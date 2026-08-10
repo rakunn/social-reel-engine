@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create Social Reel"
+  short_description: "Orchestrate safe local cinematic reel creation"
+  default_prompt: "Use $create-social-reel to create a 20–30 second cinematic vertical reel from the clips, music, captions, and LUTs I provide."

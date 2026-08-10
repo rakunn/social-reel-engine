@@ -1,0 +1,455 @@
+import {mkdtemp, writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {describe, expect, it} from 'vitest';
+import {
+  ApprovalStateSchema,
+  EditManifestSchema,
+  LutDefinitionSchema,
+  SourceManifestSchema,
+} from '../../src/contracts/schemas';
+import {
+  createColorHash,
+  createEditHash,
+  createEditReviewHash,
+} from '../../src/core/approvals';
+import {hashFile} from '../../src/core/hash';
+import {writeJson} from '../../src/core/json';
+import {
+  approveColor,
+  approveEdit,
+  assertFinalReadiness,
+  assertRenderApprovals,
+  readApprovalStatus,
+} from '../../src/edit/approve';
+import {validateEdit} from '../../src/edit/validate';
+import {
+  expectedRenderFingerprint,
+  recordRenderArtifact,
+} from '../../src/render/artifacts';
+
+const makeFixture = async () => {
+  const projectPath = await mkdtemp(path.join(tmpdir(), 'reel-approval-'));
+  await Promise.all(
+    [
+      'input/clips',
+      'input/music',
+      'input/captions',
+      'input/luts/technical',
+      'input/luts/creative',
+      'input/fonts',
+      'input/brand',
+      'config',
+      'analysis',
+      'edits',
+      'previews',
+    ].map((directory) =>
+      import('node:fs/promises').then(({mkdir}) =>
+        mkdir(path.join(projectPath, directory), {recursive: true}),
+      ),
+    ),
+  );
+  const clipPath = path.join(projectPath, 'input/clips/clip.mp4');
+  const alternateClipPath = path.join(projectPath, 'input/clips/alternate.mp4');
+  const lutPath = path.join(projectPath, 'input/luts/technical/identity.cube');
+  const creativeLutPath = path.join(projectPath, 'input/luts/creative/look.cube');
+  await writeFile(clipPath, 'synthetic-media-marker');
+  await writeFile(alternateClipPath, 'alternate-media-marker');
+  await writeFile(lutPath, 'synthetic-lut-marker');
+  await writeFile(creativeLutPath, 'synthetic-creative-lut-marker');
+  const clipChecksum = await hashFile(clipPath);
+  const alternateClipChecksum = await hashFile(alternateClipPath);
+  const technicalLutChecksum = await hashFile(lutPath);
+  const creativeLutChecksum = await hashFile(creativeLutPath);
+  const sourceId = `video-${clipChecksum.slice(0, 16)}`;
+  const camera = {
+    manufacturer: 'Synthetic',
+    model: 'Camera',
+    gamma: 'Log',
+    gamut: 'Wide',
+    profileId: 'synthetic-log',
+    confirmed: true,
+  } as const;
+  const sources = SourceManifestSchema.parse({
+    schemaVersion: '1.0.0',
+    generatedAt: '2026-08-10T00:00:00.000Z',
+    sources: [
+      {
+        id: sourceId,
+        relativePath: 'input/clips/clip.mp4',
+        checksumSha256: clipChecksum,
+        sizeBytes: Buffer.byteLength('synthetic-media-marker'),
+        mediaType: 'video',
+        ffprobe: {
+          format: {duration: '30'},
+          streams: [{codec_type: 'video', avg_frame_rate: '30/1'}],
+        },
+        camera,
+      },
+      {
+        id: `video-${alternateClipChecksum.slice(0, 16)}`,
+        relativePath: 'input/clips/alternate.mp4',
+        checksumSha256: alternateClipChecksum,
+        sizeBytes: Buffer.byteLength('alternate-media-marker'),
+        mediaType: 'video',
+        ffprobe: {
+          format: {duration: '30'},
+          streams: [{codec_type: 'video', avg_frame_rate: '30/1'}],
+        },
+        camera,
+      },
+      {
+        id: `lut-${technicalLutChecksum.slice(0, 16)}`,
+        relativePath: 'input/luts/technical/identity.cube',
+        checksumSha256: technicalLutChecksum,
+        sizeBytes: Buffer.byteLength('synthetic-lut-marker'),
+        mediaType: 'lut',
+        ffprobe: {format: {}, streams: []},
+        camera: {confirmed: false, profileId: null},
+      },
+      {
+        id: `lut-${creativeLutChecksum.slice(0, 16)}`,
+        relativePath: 'input/luts/creative/look.cube',
+        checksumSha256: creativeLutChecksum,
+        sizeBytes: Buffer.byteLength('synthetic-creative-lut-marker'),
+        mediaType: 'lut',
+        ffprobe: {format: {}, streams: []},
+        camera: {confirmed: false, profileId: null},
+      },
+    ],
+  });
+  const luts = {
+    schemaVersion: '1.0.0',
+    luts: [
+      {
+        id: 'synthetic-technical',
+        kind: 'technical',
+        file: 'input/luts/technical/identity.cube',
+        checksumSha256: technicalLutChecksum,
+        cameraModel: 'Camera',
+        profileId: 'synthetic-log',
+        inputGamma: 'Log',
+        inputGamut: 'Wide',
+        inputColorSpace: 'Log/Wide',
+        outputColorSpace: 'Rec.709 Gamma 2.4',
+        transformSemantics: 'normalization',
+        defaultMix: 1,
+      },
+      {
+        id: 'synthetic-creative',
+        kind: 'creative',
+        file: 'input/luts/creative/look.cube',
+        checksumSha256: creativeLutChecksum,
+        cameraModel: null,
+        profileId: null,
+        inputColorSpace: 'Rec.709',
+        outputColorSpace: 'Rec.709',
+        transformSemantics: 'look',
+        defaultMix: 0.35,
+      },
+    ],
+  };
+  const edit = EditManifestSchema.parse({
+    schemaVersion: '1.0.0',
+    reelName: 'approval-test',
+    output: {width: 1080, height: 1920, fps: 30},
+    clips: [
+      {
+        id: 'shot-1',
+        sourceId,
+        inSeconds: 2,
+        outSeconds: 27,
+        playbackRate: 1,
+        crop: {
+          start: {x: 0.5, y: 0.5, scale: 1},
+          end: {x: 0.55, y: 0.5, scale: 1.08},
+        },
+        stabilization: {enabled: false, strength: 0, fallbackToUnstabilized: true},
+        grade: {
+          exposureStops: 0,
+          whiteBalanceKelvin: 6500,
+          tint: 0,
+          technicalLutId: 'synthetic-technical',
+          creativeLutId: 'synthetic-creative',
+          combinedLutId: null,
+          creativeMix: 0.35,
+        },
+        audio: {muted: true, gainDb: 0},
+        transitionAfter: {type: 'none', durationSeconds: 0},
+      },
+    ],
+    titles: [],
+    music: null,
+    captions: null,
+  });
+  const parsedLuts = luts.luts.map((lut) => LutDefinitionSchema.parse(lut));
+  await writeJson(path.join(projectPath, 'analysis/sources.json'), sources);
+  await writeJson(path.join(projectPath, 'brief.json'), {
+    schemaVersion: '1.0.0',
+    identity: {
+      reelName: 'approval-test',
+      title: 'Approval Test',
+      createdAt: '2026-08-10T00:00:00.000Z',
+    },
+    target: {minSeconds: 20, idealSeconds: 25, maxSeconds: 30},
+    output: {width: 1080, height: 1920, fps: 30},
+    style: 'cinematic-minimal',
+    options: {music: false, captions: false, cameraAudio: false},
+    rightsConfirmed: true,
+    notes: '',
+  });
+  await writeJson(path.join(projectPath, 'analysis/approvals.json'), {
+    schemaVersion: '1.0.0',
+    edit: null,
+    color: null,
+  });
+  await writeJson(path.join(projectPath, 'config/sources.json'), {
+    schemaVersion: '1.0.0',
+    sources: {
+      'input/clips/clip.mp4': camera,
+      'input/clips/alternate.mp4': camera,
+    },
+  });
+  await writeJson(path.join(projectPath, 'config/settings.json'), {
+    schemaVersion: '1.0.0',
+    proxy: {width: 540, height: 960, crf: 23},
+    preview: {width: 540, height: 960, crf: 20},
+    master: {},
+    delivery: {},
+  });
+  await writeJson(path.join(projectPath, 'config/luts.json'), luts);
+  await writeJson(path.join(projectPath, 'edits/edit.json'), edit);
+  const previewPath = path.join(projectPath, 'previews/preview.mp4');
+  await writeFile(previewPath, 'reviewed-rough-cut-preview');
+  const previewRecord = await recordRenderArtifact(
+    projectPath,
+    'preview',
+    previewPath,
+    await expectedRenderFingerprint(projectPath, 'preview'),
+    new Date('2026-08-10T00:00:00.000Z'),
+  );
+  const editReviewHash = createEditReviewHash(createEditHash(edit), previewRecord);
+  const stillPath = path.join(projectPath, 'previews/graded-stills/shot-1.png');
+  await import('node:fs/promises').then(({mkdir}) =>
+    mkdir(path.dirname(stillPath), {recursive: true}),
+  );
+  await writeFile(stillPath, 'reviewed-reference-frame');
+  await writeJson(path.join(projectPath, 'analysis/graded-stills.json'), {
+    schemaVersion: '1.0.0',
+    generatedAt: '2026-08-10T00:00:00.000Z',
+    editManifestHash: createEditHash(edit),
+    editReviewHash,
+    colorManifestHash: createColorHash(edit, parsedLuts),
+    stills: ['previews/graded-stills/shot-1.png'],
+    checksums: {
+      'previews/graded-stills/shot-1.png': await hashFile(stillPath),
+    },
+  });
+  return {projectPath, edit, creativeLutPath, sourceId};
+};
+
+describe('edit validation', () => {
+  it('checks missing media, bounds, frame-safe playback, transitions, and target duration', async () => {
+    const {projectPath, edit} = await makeFixture();
+    const result = await validateEdit(projectPath, edit);
+    expect(result).toEqual(
+      expect.objectContaining({valid: true, durationSeconds: 25, failures: []}),
+    );
+    const unsafe = EditManifestSchema.parse({
+      ...edit,
+      clips: [{...edit.clips[0], playbackRate: 0.5}],
+    });
+    expect((await validateEdit(projectPath, unsafe)).failures).toContainEqual(
+      expect.stringMatching(/frame synthesis/i),
+    );
+  });
+});
+
+describe('hash-bound approvals', () => {
+  it('requires the exact current rough-cut preview before edit approval', async () => {
+    const {projectPath, edit} = await makeFixture();
+    await writeJson(path.join(projectPath, 'edits/edit.json'), {
+      ...edit,
+      titles: [
+        {text: 'Changed after preview', startSeconds: 0, durationSeconds: 1, position: 'center'},
+      ],
+    });
+    await expect(approveEdit(projectPath)).rejects.toThrow(/preview|stale/i);
+  });
+
+  it('invalidates edit and color approvals after timeline changes', async () => {
+    const {projectPath, edit} = await makeFixture();
+    await approveEdit(projectPath, new Date('2026-08-10T00:01:00.000Z'));
+    await approveColor(projectPath, new Date('2026-08-10T00:02:00.000Z'));
+    expect(await readApprovalStatus(projectPath)).toEqual({
+      editApproved: true,
+      colorApproved: true,
+    });
+    await expect(assertRenderApprovals(projectPath)).resolves.toBeUndefined();
+
+    await writeJson(path.join(projectPath, 'edits/edit.json'), {
+      ...edit,
+      clips: [{...edit.clips[0], outSeconds: 26}],
+    });
+    expect(await readApprovalStatus(projectPath)).toEqual({
+      editApproved: false,
+      colorApproved: false,
+    });
+    await expect(assertRenderApprovals(projectPath)).rejects.toThrow(/stale|approval/i);
+  });
+
+  it('invalidates only color when grade settings change', async () => {
+    const {projectPath, edit} = await makeFixture();
+    const approved = await approveEdit(projectPath, new Date('2026-08-10T00:01:00.000Z'));
+    await approveColor(projectPath, new Date('2026-08-10T00:02:00.000Z'));
+    await writeJson(path.join(projectPath, 'edits/edit.json'), {
+      ...edit,
+      clips: [
+        {
+          ...edit.clips[0],
+          grade: {...edit.clips[0].grade, exposureStops: 0.25},
+        },
+      ],
+    });
+    expect(await readApprovalStatus(projectPath)).toEqual({
+      editApproved: true,
+      colorApproved: false,
+    });
+    expect(
+      ApprovalStateSchema.parse(
+        JSON.parse(await import('node:fs/promises').then(({readFile}) => readFile(
+          path.join(projectPath, 'analysis/approvals.json'),
+          'utf8',
+        ))),
+      ).edit?.hash,
+    ).toBe(approved.edit?.hash);
+  });
+
+  it('invalidates approvals when reviewed input bytes or the preview change', async () => {
+    const {projectPath} = await makeFixture();
+    await approveEdit(projectPath);
+    await approveColor(projectPath);
+    await writeFile(path.join(projectPath, 'previews/preview.mp4'), 'changed-preview-bytes');
+    expect(await readApprovalStatus(projectPath)).toEqual({
+      editApproved: false,
+      colorApproved: false,
+    });
+
+    const fresh = await makeFixture();
+    await approveEdit(fresh.projectPath);
+    await approveColor(fresh.projectPath);
+    await writeFile(path.join(fresh.projectPath, 'input/clips/clip.mp4'), 'changed-input-bytes');
+    expect(await readApprovalStatus(fresh.projectPath)).toEqual({
+      editApproved: false,
+      colorApproved: false,
+    });
+    await expect(assertFinalReadiness(fresh.projectPath)).rejects.toThrow(/approval|changed|input/i);
+  });
+
+  it('keeps editorial approval but invalidates color approval when creative LUT bytes change', async () => {
+    const {projectPath, creativeLutPath} = await makeFixture();
+    await approveEdit(projectPath);
+    await approveColor(projectPath);
+    await writeFile(creativeLutPath, 'changed-creative-lut-bytes');
+    expect(await readApprovalStatus(projectPath)).toEqual({
+      editApproved: true,
+      colorApproved: false,
+    });
+    await expect(assertRenderApprovals(projectPath)).rejects.toThrow(/stale|approval/i);
+  });
+
+  it('invalidates approvals when the generated source ID mapping is modified', async () => {
+    const {projectPath, sourceId} = await makeFixture();
+    await approveEdit(projectPath);
+    await approveColor(projectPath);
+    const manifestPath = path.join(projectPath, 'analysis/sources.json');
+    const manifest = JSON.parse(
+      await import('node:fs/promises').then(({readFile}) => readFile(manifestPath, 'utf8')),
+    );
+    const selected = manifest.sources.find((source: {id: string}) => source.id === sourceId);
+    const alternate = manifest.sources.find(
+      (source: {relativePath: string}) => source.relativePath === 'input/clips/alternate.mp4',
+    );
+    Object.assign(selected, {
+      relativePath: alternate.relativePath,
+      checksumSha256: alternate.checksumSha256,
+      sizeBytes: alternate.sizeBytes,
+    });
+    await writeJson(manifestPath, manifest);
+    expect(await readApprovalStatus(projectPath)).toEqual({
+      editApproved: false,
+      colorApproved: false,
+    });
+    await expect(assertFinalReadiness(projectPath)).rejects.toThrow(/source manifest|analyze/i);
+  });
+
+  it('invalidates an approved color review when a reference frame changes afterward', async () => {
+    const {projectPath} = await makeFixture();
+    await approveEdit(projectPath);
+    await approveColor(projectPath);
+    await writeFile(
+      path.join(projectPath, 'previews/graded-stills/shot-1.png'),
+      'changed-after-color-approval',
+    );
+    expect(await readApprovalStatus(projectPath)).toEqual({
+      editApproved: true,
+      colorApproved: false,
+    });
+    await expect(assertRenderApprovals(projectPath)).rejects.toThrow(/stale|approval/i);
+  });
+
+  it('treats per-shot stabilization fallback as an editorial decision', async () => {
+    const {projectPath, edit} = await makeFixture();
+    await approveEdit(projectPath);
+    await approveColor(projectPath);
+    await writeJson(path.join(projectPath, 'edits/edit.json'), {
+      ...edit,
+      clips: [
+        {
+          ...edit.clips[0],
+          stabilization: {
+            ...edit.clips[0].stabilization,
+            fallbackToUnstabilized: false,
+          },
+        },
+      ],
+    });
+    expect(await readApprovalStatus(projectPath)).toEqual({
+      editApproved: false,
+      colorApproved: false,
+    });
+  });
+
+  it('refuses color approval when a reviewed reference frame was modified', async () => {
+    const {projectPath} = await makeFixture();
+    await approveEdit(projectPath);
+    await writeFile(
+      path.join(projectPath, 'previews/graded-stills/shot-1.png'),
+      'modified-after-generation',
+    );
+    await expect(approveColor(projectPath)).rejects.toThrow(/reference frame|checksum|stale/i);
+  });
+
+  it('requires exactly one current graded reference frame for every edit clip', async () => {
+    const {projectPath} = await makeFixture();
+    await approveEdit(projectPath);
+    const reportPath = path.join(projectPath, 'analysis/graded-stills.json');
+    const report = JSON.parse(
+      await import('node:fs/promises').then(({readFile}) => readFile(reportPath, 'utf8')),
+    );
+    await writeJson(reportPath, {...report, stills: [], checksums: {}});
+    await expect(approveColor(projectPath)).rejects.toThrow(/every current clip|reference frame/i);
+  });
+
+  it('blocks final export when media and asset rights are not confirmed', async () => {
+    const {projectPath} = await makeFixture();
+    await approveEdit(projectPath);
+    await approveColor(projectPath);
+    const briefPath = path.join(projectPath, 'brief.json');
+    const brief = JSON.parse(
+      await import('node:fs/promises').then(({readFile}) => readFile(briefPath, 'utf8')),
+    );
+    await writeJson(briefPath, {...brief, rightsConfirmed: false});
+    await expect(assertFinalReadiness(projectPath)).rejects.toThrow(/rights/i);
+  });
+});

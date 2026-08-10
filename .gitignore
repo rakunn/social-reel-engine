@@ -1,0 +1,42 @@
+.DS_Store
+node_modules/
+.venv/
+__pycache__/
+*.py[cod]
+.cache/
+coverage/
+dist/
+
+# Copied source media and licensed/user-provided assets stay local.
+projects/*/input/clips/*
+projects/*/input/music/*
+projects/*/input/captions/*
+projects/*/input/luts/technical/*
+projects/*/input/luts/creative/*
+projects/*/input/fonts/*
+projects/*/input/brand/*
+!projects/*/input/**/.gitkeep
+
+# Heavy and reproducible artifacts stay local. JSON/Markdown analysis is retained.
+projects/*/analysis/**/*.mp4
+projects/*/analysis/**/*.mov
+projects/*/analysis/**/*.mkv
+projects/*/analysis/**/*.wav
+projects/*/analysis/**/*.m4a
+projects/*/analysis/**/*.aac
+projects/*/analysis/**/*.png
+projects/*/analysis/**/*.jpg
+projects/*/analysis/**/*.jpeg
+projects/*/analysis/**/*.npy
+projects/*/analysis/**/*.npz
+projects/*/work/**
+projects/*/previews/**
+projects/*/output/**
+
+# Remotion's temporary public staging area.
+public/jobs/**
+!public/jobs/.gitkeep
+
+# Local licensed LUT/PDF library. The tracked catalog retains checksums and semantics.
+library/luts/**/*.cube
+library/guides/**/*.pdf

@@ -1,0 +1,246 @@
+{
+  "schemaVersion": "1.0.0",
+  "guide": {
+    "title": "Szatrasie o kolorowaniu LUTami",
+    "file": "library/guides/Szatrasie-o-kolorowaniu-Lutami.pdf",
+    "checksumSha256": "53d9b81ea7d02d379b10525404f01e817210dc7692b2de62b5bbd8408d037810",
+    "creativeChainPosition": "after-technical-normalization",
+    "recommendedMixRange": [0.2, 0.8],
+    "selectionPolicy": "No scene-specific LUT prescription is present in the guide. Compare looks on technically normalized reference frames and obtain color approval."
+  },
+  "technical": [
+    {
+      "id": "dji-mini-4-pro-dlogm-rec709-v1",
+      "kind": "technical",
+      "file": "library/luts/technical/DJI Mini 4 Pro D-Log M to Rec.709 V1.cube",
+      "checksumSha256": "b18162854ab47702068410c33afa98a8cb6eef159fc5a04ce0e65fad0fd8947e",
+      "cameraModel": "DJI Mini 4 Pro",
+      "profileId": "dji-mini-4-pro-d-log-m",
+      "inputGamma": "D-Log M",
+      "inputGamut": "DJI D-Log M",
+      "inputColorSpace": "DJI D-Log M",
+      "outputColorSpace": "Rec.709",
+      "transformSemantics": "normalization",
+      "defaultMix": 1
+    },
+    {
+      "id": "sony-slog3-sgamut3cine-rec709",
+      "kind": "technical",
+      "file": "library/luts/technical/SL3SG3Ctos709.cube",
+      "checksumSha256": "519c6c2c90ff0b7de4a2df6c56b1d1f11b93dc9d2d086eb2f6f844b850448875",
+      "cameraModel": null,
+      "profileId": "sony-s-log3-s-gamut3-cine",
+      "inputGamma": "S-Log3",
+      "inputGamut": "S-Gamut3.Cine",
+      "inputColorSpace": "Sony S-Log3/S-Gamut3.Cine",
+      "outputColorSpace": "Rec.709",
+      "transformSemantics": "normalization",
+      "defaultMix": 1
+    },
+    {
+      "id": "sony-slog3-sgamut3-rec709",
+      "kind": "technical",
+      "file": "library/luts/technical/SL3SG3tos709.cube",
+      "checksumSha256": "1ec8f4eb1ab094eb467b7eaf8ebbc646f9e20ab1f62d29997b7fd70f4a3efe50",
+      "cameraModel": null,
+      "profileId": "sony-s-log3-s-gamut3",
+      "inputGamma": "S-Log3",
+      "inputGamut": "S-Gamut3",
+      "inputColorSpace": "Sony S-Log3/S-Gamut3",
+      "outputColorSpace": "Rec.709",
+      "transformSemantics": "normalization",
+      "defaultMix": 1
+    }
+  ],
+  "creative": [
+    {
+      "id": "arktyczny-podmuch",
+      "kind": "creative",
+      "file": "library/luts/creative/Arktyczny-Podmuch (1).cube",
+      "checksumSha256": "62c644894d877090d9754c8031c114dbd0f5b6e6cf4afe4662ab053cd498a637",
+      "inputColorSpace": "Rec.709",
+      "outputColorSpace": "Rec.709",
+      "transformSemantics": "look",
+      "defaultMix": 0.5
+    },
+    {
+      "id": "energetyczny-zastrzyk",
+      "kind": "creative",
+      "file": "library/luts/creative/Energetyczny Zastrzyk.cube",
+      "checksumSha256": "c26acf270870ecea76fe5552dd55e2afc308bfb155be5da1b69c47ed141dbee6",
+      "inputColorSpace": "Rec.709",
+      "outputColorSpace": "Rec.709",
+      "transformSemantics": "look",
+      "defaultMix": 0.5
+    },
+    {
+      "id": "epicki-podmuch",
+      "kind": "creative",
+      "file": "library/luts/creative/Epicki Podmuch.cube",
+      "checksumSha256": "99c9ae1565b0cfe1b69cb225ea1718bf092d2b5578e1183c35d60026885b2b57",
+      "inputColorSpace": "Rec.709",
+      "outputColorSpace": "Rec.709",
+      "transformSemantics": "look",
+      "defaultMix": 0.5
+    },
+    {
+      "id": "epicki-ton",
+      "kind": "creative",
+      "file": "library/luts/creative/Epicki-Ton (1).cube",
+      "checksumSha256": "a80022d774520a13f5599a2b64846a01a0e60aa87bb2b1bda0088c3adc6595c3",
+      "inputColorSpace": "Rec.709",
+      "outputColorSpace": "Rec.709",
+      "transformSemantics": "look",
+      "defaultMix": 0.5
+    },
+    {
+      "id": "gliniana-dystopia",
+      "kind": "creative",
+      "file": "library/luts/creative/Gliniana Dystopia.cube",
+      "checksumSha256": "5eb2c542b1c1bc04d69734ee82da483a78fd0510fa9f46af451b767f5553849c",
+      "inputColorSpace": "Rec.709",
+      "outputColorSpace": "Rec.709",
+      "transformSemantics": "look",
+      "defaultMix": 0.5
+    },
+    {
+      "id": "jaskrawa-euforia",
+      "kind": "creative",
+      "file": "library/luts/creative/Jaskrawa Euforia.cube",
+      "checksumSha256": "fc0b91bd5c789f676a23a2f30f3a99f86db1b42b1c42e02b261c61f106ed74a0",
+      "inputColorSpace": "Rec.709",
+      "outputColorSpace": "Rec.709",
+      "transformSemantics": "look",
+      "defaultMix": 0.5
+    },
+    {
+      "id": "klimatyczna-nuta",
+      "kind": "creative",
+      "file": "library/luts/creative/Klimatyczna-Nuta (1).cube",
+      "checksumSha256": "986b4cad095677a58f9f5e1e7f48608cbd8a72b6cd738c3134c3416fe7a6f9ae",
+      "inputColorSpace": "Rec.709",
+      "outputColorSpace": "Rec.709",
+      "transformSemantics": "look",
+      "defaultMix": 0.5
+    },
+    {
+      "id": "krzykliwy-mech",
+      "kind": "creative",
+      "file": "library/luts/creative/Krzykliwy Mech.cube",
+      "checksumSha256": "59c0d72fc57ee1bcf58533ae915262afeda47c25a19c89be48fdc29f1f2f3d17",
+      "inputColorSpace": "Rec.709",
+      "outputColorSpace": "Rec.709",
+      "transformSemantics": "look",
+      "defaultMix": 0.5
+    },
+    {
+      "id": "lazurowy-blask",
+      "kind": "creative",
+      "file": "library/luts/creative/Lazurowy-Blask (1).cube",
+      "checksumSha256": "9aad100a8f133476cb1275f61af957f095b4835e080e80843db1ec4b34b7ec99",
+      "inputColorSpace": "Rec.709",
+      "outputColorSpace": "Rec.709",
+      "transformSemantics": "look",
+      "defaultMix": 0.5
+    },
+    {
+      "id": "mglisty-sen",
+      "kind": "creative",
+      "file": "library/luts/creative/Mglisty-Sen (1).cube",
+      "checksumSha256": "e9c7f60ce56e98ecc38bc5fe7acdb3114eb00421c7a453cf5f954c8347c3fb40",
+      "inputColorSpace": "Rec.709",
+      "outputColorSpace": "Rec.709",
+      "transformSemantics": "look",
+      "defaultMix": 0.5
+    },
+    {
+      "id": "miedziana-iskra",
+      "kind": "creative",
+      "file": "library/luts/creative/Miedziana-Iskra (1).cube",
+      "checksumSha256": "2e76343cb6166d343271c994c21678a94eb762a7b3b10984459a7580da411879",
+      "inputColorSpace": "Rec.709",
+      "outputColorSpace": "Rec.709",
+      "transformSemantics": "look",
+      "defaultMix": 0.5
+    },
+    {
+      "id": "morska-mandarynka",
+      "kind": "creative",
+      "file": "library/luts/creative/Morska Mandarynka.cube",
+      "checksumSha256": "6236d159497b4d2294c54f273343eaec21e3c6818b47828813e5d224fdc3910e",
+      "inputColorSpace": "Rec.709",
+      "outputColorSpace": "Rec.709",
+      "transformSemantics": "look",
+      "defaultMix": 0.5
+    },
+    {
+      "id": "mrozna-cisza",
+      "kind": "creative",
+      "file": "library/luts/creative/Mrozna-Cisza (1).cube",
+      "checksumSha256": "0be5dd08f8ecfbb853b19ed9b55a25cf1e44baaea7ef23053b0d7d95abb4be00",
+      "inputColorSpace": "Rec.709",
+      "outputColorSpace": "Rec.709",
+      "transformSemantics": "look",
+      "defaultMix": 0.5
+    },
+    {
+      "id": "oceaniczne-tchnienie",
+      "kind": "creative",
+      "file": "library/luts/creative/Oceaniczne-Tchnienie (1).cube",
+      "checksumSha256": "a880c34c8a3f491a9fef9d938bbaee6c0948f53267522de54c1a3ee33e88b67c",
+      "inputColorSpace": "Rec.709",
+      "outputColorSpace": "Rec.709",
+      "transformSemantics": "look",
+      "defaultMix": 0.5
+    },
+    {
+      "id": "ogniste-uderzenie",
+      "kind": "creative",
+      "file": "library/luts/creative/Ogniste Uderzenie.cube",
+      "checksumSha256": "0c6ca4512ae8f7a74906c70780efd9af8e20d6ce96f259593b40ecb637b98b02",
+      "inputColorSpace": "Rec.709",
+      "outputColorSpace": "Rec.709",
+      "transformSemantics": "look",
+      "defaultMix": 0.5
+    },
+    {
+      "id": "otulajacy-puch",
+      "kind": "creative",
+      "file": "library/luts/creative/Otulajacy-Puch (1).cube",
+      "checksumSha256": "17b5f69f55993da1ecf0327eab1b41a0f4638645a37951c9e8c8c82479621ac2",
+      "inputColorSpace": "Rec.709",
+      "outputColorSpace": "Rec.709",
+      "transformSemantics": "look",
+      "defaultMix": 0.5
+    },
+    {
+      "id": "pustynny-sen",
+      "kind": "creative",
+      "file": "library/luts/creative/Pustynny Sen.cube",
+      "checksumSha256": "5f7e8990cfe36aeee791908f06756ae00030fa58a0a1c4cc958b23d4f32b363c",
+      "inputColorSpace": "Rec.709",
+      "outputColorSpace": "Rec.709",
+      "transformSemantics": "look",
+      "defaultMix": 0.5
+    },
+    {
+      "id": "wyborna-aura",
+      "kind": "creative",
+      "file": "library/luts/creative/Wyborna-Aura (2).cube",
+      "checksumSha256": "88426c6cda36c60ed653d090546eee6ec4b02f5126a4d4ca4443f4949b1134a5",
+      "inputColorSpace": "Rec.709",
+      "outputColorSpace": "Rec.709",
+      "transformSemantics": "look",
+      "defaultMix": 0.5
+    }
+  ],
+  "unclassified": [
+    {
+      "id": "hdr-conversion-lut-unconfirmed",
+      "file": "library/luts/unclassified/HDR CONVERSION LUT.cube",
+      "checksumSha256": "21049402886507fd0586126215bc5d4032fe317bfae98841f5f915a87d33adec",
+      "blocked": true,
+      "reason": "Input/output color spaces and whether this is technical, creative, or combined were not declared."
+    }
+  ]
+}
