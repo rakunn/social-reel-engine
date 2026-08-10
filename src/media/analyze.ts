@@ -5,6 +5,7 @@ import {
   type SourceManifest,
 } from '../contracts/schemas';
 import {readJson, writeJson} from '../core/json';
+import {hashValue} from '../core/hash';
 import {probeFile} from './ffmpeg';
 import {scanInputs, type InputKind} from '../project/ingest';
 
@@ -40,6 +41,13 @@ export const mediaTypeForKind = (kind: InputKind): SourceEntry['mediaType'] => {
   }
 };
 
+export const sourceIdFor = (
+  mediaType: SourceEntry['mediaType'],
+  relativePath: string,
+  checksumSha256: string,
+): string =>
+  `${mediaType}-${hashValue({relativePath, checksumSha256}).slice(0, 16)}`;
+
 export const cameraFromConfirmation = (confirmation: SourceConfirmation = {}) => ({
   manufacturer: confirmation.manufacturer ?? null,
   model: confirmation.model ?? null,
@@ -63,7 +71,7 @@ export const analyzeSources = async (
     const shouldProbe = mediaType === 'video' || mediaType === 'audio';
     const confirmation = config.sources[file.relativePath] ?? {};
     const entry = {
-      id: `${mediaType}-${file.checksumSha256.slice(0, 16)}`,
+      id: sourceIdFor(mediaType, file.relativePath, file.checksumSha256),
       relativePath: file.relativePath,
       checksumSha256: file.checksumSha256,
       sizeBytes: file.sizeBytes,

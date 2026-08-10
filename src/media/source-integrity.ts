@@ -10,6 +10,7 @@ import {scanInputs} from '../project/ingest';
 import {
   cameraFromConfirmation,
   mediaTypeForKind,
+  sourceIdFor,
   type SourcesConfig,
 } from './analyze';
 
@@ -54,7 +55,7 @@ export const readValidatedSourceManifest = async (
     .map((file): SourceIdentity => {
       const mediaType = mediaTypeForKind(file.kind);
       return {
-        id: `${mediaType}-${file.checksumSha256.slice(0, 16)}`,
+        id: sourceIdFor(mediaType, file.relativePath, file.checksumSha256),
         relativePath: file.relativePath,
         checksumSha256: file.checksumSha256,
         sizeBytes: file.sizeBytes,

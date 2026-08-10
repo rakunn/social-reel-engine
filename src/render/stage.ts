@@ -1,4 +1,4 @@
-import {parseSrt, type Caption} from '@remotion/captions';
+import type {Caption} from '@remotion/captions';
 import {access, copyFile, mkdir, readdir, readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -9,7 +9,11 @@ import {hashFile} from '../core/hash';
 import {readJson, writeJson} from '../core/json';
 import {resolveInside} from '../core/paths';
 import {gradeSelectedClips, type GradedClipReport} from '../media/grade';
-import {generateProxies, type ProxyReport} from '../media/proxy';
+import {
+  buildProxyVideoFilter,
+  generateProxies,
+  type ProxyReport,
+} from '../media/proxy';
 import {
   preparePreviewStabilizedClip,
   type PreviewStabilizationReport,
@@ -17,6 +21,7 @@ import {
 import type {ReelRenderProps} from '../remotion/model';
 import {secondsToMediaFrames} from '../remotion/model';
 import {readValidatedSourceManifest} from '../media/source-integrity';
+import {parseCaptionContent} from '../remotion/captions';
 
 export type StageTarget = 'preview' | 'master';
 
@@ -50,17 +55,7 @@ const loadCaptions = async (
     return [];
   }
   const content = await readFile(resolveInside(projectPath, edit.captions.relativePath), 'utf8');
-  if (edit.captions.format === 'srt') {
-    return parseSrt({input: content}).captions;
-  }
-  const parsed: unknown = JSON.parse(content);
-  const captions = Array.isArray(parsed)
-    ? parsed
-    : (parsed as {captions?: unknown}).captions;
-  if (!Array.isArray(captions)) {
-    throw new Error('Remotion Caption JSON must be an array or an object containing captions[]');
-  }
-  return captions as Caption[];
+  return parseCaptionContent(content, edit.captions.format);
 };
 
 const firstFont = async (projectPath: string): Promise<string | null> => {
@@ -118,10 +113,20 @@ export const prepareRenderProps = async (
         throw new Error(`No proxy generated for source ${clip.sourceId}`);
       }
       sourcePath = resolveInside(projectPath, proxy.proxy);
+      const original = sources.sources.find((source) => source.id === clip.sourceId);
+      if (!original || original.mediaType !== 'video') {
+        throw new Error(`No original video source found for ${clip.sourceId}`);
+      }
       const stabilized = await preparePreviewStabilizedClip(
         projectPath,
         clip,
         sourcePath,
+        resolveInside(projectPath, original.relativePath),
+        buildProxyVideoFilter(
+          projectPath,
+          proxy.normalizerFile,
+          proxy.maximumDimension,
+        ),
         priorPreviewStabilization?.items.find((item) => item.clipId === clip.id),
       );
       sourcePath = stabilized.sourcePath;

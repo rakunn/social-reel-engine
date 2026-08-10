@@ -30,12 +30,17 @@ export const createColorHash = (
 
 export const createEditReviewHash = (
   editManifestHash: string,
-  preview: {fingerprint: string; checksumSha256: string},
+  preview: {
+    fingerprint: string;
+    checksumSha256: string;
+    reviewContextHash?: string | null;
+  },
 ): string =>
   hashValue({
     editManifestHash,
     previewFingerprint: preview.fingerprint,
     previewChecksumSha256: preview.checksumSha256,
+    previewReviewContextHash: preview.reviewContextHash ?? null,
   });
 
 export type ReviewedStillFingerprint = {

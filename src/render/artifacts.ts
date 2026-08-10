@@ -12,6 +12,7 @@ import {
   sourceManifestFingerprintProjection,
 } from '../media/source-integrity';
 import {renderOptionsFor, targetExpectations, type OutputTarget} from './policy';
+import {readPreviewStabilizationContext} from '../media/preview-stabilization-integrity';
 
 export type RenderArtifactRecord = {
   fingerprint: string;
@@ -19,6 +20,7 @@ export type RenderArtifactRecord = {
   file: string;
   checksumSha256: string;
   sizeBytes: number;
+  reviewContextHash?: string | null;
 };
 
 export type RenderArtifactIndex = {
@@ -158,12 +160,22 @@ export const recordRenderArtifact = async (
   const relativeFile = path.relative(projectPath, outputPath).split(path.sep).join('/');
   const resolved = resolveInside(projectPath, relativeFile);
   const outputStat = await stat(resolved);
+  const previewContext =
+    target === 'preview'
+      ? await readPreviewStabilizationContext(projectPath)
+      : {fresh: true, reason: null, reviewContextHash: null};
+  if (!previewContext.fresh) {
+    throw new Error(
+      `Cannot record preview artifact: ${previewContext.reason ?? 'stabilization review context is invalid'}`,
+    );
+  }
   const record: RenderArtifactRecord = {
     fingerprint,
     generatedAt: now.toISOString(),
     file: relativeFile,
     checksumSha256: await hashFile(resolved),
     sizeBytes: outputStat.size,
+    reviewContextHash: previewContext.reviewContextHash,
   };
   const index = await readIndex(projectPath);
   index.artifacts[target] = record;
@@ -186,7 +198,26 @@ export const readRenderArtifactFreshness = async (
     const outputStat = await stat(outputPath);
     const checksum =
       options.verifyChecksum === false ? record.checksumSha256 : await hashFile(outputPath);
-    return evaluateRenderArtifact(record, expectedFingerprint, checksum, outputStat.size);
+    const freshness = evaluateRenderArtifact(
+      record,
+      expectedFingerprint,
+      checksum,
+      outputStat.size,
+    );
+    if (!freshness.fresh || target !== 'preview') {
+      return freshness;
+    }
+    const context = await readPreviewStabilizationContext(projectPath);
+    if (!context.fresh) {
+      return {fresh: false, reason: context.reason};
+    }
+    if ((record.reviewContextHash ?? null) !== context.reviewContextHash) {
+      return {
+        fresh: false,
+        reason: 'Preview stabilization context does not match the rendered artifact record',
+      };
+    }
+    return {fresh: true, reason: null};
   } catch {
     return {fresh: false, reason: 'Rendered output is missing or unreadable'};
   }

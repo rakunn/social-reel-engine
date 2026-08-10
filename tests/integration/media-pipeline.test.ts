@@ -14,7 +14,7 @@ import {
   resolveClipColor,
 } from '../../src/media/grade';
 import {probeFile, runFfmpeg} from '../../src/media/ffmpeg';
-import {approveColor, approveEdit} from '../../src/edit/approve';
+import {approveColor, approveEdit, readApprovalStatus} from '../../src/edit/approve';
 import {ingestFiles} from '../../src/project/ingest';
 import {createReelProject} from '../../src/project/workspace';
 import {
@@ -31,7 +31,7 @@ let originalClipPath: string;
 let originalClipHash: string;
 
 beforeAll(async () => {
-  const root = await mkdtemp(path.join(tmpdir(), 'reel-media-integration-'));
+  const root = await mkdtemp(path.join(tmpdir(), String.raw`reel-media-o'\-`));
   projectPath = await createReelProject({
     engineRoot: repositoryRoot,
     projectsRoot: path.join(root, 'projects'),
@@ -138,6 +138,10 @@ describe('source analysis and viewing proxies', () => {
     expect(await hashFile(originalClipPath)).toBe(originalClipHash);
     const second = await generateProxies(projectPath);
     expect(second.items[0].cached).toBe(true);
+    await writeFile(path.join(projectPath, second.items[0].representativeFrame), 'corrupt');
+    const afterArtifactTamper = await generateProxies(projectPath);
+    expect(afterArtifactTamper.items[0].cached).toBe(false);
+    expect((await generateProxies(projectPath)).items[0].cached).toBe(true);
     const settingsPath = path.join(projectPath, 'config/settings.json');
     const settings = JSON.parse(await readFile(settingsPath, 'utf8'));
     await writeJson(settingsPath, {
@@ -157,6 +161,12 @@ describe('strict color gating', () => {
       /unconfirmed/i,
     );
     await expect(generateGradedStills(projectPath)).rejects.toThrow(/valid edit/i);
+  });
+
+  it('normalizes proxies when the LUT path contains apostrophes and backslashes', async () => {
+    await confirmSyntheticColor();
+    await analyzeSources(projectPath);
+    expect((await generateProxies(projectPath)).items[0].normalization).toBe('technical');
   });
 
   it('resolves and applies a matching technical LUT after explicit confirmation', async () => {
@@ -270,11 +280,19 @@ describe('strict color gating', () => {
     });
     const stagedPreview = await prepareRenderProps(projectPath, repositoryRoot, 'preview');
     expect(stagedPreview.props.trimBeforeFramesByClip?.['shot-1']).toBe(0);
-    expect(
-      JSON.parse(
-        await readFile(path.join(projectPath, 'analysis/preview-stabilization.json'), 'utf8'),
-      ).items[0],
-    ).toEqual(expect.objectContaining({clipId: 'shot-1', stabilization: 'applied'}));
+    const previewStabilization = JSON.parse(
+      await readFile(path.join(projectPath, 'analysis/preview-stabilization.json'), 'utf8'),
+    );
+    const reviewedStabilization = previewStabilization.items[0];
+    expect(reviewedStabilization).toEqual(
+      expect.objectContaining({
+        clipId: 'shot-1',
+        stabilization: 'applied',
+        detectionSourceChecksumSha256: source.checksumSha256,
+        transformPath: expect.stringMatching(/\.trf$/),
+        transformChecksumSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      }),
+    );
 
     const previewPath = path.join(projectPath, 'previews/preview.mp4');
     await writeFile(previewPath, 'integration-reviewed-preview');
@@ -288,6 +306,44 @@ describe('strict color gating', () => {
     const stills = await generateGradedStills(projectPath);
     expect(stills.stills).toHaveLength(1);
     await approveColor(projectPath);
+    const transformPath = path.join(projectPath, reviewedStabilization.transformPath);
+    const reviewedTransform = await readFile(transformPath);
+    await writeFile(transformPath, Buffer.concat([reviewedTransform, Buffer.from('\n# tampered')]));
+    expect(await readApprovalStatus(projectPath)).toEqual({
+      editApproved: false,
+      colorApproved: false,
+    });
+    await expect(gradeSelectedClips(projectPath)).rejects.toThrow(
+      /stabilization|preview|checksum|approval.*stale/i,
+    );
+    await writeFile(transformPath, reviewedTransform);
+    expect(await readApprovalStatus(projectPath)).toEqual({
+      editApproved: true,
+      colorApproved: true,
+    });
+    const replacementTransform = Buffer.concat([
+      reviewedTransform,
+      Buffer.from('\n# replacement with self-consistent report'),
+    ]);
+    await writeFile(transformPath, replacementTransform);
+    await writeJson(path.join(projectPath, 'analysis/preview-stabilization.json'), {
+      ...previewStabilization,
+      items: [
+        {
+          ...reviewedStabilization,
+          transformChecksumSha256: await hashFile(transformPath),
+        },
+      ],
+    });
+    expect(await readApprovalStatus(projectPath)).toEqual({
+      editApproved: false,
+      colorApproved: false,
+    });
+    await writeFile(transformPath, reviewedTransform);
+    await writeJson(
+      path.join(projectPath, 'analysis/preview-stabilization.json'),
+      previewStabilization,
+    );
     const result = await gradeSelectedClips(projectPath);
     expect(result.items[0].stabilization).toBe('applied');
     const graded = await probeFile(path.join(projectPath, result.items[0].path));

@@ -20,9 +20,13 @@ import {readJson, writeJson} from '../core/json';
 import {resolveInside} from '../core/paths';
 import {buildFfmpegColorGraph} from './color-ffmpeg';
 import {runFfmpeg} from './ffmpeg';
-import {stabilizationOutcome} from './stabilize';
 import {readValidatedSourceManifest} from './source-integrity';
 import {pipelineBuildFingerprint} from '../render/artifacts';
+import {escapeFfmpegFilterValue} from './filter-escape';
+import type {
+  PreviewStabilizationItem,
+  PreviewStabilizationReport,
+} from './preview-stabilize';
 
 type GradeSelection = {
   exposureStops?: number;
@@ -191,9 +195,6 @@ const fileExists = async (filePath: string): Promise<boolean> => {
   }
 };
 
-const escapeFilterValue = (value: string): string =>
-  value.replaceAll('\\', '\\\\').replaceAll(':', '\\:').replaceAll("'", "\\'");
-
 export const gradeSelectedClips = async (
   projectPath: string,
   now = new Date(),
@@ -207,6 +208,24 @@ export const gradeSelectedClips = async (
   const lutsConfig = await readJson<{luts?: unknown[]}>(path.join(projectPath, 'config/luts.json'));
   const luts = (lutsConfig.luts ?? []).map((lut) => LutDefinitionSchema.parse(lut));
   const reportPath = path.join(projectPath, 'analysis/graded-clips.json');
+  let previewStabilization: PreviewStabilizationReport | null = null;
+  if (edit.clips.some((clip) => clip.stabilization.enabled)) {
+    try {
+      previewStabilization = await readJson<PreviewStabilizationReport>(
+        path.join(projectPath, 'analysis/preview-stabilization.json'),
+      );
+      if (
+        previewStabilization.schemaVersion !== '1.0.0' ||
+        !Array.isArray(previewStabilization.items)
+      ) {
+        throw new Error('invalid report');
+      }
+    } catch {
+      throw new Error(
+        'Approved preview stabilization record is missing or invalid; render and approve a new preview',
+      );
+    }
+  }
   let previous: GradedClipReport | null = null;
   try {
     previous = await readJson<GradedClipReport>(reportPath);
@@ -224,6 +243,56 @@ export const gradeSelectedClips = async (
       throw new Error(`Edit references missing source ${clip.sourceId}`);
     }
     const chain = resolveClipColor(projectPath, source, clip.grade);
+    const reviewedStabilization: PreviewStabilizationItem | undefined =
+      clip.stabilization.enabled
+        ? previewStabilization?.items.find((item) => item.clipId === clip.id)
+        : {
+            clipId: clip.id,
+            fingerprint: artifactFingerprint({clipId: clip.id, stabilization: 'disabled'}),
+            path: null,
+            checksumSha256: null,
+            detectionSourceChecksumSha256: null,
+            transformPath: null,
+            transformChecksumSha256: null,
+            stabilization: 'disabled',
+            cached: true,
+          };
+    if (!reviewedStabilization) {
+      throw new Error(`${clip.id}: approved preview stabilization record is missing`);
+    }
+    let reviewedTransformPath: string | null = null;
+    if (!clip.stabilization.enabled) {
+      if (reviewedStabilization.stabilization !== 'disabled') {
+        throw new Error(`${clip.id}: stabilization does not match the approved preview`);
+      }
+    } else if (
+      reviewedStabilization.detectionSourceChecksumSha256 !== source.checksumSha256
+    ) {
+      throw new Error(
+        `${clip.id}: reviewed stabilization was not detected from the current original source`,
+      );
+    } else if (reviewedStabilization.stabilization === 'applied') {
+      if (
+        !reviewedStabilization.transformPath ||
+        !reviewedStabilization.transformChecksumSha256
+      ) {
+        throw new Error(`${clip.id}: approved preview stabilization transform is missing`);
+      }
+      reviewedTransformPath = resolveInside(projectPath, reviewedStabilization.transformPath);
+      if (
+        !existsSync(reviewedTransformPath) ||
+        (await hashFile(reviewedTransformPath)) !==
+          reviewedStabilization.transformChecksumSha256
+      ) {
+        throw new Error(`${clip.id}: reviewed stabilization transform checksum does not match`);
+      }
+    } else if (reviewedStabilization.stabilization === 'fallback') {
+      if (!clip.stabilization.fallbackToUnstabilized) {
+        throw new Error(`${clip.id}: the approved preview fallback is not allowed by the edit`);
+      }
+    } else {
+      throw new Error(`${clip.id}: stabilization does not match the approved preview`);
+    }
     const fingerprint = artifactFingerprint({
       version: 1,
       pipelineBuild,
@@ -233,6 +302,19 @@ export const gradeSelectedClips = async (
         outSeconds: clip.outSeconds,
         stabilization: clip.stabilization,
       },
+      reviewedStabilization: {
+        fingerprint: reviewedStabilization.fingerprint,
+        stabilization: reviewedStabilization.stabilization,
+        detectionSourceChecksumSha256:
+          reviewedStabilization.detectionSourceChecksumSha256,
+        transformChecksumSha256: reviewedStabilization.transformChecksumSha256,
+      } satisfies Pick<
+        PreviewStabilizationItem,
+        | 'fingerprint'
+        | 'stabilization'
+        | 'detectionSourceChecksumSha256'
+        | 'transformChecksumSha256'
+      >,
       chain,
       luts,
       encoder: {codec: 'prores_ks', profile: 3, pixelFormat: 'yuv422p10le'},
@@ -256,38 +338,12 @@ export const gradeSelectedClips = async (
     let stabilization: GradedClipReport['items'][number]['stabilization'] = 'disabled';
     let stabilizationPrefix = '';
     if (clip.stabilization.enabled) {
-      const transformsPath = path.join(
-        projectPath,
-        'work/stabilization',
-        `${clip.id}-${fingerprint.slice(0, 12)}.trf`,
-      );
-      const detection = await runFfmpeg(
-        [
-          '-ss',
-          clip.inSeconds.toFixed(3),
-          '-t',
-          duration.toFixed(3),
-          '-i',
-          inputPath,
-          '-vf',
-          `vidstabdetect=shakiness=${Math.max(1, Math.round(clip.stabilization.strength * 10))}:accuracy=15:result='${escapeFilterValue(transformsPath)}'`,
-          '-f',
-          'null',
-          '-',
-        ],
-        {allowFailure: true},
-      );
-      const detected = detection.exitCode === 0 && existsSync(transformsPath);
-      const outcome = stabilizationOutcome(
-        detected,
-        clip.stabilization.fallbackToUnstabilized,
-      );
-      if (outcome === 'applied') {
+      if (reviewedStabilization.stabilization === 'applied' && reviewedTransformPath) {
         graphInput = 'stabilized';
         stabilization = 'applied';
         const smoothing = Math.max(5, Math.round(5 + clip.stabilization.strength * 25));
         stabilizationPrefix =
-          `[0:v]vidstabtransform=input='${escapeFilterValue(transformsPath)}':` +
+          `[0:v]vidstabtransform=input=${escapeFfmpegFilterValue(reviewedTransformPath)}:` +
           `smoothing=${smoothing}:zoom=5:optzoom=1:interpol=bicubic[stabilized];`;
       } else {
         stabilization = 'fallback';

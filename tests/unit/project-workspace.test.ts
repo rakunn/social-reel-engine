@@ -15,6 +15,7 @@ import {
   type ArtifactRecord,
 } from '../../src/project/artifacts';
 import {hashFile} from '../../src/core/hash';
+import {analyzeSources} from '../../src/media/analyze';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -137,6 +138,26 @@ describe('immutable ingest', () => {
     await writeFile(right, 'right');
     await ingestFiles(projectPath, [left], 'clips');
     await expect(ingestFiles(projectPath, [right], 'clips')).rejects.toThrow(/refusing to overwrite/i);
+  });
+
+  it('gives byte-identical files at different paths distinct source IDs', async () => {
+    const projectsRoot = await makeProjectsRoot();
+    const projectPath = await createReelProject({
+      engineRoot: repositoryRoot,
+      projectsRoot,
+      reelName: 'duplicate-bytes',
+    });
+    const sourceRoot = await mkdtemp(path.join(tmpdir(), 'reel-duplicate-bytes-'));
+    const first = path.join(sourceRoot, 'first.srt');
+    const second = path.join(sourceRoot, 'second.srt');
+    const contents = '1\n00:00:00,000 --> 00:00:01,000\nSame bytes\n';
+    await writeFile(first, contents);
+    await writeFile(second, contents);
+    await ingestFiles(projectPath, [first, second], 'captions');
+
+    const manifest = await analyzeSources(projectPath);
+    expect(manifest.sources).toHaveLength(2);
+    expect(new Set(manifest.sources.map((source) => source.id)).size).toBe(2);
   });
 });
 
