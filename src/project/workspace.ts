@@ -76,6 +76,7 @@ export type ProjectStatus = {
     | 'awaiting-preview'
     | 'awaiting-edit-approval'
     | 'awaiting-color-approval'
+    | 'awaiting-rights-confirmation'
     | 'ready-to-render'
     | 'rendered';
   nextAction: string;
@@ -145,8 +146,9 @@ export const getProjectStatus = async (projectPath: string): Promise<ProjectStat
     };
   }
   ApprovalStateSchema.parse(await readJson(path.join(projectPath, 'analysis/approvals.json')));
-  const {readApprovalStatus} = await import('../edit/approve');
-  const {editApproved, colorApproved} = await readApprovalStatus(projectPath);
+  const {readApprovalReadiness} = await import('../edit/approve');
+  const {editApproved, colorApproved, colorReviewReady} =
+    await readApprovalReadiness(projectPath);
   if (!editApproved) {
     return {...base, stage: 'awaiting-edit-approval', nextAction: 'Review the rough cut, then run approve-edit.'};
   }
@@ -155,7 +157,19 @@ export const getProjectStatus = async (projectPath: string): Promise<ProjectStat
       ...base,
       editApproved,
       stage: 'awaiting-color-approval',
-      nextAction: 'Review graded reference frames, then run approve-color.',
+      nextAction: colorReviewReady
+        ? 'Review graded reference frames, then run approve-color.'
+        : 'Run grade-stills, review the graded reference frames, then run approve-color.',
+    };
+  }
+  const brief = ReelBriefSchema.parse(await readJson(path.join(projectPath, 'brief.json')));
+  if (!brief.rightsConfirmed) {
+    return {
+      ...base,
+      editApproved,
+      colorApproved,
+      stage: 'awaiting-rights-confirmation',
+      nextAction: 'Confirm usage rights in brief.json before rendering.',
     };
   }
   const [master, delivery] = await Promise.all([

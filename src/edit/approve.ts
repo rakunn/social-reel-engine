@@ -241,9 +241,18 @@ export const approveColor = async (
   return next;
 };
 
-export const readApprovalStatus = async (projectPath: string) => {
+export const readApprovalReadiness = async (projectPath: string) => {
   const state = await currentReviewHashes(projectPath);
-  return approvalStatus(state.approvals, state.editReviewHash, state.colorReviewHash);
+  return {
+    ...approvalStatus(state.approvals, state.editReviewHash, state.colorReviewHash),
+    colorReviewReady: state.colorReviewHash !== null,
+    colorReason: state.colorReason,
+  };
+};
+
+export const readApprovalStatus = async (projectPath: string) => {
+  const {editApproved, colorApproved} = await readApprovalReadiness(projectPath);
+  return {editApproved, colorApproved};
 };
 
 export const assertEditApproval = async (projectPath: string): Promise<string> => {

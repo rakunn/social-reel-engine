@@ -493,6 +493,39 @@ describe('hash-bound approvals', () => {
     );
   });
 
+  it('directs status to generate missing graded reference frames before color approval', async () => {
+    const {projectPath} = await makeFixture();
+    await approveEdit(projectPath);
+    await unlink(path.join(projectPath, 'analysis/graded-stills.json'));
+
+    await expect(getProjectStatus(projectPath)).resolves.toEqual(
+      expect.objectContaining({
+        stage: 'awaiting-color-approval',
+        editApproved: true,
+        colorApproved: false,
+        nextAction: expect.stringMatching(/grade-stills/i),
+      }),
+    );
+  });
+
+  it('surfaces unconfirmed rights before reporting render readiness', async () => {
+    const {projectPath} = await makeFixture();
+    await approveEdit(projectPath);
+    await approveColor(projectPath);
+    const briefPath = path.join(projectPath, 'brief.json');
+    const brief = JSON.parse(await readFile(briefPath, 'utf8'));
+    await writeJson(briefPath, {...brief, rightsConfirmed: false});
+
+    await expect(getProjectStatus(projectPath)).resolves.toEqual(
+      expect.objectContaining({
+        stage: 'awaiting-rights-confirmation',
+        editApproved: true,
+        colorApproved: true,
+        nextAction: expect.stringMatching(/rights.*brief\.json/i),
+      }),
+    );
+  });
+
   it('does not report a same-size corrupted delivery as rendered', async () => {
     const {projectPath} = await makeFixture();
     await approveEdit(projectPath);

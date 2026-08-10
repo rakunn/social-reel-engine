@@ -59,7 +59,8 @@ export const cropTransform = (
   frame: number,
   durationInFrames: number,
 ): {transform: string; transformOrigin: string; objectPosition: string} => {
-  const progress = Math.min(1, Math.max(0, frame / Math.max(1, durationInFrames)));
+  const finalFrame = Math.max(0, durationInFrames - 1);
+  const progress = finalFrame === 0 ? 0 : Math.min(1, Math.max(0, frame / finalFrame));
   const x = crop.start.x + (crop.end.x - crop.start.x) * progress;
   const y = crop.start.y + (crop.end.y - crop.start.y) * progress;
   const scale = crop.start.scale + (crop.end.scale - crop.start.scale) * progress;
