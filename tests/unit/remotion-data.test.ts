@@ -78,10 +78,22 @@ describe('data-driven Remotion model', () => {
   });
 
   it('interpolates a bounded animated crop without frame-dependent randomness', () => {
-    expect(cropTransform(edit.clips[0].crop, 90, 180)).toEqual({
+    expect(cropTransform(edit.clips[0].crop, 90, 181)).toEqual({
       transform: 'scale(1.1)',
       transformOrigin: '50% 50%',
       objectPosition: '50% 50%',
+    });
+
+    expect(cropTransform(edit.clips[0].crop, 1, 2)).toEqual({
+      transform: 'scale(1.2)',
+      transformOrigin: '75% 50%',
+      objectPosition: '75% 50%',
+    });
+
+    expect(cropTransform(edit.clips[0].crop, 0, 1)).toEqual({
+      transform: 'scale(1)',
+      transformOrigin: '25% 50%',
+      objectPosition: '25% 50%',
     });
   });
 
