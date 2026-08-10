@@ -41,6 +41,15 @@ export const createReelProject = async ({
   if (await exists(projectPath)) {
     throw new Error(`Reel project "${safeName}" already exists`);
   }
+  const templateBriefPath = path.join(engineRoot, 'templates/reel/brief.json');
+  const brief = ReelBriefSchema.parse({
+    ...(await readJson<Record<string, unknown>>(templateBriefPath)),
+    identity: {
+      reelName: safeName,
+      title: title?.trim() || safeName.replaceAll('-', ' '),
+      createdAt: now.toISOString(),
+    },
+  });
   await mkdir(resolvedProjectsRoot, {recursive: true});
   await cp(path.join(engineRoot, 'templates/reel'), projectPath, {
     recursive: true,
@@ -49,14 +58,6 @@ export const createReelProject = async ({
   });
 
   const briefPath = path.join(projectPath, 'brief.json');
-  const brief = ReelBriefSchema.parse({
-    ...(await readJson<Record<string, unknown>>(briefPath)),
-    identity: {
-      reelName: safeName,
-      title: title?.trim() || safeName.replaceAll('-', ' '),
-      createdAt: now.toISOString(),
-    },
-  });
   await writeJson(briefPath, brief);
 
   const editPath = path.join(projectPath, 'edits/edit.json');
@@ -119,9 +120,7 @@ export const getProjectStatus = async (projectPath: string): Promise<ProjectStat
     };
   }
   const {readRenderArtifactFreshness} = await import('../render/artifacts');
-  const delivery = await readRenderArtifactFreshness(projectPath, 'delivery', {
-    verifyChecksum: false,
-  });
+  const delivery = await readRenderArtifactFreshness(projectPath, 'delivery');
   if (delivery.fresh) {
     return {
       ...base,

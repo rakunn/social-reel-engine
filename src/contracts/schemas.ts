@@ -314,6 +314,14 @@ export const EditManifestSchema = z
       }
       seen.add(clip.id);
     }
+    const finalClipIndex = edit.clips.length - 1;
+    if (edit.clips[finalClipIndex].transitionAfter.type !== 'none') {
+      context.addIssue({
+        code: 'custom',
+        path: ['clips', finalClipIndex, 'transitionAfter'],
+        message: 'The final clip cannot have a transition after it',
+      });
+    }
   });
 
 const ApprovalRecordSchema = z.object({

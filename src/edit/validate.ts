@@ -97,6 +97,9 @@ export const validateEdit = async (
     if (!music) {
       failures.push(`Music source ${edit.music.sourceId} is missing`);
     } else {
+      if (!music.ffprobe.streams.some((stream) => stream.codec_type === 'audio')) {
+        failures.push(`Music source ${edit.music.sourceId} has no audio stream`);
+      }
       try {
         const musicPath = path.join(projectPath, music.relativePath);
         await access(musicPath);

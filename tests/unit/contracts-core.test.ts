@@ -249,6 +249,21 @@ describe('versioned public contracts', () => {
     ).toThrow(/output frame/i);
   });
 
+  it('rejects a transition configured after the final clip', () => {
+    expect(() =>
+      EditManifestSchema.parse({
+        ...edit,
+        clips: [
+          ...edit.clips.slice(0, -1),
+          {
+            ...edit.clips.at(-1)!,
+            transitionAfter: {type: 'fade', durationSeconds: 0.5},
+          },
+        ],
+      }),
+    ).toThrow(/final.*transition|transition.*final/i);
+  });
+
   it('rejects titles too short for monotonic fade ranges at 30 fps', () => {
     expect(() =>
       EditManifestSchema.parse({
