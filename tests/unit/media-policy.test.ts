@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {buildFfmpegColorGraph} from '../../src/media/color-ffmpeg';
 import {buildProxyVideoFilter} from '../../src/media/proxy';
+import * as proxyMedia from '../../src/media/proxy';
 import {
   parseBlackFrames,
   parseFreezeSections,
@@ -91,6 +92,36 @@ describe('FFmpeg color graph policy', () => {
     expect(filter.indexOf('format=')).toBeLessThan(filter.indexOf('lut3d='));
     expect(filter.indexOf('lut3d=')).toBeLessThan(filter.indexOf('zscale='));
     expect(filter.indexOf('zscale=')).toBeLessThan(filter.lastIndexOf('scale='));
+  });
+
+  it('derives proxy review duration from video duration_ts before container duration', () => {
+    const sourceVideoDurationSeconds = (
+      proxyMedia as typeof proxyMedia & {
+        sourceVideoDurationSeconds?: (source: {
+          ffprobe: {
+            format?: Record<string, unknown>;
+            streams?: Array<Record<string, unknown>>;
+          };
+        }) => number;
+      }
+    ).sourceVideoDurationSeconds;
+
+    expect(sourceVideoDurationSeconds).toBeTypeOf('function');
+    expect(
+      sourceVideoDurationSeconds?.({
+        ffprobe: {
+          format: {duration: '4.0'},
+          streams: [
+            {
+              codec_type: 'video',
+              duration: undefined,
+              duration_ts: '15',
+              time_base: '1/30',
+            },
+          ],
+        },
+      }),
+    ).toBe(0.5);
   });
 });
 

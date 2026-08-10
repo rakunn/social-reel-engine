@@ -1,4 +1,5 @@
 import type {Caption} from '@remotion/captions';
+import {loadFont} from '@remotion/fonts';
 import {Audio} from '@remotion/media';
 import {TransitionSeries, linearTiming} from '@remotion/transitions';
 import {fade} from '@remotion/transitions/fade';
@@ -26,6 +27,21 @@ import {
 } from './model';
 
 const dbToGain = (db: number): number => 10 ** (db / 20);
+
+const customFontLoads = new Map<string, Promise<void>>();
+
+export const ensureCustomFontLoaded = (fontUrl: string): Promise<void> => {
+  const assetUrl = staticFile(fontUrl).replaceAll("'", '%27');
+  const existing = customFontLoads.get(assetUrl);
+  if (existing) return existing;
+  const loading = loadFont({
+    family: 'ReelCustom',
+    url: assetUrl,
+    display: 'block',
+  });
+  customFontLoads.set(assetUrl, loading);
+  return loading;
+};
 
 const transitionPresentation = (
   type: EditManifest['clips'][number]['transitionAfter']['type'],
@@ -170,6 +186,9 @@ const Captions: React.FC<{captions: Caption[]}> = ({captions}) => {
 };
 
 export const SocialReel: React.FC<ReelRenderProps> = (props) => {
+  if (props.fontUrl) {
+    void ensureCustomFontLoaded(props.fontUrl);
+  }
   const timings = buildShotTimings(props.edit);
   return (
     <AbsoluteFill style={{backgroundColor: '#050505'}}>

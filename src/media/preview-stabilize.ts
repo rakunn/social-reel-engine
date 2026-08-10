@@ -157,36 +157,59 @@ export const preparePreviewStabilizedClip = async (
   }
 
   const smoothing = Math.max(5, Math.round(5 + clip.stabilization.strength * 25));
-  await runFfmpeg([
-    '-ss',
-    clip.inSeconds.toFixed(3),
-    '-t',
-    duration.toFixed(3),
-    '-i',
-    originalPath,
-    '-map',
-    '0:v:0',
-    '-map',
-    '0:a?',
-    '-vf',
-    `vidstabtransform=input=${escapeFfmpegFilterValue(transformsPath)}:smoothing=${smoothing}:zoom=5:optzoom=1:interpol=bicubic,${reviewVideoFilter}`,
-    '-c:v',
-    'libx264',
-    '-preset',
-    'fast',
-    '-crf',
-    '23',
-    '-pix_fmt',
-    'yuv420p',
-    '-c:a',
-    'aac',
-    '-b:a',
-    '128k',
-    ...(normalized ? REC709_OUTPUT_METADATA_ARGS : []),
-    '-movflags',
-    '+faststart',
-    outputPath,
-  ]);
+  const transformation = await runFfmpeg(
+    [
+      '-ss',
+      clip.inSeconds.toFixed(3),
+      '-t',
+      duration.toFixed(3),
+      '-i',
+      originalPath,
+      '-map',
+      '0:v:0',
+      '-map',
+      '0:a?',
+      '-vf',
+      `vidstabtransform=input=${escapeFfmpegFilterValue(transformsPath)}:smoothing=${smoothing}:zoom=5:optzoom=1:interpol=bicubic,${reviewVideoFilter}`,
+      '-c:v',
+      'libx264',
+      '-preset',
+      'fast',
+      '-crf',
+      '23',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      '-b:a',
+      '128k',
+      ...(normalized ? REC709_OUTPUT_METADATA_ARGS : []),
+      '-movflags',
+      '+faststart',
+      outputPath,
+    ],
+    {allowFailure: true},
+  );
+  const transformationOutcome = stabilizationOutcome(
+    transformation.exitCode === 0 && existsSync(outputPath),
+    clip.stabilization.fallbackToUnstabilized,
+  );
+  if (transformationOutcome === 'fallback') {
+    return {
+      item: {
+        clipId: clip.id,
+        fingerprint,
+        path: null,
+        checksumSha256: null,
+        detectionSourceChecksumSha256,
+        transformPath: null,
+        transformChecksumSha256: null,
+        stabilization: 'fallback',
+        cached: false,
+      },
+      sourcePath: proxyPath,
+    };
+  }
   const checksumSha256 = await hashFile(outputPath);
   const transformChecksumSha256 = await hashFile(transformsPath);
   return {

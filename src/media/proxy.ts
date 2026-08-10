@@ -11,6 +11,8 @@ import {lutCompatibilityFailures} from '../core/lut-compatibility';
 import {pipelineBuildFingerprint} from '../render/artifacts';
 import {escapeFfmpegFilterValue} from './filter-escape';
 import {REC709_OUTPUT_METADATA_ARGS} from './color-ffmpeg';
+import {streamDurationSeconds} from './duration';
+import {readRenderSettings} from '../render/policy';
 
 export type ProxyItem = {
   sourceId: string;
@@ -51,12 +53,12 @@ const loadLuts = async (projectPath: string): Promise<LutDefinition[]> => {
   return LutDefinitionsSchema.parse(config.luts ?? []);
 };
 
-const durationOf = (source: {
+export const sourceVideoDurationSeconds = (source: {
   ffprobe: {format?: Record<string, unknown>; streams?: Array<Record<string, unknown>>};
 }): number => {
   const video = source.ffprobe.streams?.find((stream) => stream.codec_type === 'video');
-  const videoDuration = Number(video?.duration);
-  if (Number.isFinite(videoDuration) && videoDuration > 0) {
+  const videoDuration = video ? streamDurationSeconds(video) : null;
+  if (videoDuration !== null) {
     return videoDuration;
   }
   const duration = Number(source.ffprobe.format?.duration);
@@ -107,9 +109,7 @@ export const generateProxies = async (
 ): Promise<ProxyReport> => {
   const manifest = await analyzeSources(projectPath, now);
   const luts = await loadLuts(projectPath);
-  const settings = await readJson<{
-    proxy: {width: number; height: number; crf: number};
-  }>(path.join(projectPath, 'config/settings.json'));
+  const settings = await readRenderSettings(projectPath);
   const maximumDimension = Math.max(settings.proxy.width, settings.proxy.height);
   if (
     !Number.isInteger(maximumDimension) ||
@@ -198,7 +198,7 @@ export const generateProxies = async (
         '+faststart',
         proxyPath,
       ]);
-      const stillTimestamp = Math.max(0, durationOf(source) * 0.45);
+      const stillTimestamp = Math.max(0, sourceVideoDurationSeconds(source) * 0.45);
       await runFfmpeg([
         '-ss',
         stillTimestamp.toFixed(3),
@@ -214,7 +214,7 @@ export const generateProxies = async (
         '-i',
         proxyPath,
         '-vf',
-        `fps=${Math.min(8, Math.max(0.01, 8 / durationOf(source))).toFixed(6)},` +
+        `fps=${Math.min(8, Math.max(0.01, 8 / sourceVideoDurationSeconds(source))).toFixed(6)},` +
           'scale=320:-2,tile=4x2:padding=4:margin=4:color=black',
         '-frames:v',
         '1',
