@@ -5,6 +5,15 @@ import {escapeFfmpegFilterValue} from './filter-escape';
 
 const label = (value: string): string => `[${value}]`;
 
+export const REC709_OUTPUT_METADATA_ARGS = [
+  '-color_primaries',
+  'bt709',
+  '-color_trc',
+  'bt709',
+  '-colorspace',
+  'bt709',
+] as const;
+
 export const buildFfmpegColorGraph = (
   chain: {operations: ColorOperation[]},
   projectPath: string,

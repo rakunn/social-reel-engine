@@ -127,6 +127,7 @@ export const prepareRenderProps = async (
           proxy.normalizerFile,
           proxy.maximumDimension,
         ),
+        proxy.normalization !== 'unconfirmed-watermarked',
         priorPreviewStabilization?.items.find((item) => item.clipId === clip.id),
       );
       sourcePath = stabilized.sourcePath;

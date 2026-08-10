@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {buildFfmpegColorGraph} from '../../src/media/color-ffmpeg';
+import {buildProxyVideoFilter} from '../../src/media/proxy';
 import {
   parseBlackFrames,
   parseFreezeSections,
@@ -76,6 +77,19 @@ describe('FFmpeg color graph policy', () => {
     expect(graph.filterComplex).toContain('blend=all_expr');
     expect(graph.filterComplex).toContain('zscale=primaries=bt709');
     expect(graph.outputLabel).toBe('color_out');
+  });
+
+  it('converts normalized proxies to limited-range Rec.709 before scaling', () => {
+    const filter = buildProxyVideoFilter(
+      '/tmp/project',
+      'input/luts/technical/identity.cube',
+      960,
+    );
+    expect(filter).toContain('format=gbrp16le');
+    expect(filter).toContain('zscale=primaries=bt709:transfer=bt709:matrix=bt709:range=limited');
+    expect(filter.indexOf('format=')).toBeLessThan(filter.indexOf('lut3d='));
+    expect(filter.indexOf('lut3d=')).toBeLessThan(filter.indexOf('zscale='));
+    expect(filter.indexOf('zscale=')).toBeLessThan(filter.lastIndexOf('scale='));
   });
 });
 

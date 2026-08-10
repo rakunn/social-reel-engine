@@ -141,8 +141,11 @@ export const getProjectStatus = async (projectPath: string): Promise<ProjectStat
     };
   }
   const {readRenderArtifactFreshness} = await import('../render/artifacts');
-  const delivery = await readRenderArtifactFreshness(projectPath, 'delivery');
-  if (delivery.fresh) {
+  const [master, delivery] = await Promise.all([
+    readRenderArtifactFreshness(projectPath, 'master'),
+    readRenderArtifactFreshness(projectPath, 'delivery'),
+  ]);
+  if (master.fresh && delivery.fresh) {
     return {
       ...base,
       editApproved,

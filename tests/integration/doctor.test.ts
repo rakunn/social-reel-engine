@@ -1,9 +1,14 @@
+import {execFile} from 'node:child_process';
+import {chmod, mkdtemp, writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
 import path from 'node:path';
+import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
 import {describe, expect, it} from 'vitest';
 import {runDoctor} from '../../src/commands/doctor';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const execFileAsync = promisify(execFile);
 
 describe('doctor', () => {
   it('verifies the pinned local reel toolchain and required FFmpeg capabilities', async () => {
@@ -20,4 +25,39 @@ describe('doctor', () => {
       ]),
     );
   });
+
+  it('fails preflight when FFmpeg omits a filter used by the pipeline', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'reel-doctor-ffmpeg-'));
+    const fakeFfmpeg = path.join(root, 'ffmpeg');
+    await writeFile(
+      fakeFfmpeg,
+      '#!/bin/sh\n' +
+        'case "$*" in\n' +
+        '  *-filters*) printf "%s\\n" "... lut3d V->V" "... zscale V->V" "... vidstabdetect V->V" "... vidstabtransform V->V" "... loudnorm A->A" ;;\n' +
+        '  *-encoders*) printf "%s\\n" "libx264" "prores_ks" "aac" ;;\n' +
+        '  *) printf "%s\\n" "ffmpeg version synthetic" "ffprobe version synthetic" ;;\n' +
+        'esac\n',
+    );
+    await chmod(fakeFfmpeg, 0o755);
+    const code =
+      `const {runDoctor} = await import('./src/commands/doctor.ts');` +
+      `const report = await runDoctor(${JSON.stringify(repositoryRoot)});` +
+      `process.stdout.write(JSON.stringify(report));`;
+    const {stdout} = await execFileAsync(
+      process.execPath,
+      ['--import', 'tsx', '--input-type=module', '--eval', code],
+      {
+        cwd: repositoryRoot,
+        env: {
+          ...process.env,
+          REEL_FFMPEG_PATH: fakeFfmpeg,
+          REEL_FFPROBE_PATH: fakeFfmpeg,
+        },
+      },
+    );
+    const report = JSON.parse(stdout);
+    expect(report.checks).toContainEqual(
+      expect.objectContaining({id: 'ffmpeg-filters', status: 'fail'}),
+    );
+  }, 30_000);
 });

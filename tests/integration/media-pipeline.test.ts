@@ -166,7 +166,16 @@ describe('strict color gating', () => {
   it('normalizes proxies when the LUT path contains apostrophes and backslashes', async () => {
     await confirmSyntheticColor();
     await analyzeSources(projectPath);
-    expect((await generateProxies(projectPath)).items[0].normalization).toBe('technical');
+    const result = await generateProxies(projectPath);
+    expect(result.items[0].normalization).toBe('technical');
+    const proxy = await probeFile(path.join(projectPath, result.items[0].proxy));
+    expect(proxy.streams?.[0]).toEqual(
+      expect.objectContaining({
+        color_primaries: 'bt709',
+        color_transfer: 'bt709',
+        color_space: 'bt709',
+      }),
+    );
   });
 
   it('rejects ambiguous duplicate LUT identifiers', async () => {
@@ -305,10 +314,21 @@ describe('strict color gating', () => {
     expect(reviewedStabilization).toEqual(
       expect.objectContaining({
         clipId: 'shot-1',
+        path: expect.stringMatching(/\.mp4$/),
         stabilization: 'applied',
         detectionSourceChecksumSha256: source.checksumSha256,
         transformPath: expect.stringMatching(/\.trf$/),
         transformChecksumSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      }),
+    );
+    const stabilizedProxy = await probeFile(
+      path.join(projectPath, reviewedStabilization.path),
+    );
+    expect(stabilizedProxy.streams?.[0]).toEqual(
+      expect.objectContaining({
+        color_primaries: 'bt709',
+        color_transfer: 'bt709',
+        color_space: 'bt709',
       }),
     );
 

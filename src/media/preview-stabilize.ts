@@ -9,6 +9,7 @@ import {runFfmpeg} from './ffmpeg';
 import {stabilizationOutcome, validateStabilizedCrop} from './stabilize';
 import {pipelineBuildFingerprint} from '../render/artifacts';
 import {escapeFfmpegFilterValue} from './filter-escape';
+import {REC709_OUTPUT_METADATA_ARGS} from './color-ffmpeg';
 
 export type PreviewStabilizationItem = {
   clipId: string;
@@ -34,6 +35,7 @@ export const preparePreviewStabilizedClip = async (
   proxyPath: string,
   originalPath: string,
   reviewVideoFilter: string,
+  normalized: boolean,
   prior?: PreviewStabilizationItem,
 ): Promise<{item: PreviewStabilizationItem; sourcePath: string}> => {
   if (!clip.stabilization.enabled) {
@@ -67,7 +69,12 @@ export const preparePreviewStabilizedClip = async (
     reviewVideoFilter,
     selection: {inSeconds: clip.inSeconds, outSeconds: clip.outSeconds},
     stabilization: clip.stabilization,
-    encoder: {codec: 'libx264', crf: 23, pixelFormat: 'yuv420p'},
+    encoder: {
+      codec: 'libx264',
+      crf: 23,
+      pixelFormat: 'yuv420p',
+      colorMetadata: normalized ? 'bt709' : null,
+    },
   });
   const relativeOutput = `work/preview-stabilized/${clip.id}-${fingerprint.slice(0, 12)}.mp4`;
   const outputPath = resolveInside(projectPath, relativeOutput);
@@ -154,6 +161,7 @@ export const preparePreviewStabilizedClip = async (
     'aac',
     '-b:a',
     '128k',
+    ...(normalized ? REC709_OUTPUT_METADATA_ARGS : []),
     '-movflags',
     '+faststart',
     outputPath,
