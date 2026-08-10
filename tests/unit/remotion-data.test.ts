@@ -8,6 +8,7 @@ import {
   secondsToMediaFrames,
   type ReelRenderProps,
 } from '../../src/remotion/model';
+import * as remotionModel from '../../src/remotion/model';
 
 const edit = EditManifestSchema.parse({
   schemaVersion: '1.0.0',
@@ -93,5 +94,16 @@ describe('data-driven Remotion model', () => {
   it('converts source and music trim offsets from seconds to Remotion frames', () => {
     expect(secondsToMediaFrames(10, 30)).toBe(300);
     expect(secondsToMediaFrames(0.25, 30)).toBe(8);
+  });
+
+  it('quotes custom-font URLs so apostrophes cannot break the font-face rule', () => {
+    const fontFaceRule = (
+      remotionModel as typeof remotionModel & {fontFaceRule?: (url: string) => string}
+    ).fontFaceRule;
+
+    expect(fontFaceRule).toBeTypeOf('function');
+    expect(fontFaceRule?.("/fonts/Director's Cut.ttf")).toBe(
+      `@font-face{font-family:ReelCustom;src:url("/fonts/Director's Cut.ttf");font-display:block;}`,
+    );
   });
 });

@@ -5,6 +5,31 @@ import {
   targetExpectations,
 } from '../../src/render/policy';
 
+const settings = {
+  schemaVersion: '1.0.0',
+  proxy: {width: 540, height: 960, crf: 23},
+  preview: {width: 540, height: 960, crf: 18, audioBitrate: '160k'},
+  master: {
+    width: 1080,
+    height: 1920,
+    fps: 30,
+    videoCodec: 'prores_ks',
+    profile: 3,
+    pixelFormat: 'yuv422p10le',
+    audioCodec: 'pcm_s16le',
+    audioSampleRate: 48000,
+  },
+  delivery: {
+    videoCodec: 'libx264',
+    pixelFormat: 'yuv420p',
+    crf: 19,
+    audioCodec: 'aac',
+    audioBitrate: '192k',
+    integratedLufs: -16,
+    truePeakDbtp: -2,
+  },
+} as const;
+
 describe('render policy', () => {
   it('pins the preview and master encodes to the approved formats', () => {
     expect(renderOptionsFor('preview')).toEqual(
@@ -86,6 +111,29 @@ describe('render policy', () => {
         pixelFormat: 'yuv422p10le',
         audioCodec: 'pcm_s16le',
       }),
+    );
+  });
+
+  it('applies supported project render settings to encoders and QC expectations', () => {
+    expect(renderOptionsFor('preview', settings)).toEqual(
+      expect.objectContaining({crf: 18, audioBitrate: '160k'}),
+    );
+    const deliveryArgs = deliveryFfmpegArgs(
+      '/tmp/master.mov',
+      '/tmp/delivery.mp4',
+      {
+        inputIntegratedLufs: -20.55,
+        inputTruePeakDbtp: -9.07,
+        inputLoudnessRangeLu: 0,
+        inputThresholdLufs: -30.55,
+        targetOffsetLu: -0.89,
+      },
+      settings,
+    );
+    expect(deliveryArgs).toEqual(expect.arrayContaining(['19', '192k']));
+    expect(deliveryArgs.join(' ')).toContain('loudnorm=I=-16:TP=-2');
+    expect(targetExpectations('delivery', settings)).toEqual(
+      expect.objectContaining({audioBitRate: 192_000, integratedLufs: -16, truePeakDbtp: -2}),
     );
   });
 });

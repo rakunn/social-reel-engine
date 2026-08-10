@@ -20,6 +20,7 @@ import {
   buildShotTimings,
   captionFrameRange,
   cropTransform,
+  fontFaceRule,
   secondsToMediaFrames,
   type ReelRenderProps,
 } from './model';
@@ -178,7 +179,7 @@ export const SocialReel: React.FC<ReelRenderProps> = (props) => {
   return (
     <AbsoluteFill style={{backgroundColor: '#050505'}}>
       {props.fontUrl ? (
-        <style>{`@font-face{font-family:ReelCustom;src:url('${staticFile(props.fontUrl)}');font-display:block;}`}</style>
+        <style>{fontFaceRule(staticFile(props.fontUrl))}</style>
       ) : null}
       <TransitionSeries>
         {props.edit.clips.map((clip, index) => {
