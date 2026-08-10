@@ -17,6 +17,33 @@ export type DoctorReport = {
   checks: DoctorCheck[];
 };
 
+const REQUIRED_FFMPEG_FILTERS = [
+  'blackdetect',
+  'blend',
+  'colorbalance',
+  'colortemperature',
+  'drawbox',
+  'drawtext',
+  'exposure',
+  'format',
+  'fps',
+  'freezedetect',
+  'loudnorm',
+  'lut3d',
+  'scale',
+  'setparams',
+  'split',
+  'tile',
+  'vidstabdetect',
+  'vidstabtransform',
+  'zscale',
+] as const;
+
+const hasRequiredFfmpegFilters = (output: string): boolean => {
+  const available = new Set(output.split(/\s+/));
+  return REQUIRED_FFMPEG_FILTERS.every((name) => available.has(name));
+};
+
 const checkCommand = async (
   id: string,
   command: string,
@@ -130,8 +157,8 @@ export const runDoctor = async (engineRoot: string): Promise<DoctorReport> => {
       'ffmpeg-filters',
       FFMPEG,
       ['-hide_banner', '-filters'],
-      (output) => ['lut3d', 'zscale', 'vidstabdetect', 'vidstabtransform', 'loudnorm'].every((name) => output.includes(name)),
-      'FFmpeg has LUT, color, stabilization, and loudness filters',
+      hasRequiredFfmpegFilters,
+      `FFmpeg has all ${REQUIRED_FFMPEG_FILTERS.length} pipeline filters`,
     ),
   );
   checks.push(

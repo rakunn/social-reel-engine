@@ -5,6 +5,7 @@ import {
   EditManifestSchema,
   LutDefinitionsSchema,
   ReelBriefSchema,
+  type RenderSettings,
 } from '../contracts/schemas';
 import {createEditHash} from '../core/approvals';
 import {hashFile, hashValue} from '../core/hash';
@@ -108,6 +109,27 @@ export const evaluateRenderArtifact = (
   return {fresh: true, reason: null};
 };
 
+const renderSettingsFingerprintProjection = (
+  target: OutputTarget,
+  settings: RenderSettings,
+): Record<string, unknown> => {
+  if (target === 'preview') {
+    return {
+      schemaVersion: settings.schemaVersion,
+      proxy: settings.proxy,
+      preview: settings.preview,
+    };
+  }
+  if (target === 'master') {
+    return {schemaVersion: settings.schemaVersion, master: settings.master};
+  }
+  return {
+    schemaVersion: settings.schemaVersion,
+    master: settings.master,
+    delivery: settings.delivery,
+  };
+};
+
 export const expectedRenderFingerprint = async (
   projectPath: string,
   target: OutputTarget,
@@ -147,7 +169,7 @@ export const expectedRenderFingerprint = async (
     sourceConfirmations,
     sourceManifest: sourceManifestFingerprintProjection(sourceManifest),
     luts: target === 'preview' ? previewLuts : luts,
-    settings,
+    settings: renderSettingsFingerprintProjection(target, settings),
     rightsConfirmed: target === 'preview' ? 'not-required' : rightsConfirmed,
     outputPolicy: targetExpectations(target, settings),
     renderer:

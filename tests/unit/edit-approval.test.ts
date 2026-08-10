@@ -1,4 +1,4 @@
-import {mkdir, mkdtemp, writeFile} from 'node:fs/promises';
+import {mkdir, mkdtemp, readFile, unlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {describe, expect, it} from 'vitest';
@@ -251,6 +251,28 @@ const makeFixture = async () => {
   return {projectPath, edit, creativeLutPath, sourceId};
 };
 
+const recordFinalArtifacts = async (projectPath: string) => {
+  const outputDirectory = path.join(projectPath, 'output');
+  await mkdir(outputDirectory, {recursive: true});
+  const masterPath = path.join(outputDirectory, 'master.mov');
+  const deliveryPath = path.join(outputDirectory, 'delivery.mp4');
+  await writeFile(masterPath, 'current-master');
+  await recordRenderArtifact(
+    projectPath,
+    'master',
+    masterPath,
+    await expectedRenderFingerprint(projectPath, 'master'),
+  );
+  await writeFile(deliveryPath, 'current-delivery');
+  await recordRenderArtifact(
+    projectPath,
+    'delivery',
+    deliveryPath,
+    await expectedRenderFingerprint(projectPath, 'delivery'),
+  );
+  return {masterPath, deliveryPath};
+};
+
 describe('edit validation', () => {
   it('checks missing media, bounds, frame-safe playback, transitions, and target duration', async () => {
     const {projectPath, edit} = await makeFixture();
@@ -294,6 +316,63 @@ describe('edit validation', () => {
 });
 
 describe('hash-bound approvals', () => {
+  it('keeps preview and master fingerprints stable for delivery-only settings', async () => {
+    const {projectPath} = await makeFixture();
+    const before = {
+      preview: await expectedRenderFingerprint(projectPath, 'preview'),
+      master: await expectedRenderFingerprint(projectPath, 'master'),
+      delivery: await expectedRenderFingerprint(projectPath, 'delivery'),
+    };
+    const settingsPath = path.join(projectPath, 'config/settings.json');
+    const settings = JSON.parse(await readFile(settingsPath, 'utf8'));
+    await writeJson(settingsPath, {
+      ...settings,
+      delivery: {...settings.delivery, audioBitrate: '192k'},
+    });
+
+    expect(await expectedRenderFingerprint(projectPath, 'preview')).toBe(before.preview);
+    expect(await expectedRenderFingerprint(projectPath, 'master')).toBe(before.master);
+    expect(await expectedRenderFingerprint(projectPath, 'delivery')).not.toBe(before.delivery);
+  });
+
+  it('changes only the preview fingerprint for preview encoder settings', async () => {
+    const {projectPath} = await makeFixture();
+    const before = {
+      preview: await expectedRenderFingerprint(projectPath, 'preview'),
+      master: await expectedRenderFingerprint(projectPath, 'master'),
+      delivery: await expectedRenderFingerprint(projectPath, 'delivery'),
+    };
+    const settingsPath = path.join(projectPath, 'config/settings.json');
+    const settings = JSON.parse(await readFile(settingsPath, 'utf8'));
+    await writeJson(settingsPath, {
+      ...settings,
+      preview: {...settings.preview, crf: 19},
+    });
+
+    expect(await expectedRenderFingerprint(projectPath, 'preview')).not.toBe(before.preview);
+    expect(await expectedRenderFingerprint(projectPath, 'master')).toBe(before.master);
+    expect(await expectedRenderFingerprint(projectPath, 'delivery')).toBe(before.delivery);
+  });
+
+  it('changes only the preview fingerprint for proxy settings', async () => {
+    const {projectPath} = await makeFixture();
+    const before = {
+      preview: await expectedRenderFingerprint(projectPath, 'preview'),
+      master: await expectedRenderFingerprint(projectPath, 'master'),
+      delivery: await expectedRenderFingerprint(projectPath, 'delivery'),
+    };
+    const settingsPath = path.join(projectPath, 'config/settings.json');
+    const settings = JSON.parse(await readFile(settingsPath, 'utf8'));
+    await writeJson(settingsPath, {
+      ...settings,
+      proxy: {...settings.proxy, crf: 22},
+    });
+
+    expect(await expectedRenderFingerprint(projectPath, 'preview')).not.toBe(before.preview);
+    expect(await expectedRenderFingerprint(projectPath, 'master')).toBe(before.master);
+    expect(await expectedRenderFingerprint(projectPath, 'delivery')).toBe(before.delivery);
+  });
+
   it('marks final artifacts stale when rights confirmation is withdrawn', async () => {
     const {projectPath} = await makeFixture();
     const outputDirectory = path.join(projectPath, 'output');
@@ -333,19 +412,22 @@ describe('hash-bound approvals', () => {
     const {projectPath} = await makeFixture();
     await approveEdit(projectPath);
     await approveColor(projectPath);
-    const outputDirectory = path.join(projectPath, 'output');
-    await mkdir(outputDirectory, {recursive: true});
-    const deliveryPath = path.join(outputDirectory, 'delivery.mp4');
-    await writeFile(deliveryPath, 'current-delivery');
-    await recordRenderArtifact(
-      projectPath,
-      'delivery',
-      deliveryPath,
-      await expectedRenderFingerprint(projectPath, 'delivery'),
-    );
+    const {deliveryPath} = await recordFinalArtifacts(projectPath);
     expect((await getProjectStatus(projectPath)).stage).toBe('rendered');
 
     await writeFile(deliveryPath, 'changed-delivery');
+
+    expect((await getProjectStatus(projectPath)).stage).toBe('ready-to-render');
+  });
+
+  it('does not report rendered when the current master is missing', async () => {
+    const {projectPath} = await makeFixture();
+    await approveEdit(projectPath);
+    await approveColor(projectPath);
+    const {masterPath} = await recordFinalArtifacts(projectPath);
+    expect((await getProjectStatus(projectPath)).stage).toBe('rendered');
+
+    await unlink(masterPath);
 
     expect((await getProjectStatus(projectPath)).stage).toBe('ready-to-render');
   });

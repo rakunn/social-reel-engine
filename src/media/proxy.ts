@@ -10,6 +10,7 @@ import {hashFile} from '../core/hash';
 import {lutCompatibilityFailures} from '../core/lut-compatibility';
 import {pipelineBuildFingerprint} from '../render/artifacts';
 import {escapeFfmpegFilterValue} from './filter-escape';
+import {REC709_OUTPUT_METADATA_ARGS} from './color-ffmpeg';
 
 export type ProxyItem = {
   sourceId: string;
@@ -85,7 +86,10 @@ export const buildProxyVideoFilter = (
     `scale='if(gt(iw,ih),${maximumDimension},-2)':` +
     `'if(gt(iw,ih),-2,${maximumDimension})'`;
   return normalizerFile
-    ? `lut3d=file=${escapeFfmpegFilterValue(resolveInside(projectPath, normalizerFile))},${baseScale}`
+    ? `format=gbrp16le,` +
+        `lut3d=file=${escapeFfmpegFilterValue(resolveInside(projectPath, normalizerFile))},` +
+        'zscale=primaries=bt709:transfer=bt709:matrix=bt709:range=limited:' +
+        `matrixin=gbr:transferin=bt709:primariesin=bt709,${baseScale}`
     : `${baseScale},drawbox=x=0:y=ih-100:w=iw:h=100:color=black@0.72:t=fill,` +
         "drawtext=text='UNNORMALIZED LOG PREVIEW - PROFILE NOT CONFIRMED':fontcolor=white:fontsize=h/28:x=(w-text_w)/2:y=h-66";
 };
@@ -182,6 +186,7 @@ export const generateProxies = async (
         'aac',
         '-b:a',
         '128k',
+        ...(normalizer ? REC709_OUTPUT_METADATA_ARGS : []),
         '-movflags',
         '+faststart',
         proxyPath,
