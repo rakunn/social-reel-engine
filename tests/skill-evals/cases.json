@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "1.0.0",
+  "cases": [
+    {
+      "id": "dji-start-to-finish",
+      "prompt": "I supplied DJI Mini 4 Pro D-Log M clips, music, captions, a technical LUT, and creative LUTs. Explain the exact local workflow, commands, checkpoints, unsafe guesses, and remaining uncertainties for a 20–30 second cinematic vertical reel.",
+      "mustCover": [
+        "doctor and isolated project creation",
+        "immutable checksum-based ingest",
+        "explicit DJI camera/profile confirmation",
+        "rough-cut preview pause before approve-edit",
+        "graded-reference pause before approve-color",
+        "final render and QC",
+        "no inferred transform, creative look, rights, crop, or stabilization"
+      ]
+    },
+    {
+      "id": "mixed-dji-sony",
+      "prompt": "The clips mix DJI D-Log M and Sony S-Log3, and I also supplied HDR CONVERSION LUT.cube. Describe the safe color workflow and what must be confirmed before final rendering.",
+      "mustCover": [
+        "per-source camera and gamma/gamut confirmation",
+        "S-Gamut3 versus S-Gamut3.Cine distinction",
+        "exactly one technical or combined normalization transform",
+        "HDR LUT remains blocked while semantics are unknown",
+        "creative look follows technical normalization",
+        "separate editorial and color approvals"
+      ]
+    },
+    {
+      "id": "creative-lut-selection",
+      "prompt": "Choose a restrained cinematic-minimal look from the supplied Polish creative LUT collection using the supplied PDF guide. Explain comparison, intensity, and approval policy.",
+      "mustCover": [
+        "no choice from filename alone",
+        "compare technically normalized representative frames",
+        "PDF supplies general intensity guidance but no scene-to-LUT mapping",
+        "creative blend is shot-dependent",
+        "pause for explicit color approval"
+      ]
+    },
+    {
+      "id": "music-captions-stabilization",
+      "prompt": "I have MP4 drone clips, one licensed music track, an SRT, and two shots that may need stabilization. Create a 20–30 second vertical reel locally. What exact workflow should Codex follow, where must it pause, and what should it never guess?",
+      "mustCover": [
+        "music beat/onset analysis",
+        "caption timing must be verified against the reel",
+        "stabilization is explicit per shot with reviewed fallback",
+        "rough-cut and graded-reference pauses",
+        "approval commands are only run after user confirmation"
+      ]
+    },
+    {
+      "id": "stale-approvals-and-qc",
+      "prompt": "My reel edit and color were approved, then I changed one trim, one crop, and a creative LUT mix. Can Codex render the final? Explain exact required commands, approval invalidation behavior, final outputs, and QC gates.",
+      "mustCover": [
+        "trim and crop invalidate edit and color approval",
+        "creative mix invalidates color approval",
+        "regenerate preview and graded stills before reapproval",
+        "final render is bound to current manifests",
+        "master and delivery QC include freshness and technical properties"
+      ]
+    }
+  ]
+}

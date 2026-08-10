@@ -1,0 +1,45 @@
+{
+  "name": "social-reel-engine",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local, approval-gated social reel creation engine for Codex, FFmpeg, and Remotion.",
+  "type": "module",
+  "engines": {
+    "node": "24.12.0",
+    "npm": "11.6.2"
+  },
+  "packageManager": "npm@11.6.2",
+  "scripts": {
+    "reel": "node --import tsx src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run tests/unit tests/integration",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "vitest run tests/e2e",
+    "remotion": "remotion studio src/remotion/index.ts",
+    "synthetic:e2e": "node --import tsx scripts/synthetic-e2e.ts",
+    "verify": "npm run typecheck && npm run test && npm run test:e2e && npm run reel -- doctor"
+  },
+  "dependencies": {
+    "@remotion/bundler": "4.0.507",
+    "@remotion/captions": "4.0.507",
+    "@remotion/cli": "4.0.507",
+    "@remotion/fonts": "4.0.507",
+    "@remotion/media": "4.0.507",
+    "@remotion/renderer": "4.0.507",
+    "@remotion/transitions": "4.0.507",
+    "commander": "14.0.2",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "remotion": "4.0.507",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "tsx": "4.23.11",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

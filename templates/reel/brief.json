@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "1.0.0",
+  "identity": {
+    "reelName": "reel-name",
+    "title": "Untitled Reel",
+    "createdAt": "2000-01-01T00:00:00.000Z"
+  },
+  "target": {
+    "minSeconds": 20,
+    "idealSeconds": 25,
+    "maxSeconds": 30
+  },
+  "output": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30
+  },
+  "style": "cinematic-minimal",
+  "options": {
+    "music": true,
+    "captions": false,
+    "cameraAudio": false
+  },
+  "rightsConfirmed": false,
+  "notes": ""
+}

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "1.0.0",
+  "proxy": {
+    "width": 540,
+    "height": 960,
+    "crf": 23
+  },
+  "preview": {
+    "width": 540,
+    "height": 960,
+    "crf": 20
+  },
+  "master": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "videoCodec": "prores_ks",
+    "profile": 3,
+    "pixelFormat": "yuv422p10le",
+    "audioCodec": "pcm_s16le",
+    "audioSampleRate": 48000
+  },
+  "delivery": {
+    "videoCodec": "libx264",
+    "pixelFormat": "yuv420p",
+    "crf": 17,
+    "audioCodec": "aac",
+    "audioBitrate": "256k",
+    "integratedLufs": -14,
+    "truePeakDbtp": -1.5
+  }
+}
