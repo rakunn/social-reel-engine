@@ -1,4 +1,4 @@
-import {access, mkdtemp, readFile, writeFile} from 'node:fs/promises';
+import {access, chmod, mkdir, mkdtemp, readFile, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -314,6 +314,12 @@ describe('strict color gating', () => {
 
   it('grades approved selections to reusable 10-bit ProRes intermediates', async () => {
     await confirmSyntheticColor();
+    const nestedFontPath = path.join(
+      projectPath,
+      'input/fonts/campaign/NestedDirector.ttf',
+    );
+    await mkdir(path.dirname(nestedFontPath), {recursive: true});
+    await writeFile(nestedFontPath, 'synthetic nested font');
     const manifest = await analyzeSources(projectPath);
     const source = manifest.sources.find((entry) => entry.mediaType === 'video')!;
     await writeJson(path.join(projectPath, 'edits/edit.json'), {
@@ -351,6 +357,13 @@ describe('strict color gating', () => {
     });
     const stagedPreview = await prepareRenderProps(projectPath, repositoryRoot, 'preview');
     expect(stagedPreview.props.trimBeforeFramesByClip?.['shot-1']).toBe(0);
+    expect(stagedPreview.props.fontUrl).toMatch(/\/fonts\/NestedDirector\.ttf$/);
+    expect(
+      await readFile(
+        path.join(repositoryRoot, 'public', stagedPreview.props.fontUrl!),
+        'utf8',
+      ),
+    ).toBe('synthetic nested font');
     const previewStabilization = JSON.parse(
       await readFile(path.join(projectPath, 'analysis/preview-stabilization.json'), 'utf8'),
     );
@@ -446,16 +459,78 @@ describe('music analysis', () => {
     expect(JSON.parse(await readFile(path.join(projectPath, 'analysis/beats.json'), 'utf8'))).toEqual(
       expect.objectContaining({schemaVersion: '1.0.0'}),
     );
+  });
 
-    const analyzerPath = path.join(repositoryRoot, 'python/analyze_beats.py');
+  it('uses recursive filtered discovery and regenerates malformed cached reports', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'reel-beats-cache-'));
+    const cacheProject = await createReelProject({
+      engineRoot: repositoryRoot,
+      projectsRoot: path.join(root, 'projects'),
+      reelName: 'beats-cache',
+    });
+    const nestedMusicPath = path.join(cacheProject, 'input/music/library/clicks.wav');
+    await mkdir(path.dirname(nestedMusicPath), {recursive: true});
+    await writeFile(nestedMusicPath, 'synthetic music bytes');
+    await writeFile(path.join(cacheProject, 'input/music/Thumbs.db'), 'ignored metadata');
+
+    const fakeEngineRoot = path.join(root, 'fake-engine');
+    const analyzerPath = path.join(fakeEngineRoot, 'python/analyze_beats.py');
+    const fakePython = path.join(fakeEngineRoot, '.venv/bin/python');
+    await mkdir(path.dirname(analyzerPath), {recursive: true});
+    await mkdir(path.dirname(fakePython), {recursive: true});
+    await writeFile(analyzerPath, '# deterministic analyzer fixture\n');
+    await writeFile(
+      fakePython,
+      `#!/bin/sh
+echo '{"durationSeconds":4,"sampleRate":22050,"tempoBpm":120,"beatsSeconds":[0.5,1,1.5],"onsetsSeconds":[0.25,0.75,1.25]}'
+`,
+    );
+    await chmod(fakePython, 0o755);
+
+    const initialAt = new Date('2028-01-02T03:04:05.000Z');
+    const result = await analyzeMusic(cacheProject, fakeEngineRoot, initialAt);
+    expect(result).toEqual(
+      expect.objectContaining({
+        generatedAt: initialAt.toISOString(),
+        relativePath: 'input/music/library/clicks.wav',
+        durationSeconds: 4,
+      }),
+    );
+
     const analyzerImplementationSha256 = await hashFile(analyzerPath);
-    await writeJson(path.join(projectPath, 'analysis/beats.json'), {
+    await writeJson(path.join(cacheProject, 'analysis/beats.json'), {
       ...result,
+      generatedAt: '1999-01-01T00:00:00.000Z',
+      durationSeconds: -1,
+      sampleRate: 0,
+      tempoBpm: -1,
+      beatsSeconds: [-0.25],
+      onsetsSeconds: [result.durationSeconds + 1],
+    });
+    const cacheRefreshAt = new Date('2029-01-02T03:04:05.000Z');
+    const cacheRefreshed = await analyzeMusic(cacheProject, fakeEngineRoot, cacheRefreshAt);
+    expect(cacheRefreshed).toEqual(
+      expect.objectContaining({
+        generatedAt: cacheRefreshAt.toISOString(),
+        relativePath: 'input/music/library/clicks.wav',
+        durationSeconds: expect.any(Number),
+        sampleRate: expect.any(Number),
+        tempoBpm: expect.any(Number),
+      }),
+    );
+    expect(cacheRefreshed.durationSeconds).toBeGreaterThan(0);
+    expect(cacheRefreshed.sampleRate).toBeGreaterThan(0);
+    expect(cacheRefreshed.tempoBpm).toBeGreaterThanOrEqual(0);
+    expect(cacheRefreshed.beatsSeconds.every((timestamp) => timestamp >= 0)).toBe(true);
+    expect(cacheRefreshed.onsetsSeconds.every((timestamp) => timestamp >= 0)).toBe(true);
+
+    await writeJson(path.join(cacheProject, 'analysis/beats.json'), {
+      ...cacheRefreshed,
       generatedAt: '2000-01-01T00:00:00.000Z',
       analyzerImplementationSha256: '0'.repeat(64),
     });
     const refreshedAt = new Date('2030-01-02T03:04:05.000Z');
-    const refreshed = await analyzeMusic(projectPath, repositoryRoot, refreshedAt);
+    const refreshed = await analyzeMusic(cacheProject, fakeEngineRoot, refreshedAt);
     expect(refreshed.generatedAt).toBe(refreshedAt.toISOString());
     expect(refreshed.analyzerImplementationSha256).toBe(analyzerImplementationSha256);
   });
