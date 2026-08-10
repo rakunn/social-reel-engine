@@ -252,6 +252,44 @@ describe('edit media validation', () => {
     }
   });
 
+  it('derives selected video duration from duration_ts before using container duration', async () => {
+    const manifestPath = path.join(projectPath, 'analysis/sources.json');
+    const original = JSON.parse(await readFile(manifestPath, 'utf8'));
+    const changed = {
+      ...original,
+      sources: original.sources.map((source: {id: string; ffprobe: {format: Record<string, unknown>; streams: Array<Record<string, unknown>>}}) =>
+        source.id === videoSourceId
+          ? {
+              ...source,
+              ffprobe: {
+                ...source.ffprobe,
+                format: {...source.ffprobe.format, duration: '2.0'},
+                streams: source.ffprobe.streams.map((stream) =>
+                  stream.codec_type === 'video'
+                    ? {
+                        ...stream,
+                        duration: undefined,
+                        duration_ts: '15',
+                        time_base: '1/30',
+                      }
+                    : stream,
+                ),
+              },
+            }
+          : source,
+      ),
+    };
+    await writeJson(manifestPath, changed);
+
+    try {
+      const result = await validateEdit(projectPath, edit({muted: true, captions: 'none'}));
+      expect(result.valid).toBe(false);
+      expect(result.failures).toContainEqual(expect.stringMatching(/out point.*source duration/i));
+    } finally {
+      await writeJson(manifestPath, original);
+    }
+  });
+
   it('rejects unmuted trims outside the audio stream timeline', async () => {
     const manifestPath = path.join(projectPath, 'analysis/sources.json');
     const original = JSON.parse(await readFile(manifestPath, 'utf8'));

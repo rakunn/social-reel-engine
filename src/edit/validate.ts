@@ -101,10 +101,10 @@ export const validateEdit = async (
       }
       const video = source.ffprobe.streams.find((stream) => stream.codec_type === 'video');
       const audio = source.ffprobe.streams.find((stream) => stream.codec_type === 'audio');
-      const videoDuration = Number(video?.duration);
+      const videoDuration = video ? streamDurationSeconds(video) : null;
       const formatDuration = Number(source.ffprobe.format?.duration);
       const duration =
-        Number.isFinite(videoDuration) && videoDuration > 0
+        videoDuration !== null
           ? videoDuration
           : Number.isFinite(formatDuration) && formatDuration > 0
             ? formatDuration

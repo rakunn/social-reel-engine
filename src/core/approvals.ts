@@ -18,15 +18,48 @@ const editorialProjection = (edit: EditManifest) => ({
 export const createEditHash = (edit: EditManifest): string =>
   hashValue(editorialProjection(edit));
 
+const selectedColorLutIds = (edit: EditManifest): Set<string> =>
+  new Set(
+    edit.clips.flatMap((clip) =>
+      [
+        clip.grade.technicalLutId,
+        clip.grade.creativeLutId,
+        clip.grade.combinedLutId,
+      ].filter((id): id is string => Boolean(id)),
+    ),
+  );
+
+export const selectedColorLuts = (
+  edit: EditManifest,
+  luts: readonly LutDefinition[],
+): LutDefinition[] => {
+  const selectedIds = selectedColorLutIds(edit);
+  return luts
+    .filter((lut) => selectedIds.has(lut.id))
+    .sort((left, right) => left.id.localeCompare(right.id));
+};
+
 export const createColorHash = (
   edit: EditManifest,
   luts: readonly (LutDefinition | unknown)[],
-): string =>
-  hashValue({
+): string => {
+  const selectedIds = selectedColorLutIds(edit);
+  const selectedLuts = luts
+    .filter(
+      (lut): lut is {id: string} & Record<string, unknown> =>
+        typeof lut === 'object' &&
+        lut !== null &&
+        'id' in lut &&
+        typeof lut.id === 'string' &&
+        selectedIds.has(lut.id),
+    )
+    .sort((left, right) => left.id.localeCompare(right.id));
+  return hashValue({
     editHash: createEditHash(edit),
     grades: edit.clips.map((clip) => ({id: clip.id, grade: clip.grade})),
-    luts,
+    luts: selectedLuts,
   });
+};
 
 export const createEditReviewHash = (
   editManifestHash: string,

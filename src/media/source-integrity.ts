@@ -23,6 +23,7 @@ const PIPELINE_MEDIA_TYPES = new Set<SourceEntry['mediaType']>([
   'video',
   'audio',
   'caption',
+  'font',
 ]);
 
 const identityOf = (source: SourceEntry): SourceIdentity => ({

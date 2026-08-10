@@ -10,7 +10,6 @@
       "mediaType": "video",
       "ffprobe": {
         "format": {
-          "filename": "/Users/rafalbagrowski/Documents/reels/projects/filipiny-statek-five-shot/input/clips/DJI_20260416113923_0087_D.MP4",
           "nb_streams": 4,
           "nb_programs": 0,
           "nb_stream_groups": 0,
@@ -252,7 +251,6 @@
       "mediaType": "video",
       "ffprobe": {
         "format": {
-          "filename": "/Users/rafalbagrowski/Documents/reels/projects/filipiny-statek-five-shot/input/clips/DJI_20260416113942_0088_D.MP4",
           "nb_streams": 4,
           "nb_programs": 0,
           "nb_stream_groups": 0,
@@ -494,7 +492,6 @@
       "mediaType": "video",
       "ffprobe": {
         "format": {
-          "filename": "/Users/rafalbagrowski/Documents/reels/projects/filipiny-statek-five-shot/input/clips/DJI_20260416114011_0089_D.MP4",
           "nb_streams": 4,
           "nb_programs": 0,
           "nb_stream_groups": 0,
@@ -736,7 +733,6 @@
       "mediaType": "video",
       "ffprobe": {
         "format": {
-          "filename": "/Users/rafalbagrowski/Documents/reels/projects/filipiny-statek-five-shot/input/clips/DJI_20260416114059_0090_D.MP4",
           "nb_streams": 4,
           "nb_programs": 0,
           "nb_stream_groups": 0,
@@ -978,7 +974,6 @@
       "mediaType": "video",
       "ffprobe": {
         "format": {
-          "filename": "/Users/rafalbagrowski/Documents/reels/projects/filipiny-statek-five-shot/input/clips/DJI_20260416114818_0099_D.MP4",
           "nb_streams": 4,
           "nb_programs": 0,
           "nb_stream_groups": 0,

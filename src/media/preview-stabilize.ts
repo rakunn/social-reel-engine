@@ -29,12 +29,38 @@ export type PreviewStabilizationReport = {
   items: PreviewStabilizationItem[];
 };
 
+export const previewStabilizationFingerprint = (input: {
+  pipelineBuild: string;
+  detectionSourceChecksumSha256: string;
+  normalizationInputChecksumSha256: string | null;
+  reviewVideoFilter: string;
+  selection: {inSeconds: number; outSeconds: number};
+  stabilization: EditClip['stabilization'];
+  normalized: boolean;
+}): string =>
+  artifactFingerprint({
+    version: 2,
+    pipelineBuild: input.pipelineBuild,
+    detectionSourceChecksumSha256: input.detectionSourceChecksumSha256,
+    normalizationInputChecksumSha256: input.normalizationInputChecksumSha256,
+    reviewVideoFilter: input.reviewVideoFilter,
+    selection: input.selection,
+    stabilization: input.stabilization,
+    encoder: {
+      codec: 'libx264',
+      crf: 23,
+      pixelFormat: 'yuv420p',
+      colorMetadata: input.normalized ? 'bt709' : null,
+    },
+  });
+
 export const preparePreviewStabilizedClip = async (
   projectPath: string,
   clip: EditClip,
   proxyPath: string,
   originalPath: string,
   reviewVideoFilter: string,
+  normalizationInputChecksumSha256: string | null,
   normalized: boolean,
   prior?: PreviewStabilizationItem,
 ): Promise<{item: PreviewStabilizationItem; sourcePath: string}> => {
@@ -62,19 +88,14 @@ export const preparePreviewStabilizedClip = async (
 
   const detectionSourceChecksumSha256 = await hashFile(originalPath);
   const pipelineBuild = await pipelineBuildFingerprint();
-  const fingerprint = artifactFingerprint({
-    version: 1,
+  const fingerprint = previewStabilizationFingerprint({
     pipelineBuild,
     detectionSourceChecksumSha256,
+    normalizationInputChecksumSha256,
     reviewVideoFilter,
     selection: {inSeconds: clip.inSeconds, outSeconds: clip.outSeconds},
     stabilization: clip.stabilization,
-    encoder: {
-      codec: 'libx264',
-      crf: 23,
-      pixelFormat: 'yuv420p',
-      colorMetadata: normalized ? 'bt709' : null,
-    },
+    normalized,
   });
   const relativeOutput = `work/preview-stabilized/${clip.id}-${fingerprint.slice(0, 12)}.mp4`;
   const outputPath = resolveInside(projectPath, relativeOutput);

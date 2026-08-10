@@ -119,6 +119,9 @@ export const prepareRenderProps = async (
           proxy.normalizerFile,
           proxy.maximumDimension,
         ),
+        proxy.normalizerFile
+          ? await hashFile(resolveInside(projectPath, proxy.normalizerFile))
+          : null,
         proxy.normalization !== 'unconfirmed-watermarked',
         priorPreviewStabilization?.items.find((item) => item.clipId === clip.id),
       );

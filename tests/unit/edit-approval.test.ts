@@ -347,6 +347,15 @@ describe('hash-bound approvals', () => {
     }).toEqual(before);
   });
 
+  it('requires fresh source analysis when a renderable font is added', async () => {
+    const {projectPath} = await makeFixture();
+    await writeFile(path.join(projectPath, 'input/fonts/Director.ttf'), 'new-render-font');
+
+    await expect(expectedRenderFingerprint(projectPath, 'preview')).rejects.toThrow(
+      /source manifest|analy/i,
+    );
+  });
+
   it('keeps preview and master fingerprints stable for delivery-only settings', async () => {
     const {projectPath} = await makeFixture();
     const before = {
@@ -671,6 +680,31 @@ describe('hash-bound approvals', () => {
       colorApproved: false,
     });
     await expect(assertRenderApprovals(projectPath)).rejects.toThrow(/stale|approval/i);
+  });
+
+  it('keeps color approval current when an unselected LUT definition is added', async () => {
+    const {projectPath} = await makeFixture();
+    await approveEdit(projectPath);
+    await approveColor(projectPath);
+    const configPath = path.join(projectPath, 'config/luts.json');
+    const config = JSON.parse(await readFile(configPath, 'utf8'));
+    await writeJson(configPath, {
+      ...config,
+      luts: [
+        ...config.luts,
+        {
+          ...config.luts[1],
+          id: 'unselected-creative',
+          file: 'input/luts/creative/unselected.cube',
+          checksumSha256: 'f'.repeat(64),
+        },
+      ],
+    });
+
+    expect(await readApprovalStatus(projectPath)).toEqual({
+      editApproved: true,
+      colorApproved: true,
+    });
   });
 
   it('invalidates approvals when the generated source ID mapping is modified', async () => {
