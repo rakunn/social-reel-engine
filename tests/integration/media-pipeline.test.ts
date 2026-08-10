@@ -382,5 +382,17 @@ describe('music analysis', () => {
     expect(JSON.parse(await readFile(path.join(projectPath, 'analysis/beats.json'), 'utf8'))).toEqual(
       expect.objectContaining({schemaVersion: '1.0.0'}),
     );
+
+    const analyzerPath = path.join(repositoryRoot, 'python/analyze_beats.py');
+    const analyzerImplementationSha256 = await hashFile(analyzerPath);
+    await writeJson(path.join(projectPath, 'analysis/beats.json'), {
+      ...result,
+      generatedAt: '2000-01-01T00:00:00.000Z',
+      analyzerImplementationSha256: '0'.repeat(64),
+    });
+    const refreshedAt = new Date('2030-01-02T03:04:05.000Z');
+    const refreshed = await analyzeMusic(projectPath, repositoryRoot, refreshedAt);
+    expect(refreshed.generatedAt).toBe(refreshedAt.toISOString());
+    expect(refreshed.analyzerImplementationSha256).toBe(analyzerImplementationSha256);
   });
 });

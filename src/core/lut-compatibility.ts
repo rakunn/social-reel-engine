@@ -2,7 +2,13 @@ import type {LutDefinition, SourceEntry} from '../contracts/schemas';
 import {isCanonicalRec709ColorSpace} from './color-spaces';
 
 const normalizeIdentity = (value: string): string =>
-  value.normalize('NFKC').toLowerCase().replaceAll(/[^a-z0-9]/g, '');
+  value.normalize('NFKC').toLowerCase().replaceAll(/[^\p{L}\p{N}]/gu, '');
+
+const identitiesMatch = (left: string, right: string): boolean => {
+  const normalizedLeft = normalizeIdentity(left);
+  const normalizedRight = normalizeIdentity(right);
+  return normalizedLeft.length > 0 && normalizedLeft === normalizedRight;
+};
 
 export const lutCompatibilityFailures = (
   source: SourceEntry,
@@ -22,7 +28,7 @@ export const lutCompatibilityFailures = (
   }
   if (
     lut.cameraModel &&
-    normalizeIdentity(lut.cameraModel) !== normalizeIdentity(source.camera.model ?? '')
+    !identitiesMatch(lut.cameraModel, source.camera.model ?? '')
   ) {
     failures.push(
       `${source.relativePath}: LUT camera ${lut.cameraModel} does not match confirmed source model ${source.camera.model}`,
@@ -30,7 +36,7 @@ export const lutCompatibilityFailures = (
   }
   if (
     !lut.inputGamma ||
-    normalizeIdentity(lut.inputGamma) !== normalizeIdentity(source.camera.gamma ?? '')
+    !identitiesMatch(lut.inputGamma, source.camera.gamma ?? '')
   ) {
     failures.push(
       `${source.relativePath}: LUT input gamma ${lut.inputGamma ?? 'unset'} does not match confirmed source gamma ${source.camera.gamma}`,
@@ -38,7 +44,7 @@ export const lutCompatibilityFailures = (
   }
   if (
     !lut.inputGamut ||
-    normalizeIdentity(lut.inputGamut) !== normalizeIdentity(source.camera.gamut ?? '')
+    !identitiesMatch(lut.inputGamut, source.camera.gamut ?? '')
   ) {
     failures.push(
       `${source.relativePath}: LUT input gamut ${lut.inputGamut ?? 'unset'} does not match confirmed source gamut ${source.camera.gamut}`,

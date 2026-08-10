@@ -15,6 +15,7 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 
 let projectPath: string;
 let videoSourceId: string;
+let videoWithAudioSourceId: string;
 let musicSourceId: string;
 let validMusicSourceId: string;
 
@@ -73,12 +74,47 @@ beforeAll(async () => {
     'yuv420p',
     video,
   ]);
+  const videoWithAudio = path.join(root, 'video-with-audio.mp4');
+  await runFfmpeg([
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=size=160x90:rate=30:duration=1',
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=880:sample_rate=48000:duration=1',
+    '-shortest',
+    '-c:v',
+    'libx264',
+    '-preset',
+    'ultrafast',
+    '-pix_fmt',
+    'yuv420p',
+    '-c:a',
+    'aac',
+    videoWithAudio,
+  ]);
   const captions = path.join(root, 'malformed.json');
   await writeFile(captions, '[{}]');
   const srt = path.join(root, 'malformed.srt');
   await writeFile(
     srt,
     '1\n00:00:00,000 --> 00:00:00,800\nValid caption\n\n2\nBroken caption\n',
+  );
+  const visibleCaptions = path.join(root, 'visible.json');
+  await writeFile(
+    visibleCaptions,
+    JSON.stringify([
+      {text: 'Visible', startMs: 0, endMs: 800, timestampMs: null, confidence: null},
+    ]),
+  );
+  const futureCaptions = path.join(root, 'future.json');
+  await writeFile(
+    futureCaptions,
+    JSON.stringify([
+      {text: 'Too late', startMs: 2000, endMs: 2500, timestampMs: null, confidence: null},
+    ]),
   );
   const validMusic = path.join(root, 'music.wav');
   await runFfmpeg([
@@ -90,11 +126,16 @@ beforeAll(async () => {
     'pcm_s16le',
     validMusic,
   ]);
-  await ingestFiles(projectPath, [video], 'clips');
+  await ingestFiles(projectPath, [video, videoWithAudio], 'clips');
   await ingestFiles(projectPath, [video, validMusic], 'music');
-  await ingestFiles(projectPath, [captions, srt], 'captions');
+  await ingestFiles(projectPath, [captions, srt, visibleCaptions, futureCaptions], 'captions');
   const manifest = await analyzeSources(projectPath);
-  videoSourceId = manifest.sources.find((source) => source.mediaType === 'video')!.id;
+  videoSourceId = manifest.sources.find(
+    (source) => source.relativePath === 'input/clips/video-only.mp4',
+  )!.id;
+  videoWithAudioSourceId = manifest.sources.find(
+    (source) => source.relativePath === 'input/clips/video-with-audio.mp4',
+  )!.id;
   musicSourceId = manifest.sources.find(
     (source) => source.relativePath === 'input/music/video-only.mp4',
   )!.id;
@@ -102,6 +143,20 @@ beforeAll(async () => {
     (source) => source.relativePath === 'input/music/music.wav',
   )!.id;
 }, 30_000);
+
+const validateWithBriefOptions = async (
+  options: {music: boolean; captions: boolean; cameraAudio: boolean},
+  candidate: unknown,
+) => {
+  const briefPath = path.join(projectPath, 'brief.json');
+  const original = JSON.parse(await readFile(briefPath, 'utf8'));
+  await writeJson(briefPath, {...original, options});
+  try {
+    return await validateEdit(projectPath, candidate);
+  } finally {
+    await writeJson(briefPath, original);
+  }
+};
 
 describe('edit media validation', () => {
   it('rejects requested camera audio when the source has no audio stream', async () => {
@@ -166,6 +221,37 @@ describe('edit media validation', () => {
     }
   });
 
+  it('validates trims against the selected video stream instead of a longer container', async () => {
+    const manifestPath = path.join(projectPath, 'analysis/sources.json');
+    const original = JSON.parse(await readFile(manifestPath, 'utf8'));
+    const changed = {
+      ...original,
+      sources: original.sources.map((source: {id: string; ffprobe: {format: Record<string, unknown>; streams: Array<Record<string, unknown>>}}) =>
+        source.id === videoSourceId
+          ? {
+              ...source,
+              ffprobe: {
+                ...source.ffprobe,
+                format: {...source.ffprobe.format, duration: '2.0'},
+                streams: source.ffprobe.streams.map((stream) =>
+                  stream.codec_type === 'video' ? {...stream, duration: '0.5'} : stream,
+                ),
+              },
+            }
+          : source,
+      ),
+    };
+    await writeJson(manifestPath, changed);
+
+    try {
+      const result = await validateEdit(projectPath, edit({muted: true, captions: 'none'}));
+      expect(result.valid).toBe(false);
+      expect(result.failures).toContainEqual(expect.stringMatching(/out point.*source duration/i));
+    } finally {
+      await writeJson(manifestPath, original);
+    }
+  });
+
   it('rejects titles whose rounded start frame is outside the timeline', async () => {
     const result = await validateEdit(projectPath, {
       ...edit({muted: true, captions: 'none'}),
@@ -199,6 +285,54 @@ describe('edit media validation', () => {
     expect(result.valid).toBe(false);
     expect(result.failures).toEqual(
       expect.arrayContaining([expect.stringMatching(/caption.*invalid|invalid.*caption/i)]),
+    );
+  });
+
+  it('rejects a selected caption file when no caption overlaps the rendered timeline', async () => {
+    const result = await validateWithBriefOptions(
+      {music: true, captions: true, cameraAudio: true},
+      {
+        ...edit({muted: true, captions: 'none'}),
+        captions: {relativePath: 'input/captions/future.json', format: 'remotion-json'},
+      },
+    );
+    expect(result.valid).toBe(false);
+    expect(result.failures).toContainEqual(expect.stringMatching(/caption.*timeline/i));
+  });
+
+  it('rejects music when the project brief disables music', async () => {
+    const result = await validateWithBriefOptions(
+      {music: false, captions: true, cameraAudio: true},
+      {
+        ...edit({muted: true, captions: 'none'}),
+        music: {sourceId: validMusicSourceId, startSeconds: 0, gainDb: -8},
+      },
+    );
+    expect(result.failures).toContainEqual(expect.stringMatching(/music.*disabled.*brief/i));
+  });
+
+  it('rejects captions when the project brief disables captions', async () => {
+    const result = await validateWithBriefOptions(
+      {music: true, captions: false, cameraAudio: true},
+      {
+        ...edit({muted: true, captions: 'none'}),
+        captions: {relativePath: 'input/captions/visible.json', format: 'remotion-json'},
+      },
+    );
+    expect(result.failures).toContainEqual(expect.stringMatching(/captions.*disabled.*brief/i));
+  });
+
+  it('rejects camera audio when the project brief disables camera audio', async () => {
+    const base = edit({muted: false, captions: 'none'});
+    const result = await validateWithBriefOptions(
+      {music: true, captions: true, cameraAudio: false},
+      {
+        ...base,
+        clips: [{...base.clips[0], sourceId: videoWithAudioSourceId}],
+      },
+    );
+    expect(result.failures).toContainEqual(
+      expect.stringMatching(/camera audio.*disabled.*brief/i),
     );
   });
 

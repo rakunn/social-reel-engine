@@ -16,6 +16,7 @@ import {
 } from '../../src/core/timeline';
 import {snapToNearestBeat} from '../../src/core/beats';
 import {buildColorChain} from '../../src/core/color';
+import {lutCompatibilityFailures} from '../../src/core/lut-compatibility';
 import {
   approvalStatus,
   createColorHash,
@@ -402,6 +403,48 @@ describe('color and approvals', () => {
     transformSemantics: 'look' as const,
     defaultMix: 0.35,
   };
+
+  it('does not collapse distinct non-ASCII camera identities during LUT matching', () => {
+    const source = SourceManifestSchema.parse({
+      schemaVersion: '1.0.0',
+      generatedAt: '2026-08-10T00:00:00.000Z',
+      sources: [
+        {
+          id: 'unicode-camera',
+          relativePath: 'input/clips/unicode.mp4',
+          checksumSha256: 'e'.repeat(64),
+          sizeBytes: 1,
+          mediaType: 'video',
+          ffprobe: {format: {}, streams: []},
+          camera: {
+            confirmed: true,
+            profileId: 'shared-profile',
+            model: '撮影機',
+            gamma: 'ガンマ一',
+            gamut: '色域',
+          },
+        },
+      ],
+    }).sources[0];
+    const lut = LutDefinitionSchema.parse({
+      id: 'unicode-lut',
+      kind: 'technical',
+      file: 'input/luts/technical/unicode.cube',
+      checksumSha256: 'f'.repeat(64),
+      cameraModel: '撮影機',
+      profileId: 'shared-profile',
+      inputGamma: 'ガンマ二',
+      inputGamut: '色域',
+      inputColorSpace: 'ガンマ二/色域',
+      outputColorSpace: 'Rec.709 Gamma 2.4',
+      transformSemantics: 'normalization',
+      defaultMix: 1,
+    });
+
+    expect(lutCompatibilityFailures(source, lut)).toContainEqual(
+      expect.stringMatching(/input gamma/i),
+    );
+  });
 
   it('constructs the required order and never double-normalizes combined LUTs', () => {
     expect(
