@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "1.0.0",
+  "identity": {
+    "reelName": "filipiny-statek-five-shot",
+    "title": "Filipiny Statek — Five-Shot Cinematic",
+    "createdAt": "2026-08-10T08:05:15.788Z"
+  },
+  "target": {
+    "minSeconds": 12,
+    "idealSeconds": 12.5,
+    "maxSeconds": 13
+  },
+  "output": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30
+  },
+  "style": "cinematic-minimal",
+  "options": {
+    "music": false,
+    "captions": false,
+    "cameraAudio": false
+  },
+  "rightsConfirmed": false,
+  "notes": "Five-shot visual crescendo. Use every supplied DJI Mini 4 Pro D-Log M clip once; no music, source audio, titles, or captions."
+}
