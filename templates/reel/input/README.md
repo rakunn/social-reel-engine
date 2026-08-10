@@ -1,6 +1,6 @@
 # Reel inputs
 
-Copy original media into the matching folder. Inputs are treated as immutable and are excluded from Git.
+Copy original media into the matching folder. Inputs are treated as immutable. The entire runtime project created from this template is local-only and excluded from Git.
 
 - `clips/`: MP4 or MOV camera originals
 - `music/`: supplied licensed music

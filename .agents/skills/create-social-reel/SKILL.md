@@ -20,6 +20,7 @@ Create one isolated `projects/<reel-name>` job and drive it through the engine's
    - after presenting the current graded reference frames, before `approve-color`.
 8. If a timeline, crop, playback, transition, title, audio, caption, stabilization, grade, LUT, or blend changes, regenerate the affected review artifact and obtain the approval again.
 9. Do not mark `rightsConfirmed` true. Only the user may confirm rights for footage, music, captions, LUTs, fonts, brand assets, and other supplied material.
+10. Keep every runtime `projects/<reel-name>` job local-only. The entire `projects/**` tree is ignored except `projects/.gitkeep`; never stage or force-add a job's briefs, configuration, edit manifests, approvals, analysis, QC, media, or renders. Reusable engine defaults belong in `templates/reel/`.
 
 ## Load the focused guidance
 

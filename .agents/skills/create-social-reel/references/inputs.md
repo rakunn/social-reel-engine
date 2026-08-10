@@ -15,6 +15,8 @@ Collect or discover what is available without forcing the user to repeat facts a
 
 Do not block initial ingest merely because creative direction is incomplete. Do block color grading and final export when technical profile facts are incomplete.
 
+Every runtime `projects/<reel-name>` job is local-only and ignored by Git, including its metadata and reports. Never use `git add -f` to override that boundary. Put reusable defaults and scaffold changes in `templates/reel/`, not in a live job.
+
 ## Typed ingest commands
 
 ```text

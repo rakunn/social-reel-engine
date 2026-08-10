@@ -135,21 +135,19 @@ Run:
 
 ```bash
 npm run reel -- status filipiny-statek-five-shot
-git diff --check -- projects/filipiny-statek-five-shot
 ```
 
 Inspect `analysis/sources.json`, `config/sources.json`, and `config/luts.json`. Expected: five video sources; 3840×2160 HEVC Main 10; 60000/1001 fps; no audio stream; every camera record is confirmed; exactly one compatible technical LUT is declared; status requests proxy/edit work.
 
-- [ ] **Step 8: Commit the reproducible intake metadata**
+- [ ] **Step 8: Keep the intake state local**
 
 Run:
 
 ```bash
-git add projects/filipiny-statek-five-shot
-git commit -m "feat: initialize filipiny statek reel"
+npm run reel -- status filipiny-statek-five-shot
 ```
 
-Expected: trackable configuration and JSON/Markdown analysis are committed; copied MP4 and LUT bytes remain ignored.
+Expected: the project remains under the Git-ignored `projects/` tree. Do not force-add its configuration, JSON/Markdown analysis, copied MP4 files, or LUT bytes.
 
 ---
 
@@ -250,14 +248,15 @@ Watch the complete `previews/preview.mp4` and inspect frame samples at every cut
 
 If any timeline, crop, rate, transition, grade baseline, audio, or stabilization decision changes, repeat Steps 2–4 and discard the stale review artifact.
 
-- [ ] **Step 5: Commit the reviewed rough-cut metadata**
+- [ ] **Step 5: Keep the reviewed rough-cut state local**
 
 Run:
 
 ```bash
-git add projects/filipiny-statek-five-shot
-git commit -m "feat: add filipiny statek rough cut"
+npm run reel -- status filipiny-statek-five-shot
 ```
+
+Expected: the reviewed rough-cut state remains available locally and is not force-added to Git.
 
 - [ ] **Step 6: Stop at editorial approval**
 
@@ -372,13 +371,14 @@ Expected: both reports are readable, approvals and fingerprints are current, med
 
 Watch the entire `output/delivery.mp4`. Confirm pacing, crop intent, horizon safety, color match, transition restraint, silence, and compression quality. Do not claim completion if either report fails, the output is stale/unreadable, or a warning is unreviewed.
 
-- [ ] **Step 6: Commit final reproducible metadata and report delivery**
+- [ ] **Step 6: Keep final job metadata local and report delivery**
 
 Run:
 
 ```bash
-git add projects/filipiny-statek-five-shot
-git commit -m "feat: complete filipiny statek reel"
+npm run reel -- status filipiny-statek-five-shot
 ```
+
+Expected: final metadata and deliverables remain in the ignored local job; no `projects/filipiny-statek-five-shot` file is force-added to Git.
 
 Deliver absolute clickable paths to `output/master.mov`, `output/delivery.mp4`, `analysis/qc-master.md`, and `analysis/qc-delivery.md`, plus concise QC, warning, and stabilization outcomes.

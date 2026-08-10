@@ -109,7 +109,7 @@ projects/<reel-name>/
 └── output/
 ```
 
-Source media, licensed LUT/PDF assets, proxies, intermediates, caches, previews, outputs, and virtual environments are ignored by Git. Briefs, configuration metadata, edit manifests, approval records, artifact fingerprints, and QC reports remain trackable.
+Every runtime `projects/<reel-name>` job is local-only and ignored by Git, including media, metadata, edit manifests, approvals, analysis, previews, QC reports, and renders. Only `projects/.gitkeep` is tracked; reusable scaffold changes belong in `templates/reel/`.
 
 ## Output contracts
 
