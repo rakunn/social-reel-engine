@@ -249,6 +249,23 @@ describe('versioned public contracts', () => {
     ).toThrow(/output frame/i);
   });
 
+  it('rejects exposure corrections outside FFmpeg\'s supported range', () => {
+    for (const exposureStops of [-3.01, 3.01]) {
+      expect(() =>
+        EditManifestSchema.parse({
+          ...edit,
+          clips: [
+            {
+              ...edit.clips[0],
+              grade: {...edit.clips[0].grade, exposureStops},
+            },
+            ...edit.clips.slice(1),
+          ],
+        }),
+      ).toThrow(/exposure|3/i);
+    }
+  });
+
   it('rejects a transition configured after the final clip', () => {
     expect(() =>
       EditManifestSchema.parse({

@@ -2,6 +2,47 @@ import {describe, expect, it} from 'vitest';
 import {evaluateQc} from '../../src/media/qc-report';
 
 describe('QC evaluation', () => {
+  it('fails black and freeze checks when the detectors did not complete', () => {
+    const report = evaluateQc({
+      target: 'preview',
+      now: new Date('2026-08-10T00:00:00.000Z'),
+      readable: true,
+      renderFresh: true,
+      silenceAllowed: true,
+      observedSilent: true,
+      approvals: {editApproved: false, colorApproved: false},
+      expectedDurationSeconds: 1,
+      observed: {
+        durationSeconds: 1,
+        width: 540,
+        height: 960,
+        fps: 30,
+        videoCodec: 'h264',
+        pixelFormat: 'yuv420p',
+        audioCodec: 'aac',
+        audioSampleRate: 48000,
+        audioBitRate: 128000,
+        colorPrimaries: 'bt709',
+        colorTransfer: 'bt709',
+        colorSpace: 'bt709',
+        fastStart: true,
+      },
+      missingMedia: [],
+      blackFrames: [],
+      freezeSections: [],
+      blackDetectionSucceeded: false,
+      freezeDetectionSucceeded: false,
+      loudness: null,
+    });
+
+    expect(report.failures).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/black.*detector/i),
+        expect.stringMatching(/freeze.*detector/i),
+      ]),
+    );
+  });
+
   it('passes a readable approved master with exact expected properties', () => {
     const report = evaluateQc({
       target: 'master',
@@ -29,6 +70,8 @@ describe('QC evaluation', () => {
       missingMedia: [],
       blackFrames: [],
       freezeSections: [],
+      blackDetectionSucceeded: true,
+      freezeDetectionSucceeded: true,
       loudness: {integratedLufs: -14.2, truePeakDbtp: -1.6, loudnessRangeLu: 5},
     });
     expect(report.failures).toEqual([]);
@@ -61,6 +104,8 @@ describe('QC evaluation', () => {
       missingMedia: ['shot-2: source missing'],
       blackFrames: [{startSeconds: 0, endSeconds: 0.7, durationSeconds: 0.7}],
       freezeSections: [{startSeconds: 4, endSeconds: 7, durationSeconds: 3}],
+      blackDetectionSucceeded: true,
+      freezeDetectionSucceeded: true,
       loudness: null,
     });
     expect(report.failures).toEqual(
@@ -105,6 +150,8 @@ describe('QC evaluation', () => {
       missingMedia: [],
       blackFrames: [],
       freezeSections: [],
+      blackDetectionSucceeded: true,
+      freezeDetectionSucceeded: true,
       loudness: null,
     });
     expect(report.failures).toEqual([]);
@@ -139,6 +186,8 @@ describe('QC evaluation', () => {
       missingMedia: [],
       blackFrames: [],
       freezeSections: [],
+      blackDetectionSucceeded: true,
+      freezeDetectionSucceeded: true,
       loudness: null,
     });
     expect(report.failures).toEqual([]);

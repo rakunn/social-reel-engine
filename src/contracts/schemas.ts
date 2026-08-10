@@ -175,6 +175,22 @@ export const LutDefinitionSchema = z
     }
   });
 
+export const LutDefinitionsSchema = z
+  .array(LutDefinitionSchema)
+  .superRefine((luts, context) => {
+    const seen = new Set<string>();
+    for (const [index, lut] of luts.entries()) {
+      if (seen.has(lut.id)) {
+        context.addIssue({
+          code: 'custom',
+          path: [index, 'id'],
+          message: `Duplicate LUT ID: ${lut.id}`,
+        });
+      }
+      seen.add(lut.id);
+    }
+  });
+
 const CropPointSchema = z.object({
   x: z.number().min(0).max(1),
   y: z.number().min(0).max(1),
@@ -200,7 +216,7 @@ export const EditClipSchema = z
       fallbackToUnstabilized: z.boolean().default(true),
     }),
     grade: z.object({
-      exposureStops: z.number().min(-4).max(4),
+      exposureStops: z.number().min(-3).max(3),
       whiteBalanceKelvin: z.number().int().min(2000).max(12_000),
       tint: z.number().min(-1).max(1),
       technicalLutId: z.string().min(1).nullable().optional().default(null),

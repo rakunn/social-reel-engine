@@ -16,6 +16,7 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 let projectPath: string;
 let videoSourceId: string;
 let musicSourceId: string;
+let validMusicSourceId: string;
 
 const edit = (options: {
   muted: boolean;
@@ -79,12 +80,27 @@ beforeAll(async () => {
     srt,
     '1\n00:00:00,000 --> 00:00:00,800\nValid caption\n\n2\nBroken caption\n',
   );
+  const validMusic = path.join(root, 'music.wav');
+  await runFfmpeg([
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=440:sample_rate=48000:duration=1',
+    '-c:a',
+    'pcm_s16le',
+    validMusic,
+  ]);
   await ingestFiles(projectPath, [video], 'clips');
-  await ingestFiles(projectPath, [video], 'music');
+  await ingestFiles(projectPath, [video, validMusic], 'music');
   await ingestFiles(projectPath, [captions, srt], 'captions');
   const manifest = await analyzeSources(projectPath);
   videoSourceId = manifest.sources.find((source) => source.mediaType === 'video')!.id;
-  musicSourceId = manifest.sources.find((source) => source.mediaType === 'audio')!.id;
+  musicSourceId = manifest.sources.find(
+    (source) => source.relativePath === 'input/music/video-only.mp4',
+  )!.id;
+  validMusicSourceId = manifest.sources.find(
+    (source) => source.relativePath === 'input/music/music.wav',
+  )!.id;
 }, 30_000);
 
 describe('edit media validation', () => {
@@ -104,6 +120,17 @@ describe('edit media validation', () => {
     expect(result.valid).toBe(false);
     expect(result.failures).toEqual(
       expect.arrayContaining([expect.stringMatching(/music.*audio stream/i)]),
+    );
+  });
+
+  it('rejects a music offset at or beyond the audio duration', async () => {
+    const result = await validateEdit(projectPath, {
+      ...edit({muted: true, captions: 'none'}),
+      music: {sourceId: validMusicSourceId, startSeconds: 1, gainDb: -8},
+    });
+    expect(result.valid).toBe(false);
+    expect(result.failures).toEqual(
+      expect.arrayContaining([expect.stringMatching(/music.*offset|start.*duration/i)]),
     );
   });
 

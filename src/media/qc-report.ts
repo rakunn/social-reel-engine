@@ -42,6 +42,8 @@ export type QcEvaluationInput = {
   missingMedia: string[];
   blackFrames: DetectedSection[];
   freezeSections: DetectedSection[];
+  blackDetectionSucceeded: boolean;
+  freezeDetectionSucceeded: boolean;
   loudness: Loudness | null;
 };
 
@@ -173,7 +175,9 @@ export const evaluateQc = (input: QcEvaluationInput): QcReport => {
     );
   }
 
-  if (input.blackFrames.length) {
+  if (!input.blackDetectionSucceeded) {
+    add('black-frames', 'fail', 'Black-frame detector did not complete successfully', true, false);
+  } else if (input.blackFrames.length) {
     add(
       'black-frames',
       'warn',
@@ -184,7 +188,9 @@ export const evaluateQc = (input: QcEvaluationInput): QcReport => {
   } else {
     add('black-frames', 'pass', 'No black section longer than 0.5s detected', [], []);
   }
-  if (input.freezeSections.length) {
+  if (!input.freezeDetectionSucceeded) {
+    add('freeze-sections', 'fail', 'Freeze detector did not complete successfully', true, false);
+  } else if (input.freezeSections.length) {
     add(
       'freeze-sections',
       'warn',
@@ -302,6 +308,8 @@ export const runQc = async (
   let observed: Record<string, unknown> = {};
   let blackFrames: DetectedSection[] = [];
   let freezeSections: DetectedSection[] = [];
+  let blackDetectionSucceeded = false;
+  let freezeDetectionSucceeded = false;
   let loudness: Loudness | null = null;
   let observedSilent = false;
   let renderFresh = false;
@@ -320,12 +328,14 @@ export const runQc = async (
       ['-i', outputPath, '-vf', 'blackdetect=d=0.5:pix_th=0.10', '-an', '-f', 'null', '-'],
       {allowFailure: true},
     );
-    blackFrames = parseBlackFrames(black.stderr);
+    blackDetectionSucceeded = black.exitCode === 0;
+    blackFrames = blackDetectionSucceeded ? parseBlackFrames(black.stderr) : [];
     const freeze = await runFfmpeg(
       ['-i', outputPath, '-vf', 'freezedetect=n=-60dB:d=2', '-an', '-f', 'null', '-'],
       {allowFailure: true},
     );
-    freezeSections = parseFreezeSections(freeze.stderr);
+    freezeDetectionSucceeded = freeze.exitCode === 0;
+    freezeSections = freezeDetectionSucceeded ? parseFreezeSections(freeze.stderr) : [];
     if (observed.audioCodec) {
       const measured = await runFfmpeg(
         [
@@ -359,6 +369,8 @@ export const runQc = async (
     missingMedia,
     blackFrames,
     freezeSections,
+    blackDetectionSucceeded,
+    freezeDetectionSucceeded,
     loudness,
   });
   const jsonPath = path.join(projectPath, `analysis/qc-${target}.json`);

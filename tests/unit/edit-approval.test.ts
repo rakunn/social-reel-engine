@@ -26,6 +26,7 @@ import {validateEdit} from '../../src/edit/validate';
 import {sourceIdFor} from '../../src/media/analyze';
 import {
   expectedRenderFingerprint,
+  readRenderArtifactFreshness,
   recordRenderArtifact,
 } from '../../src/render/artifacts';
 import {getProjectStatus} from '../../src/project/workspace';
@@ -265,9 +266,69 @@ describe('edit validation', () => {
       expect.stringMatching(/frame synthesis/i),
     );
   });
+
+  it('uses the project brief duration target instead of a fixed 20–30 second range', async () => {
+    const {projectPath, edit} = await makeFixture();
+    const briefPath = path.join(projectPath, 'brief.json');
+    const brief = JSON.parse(
+      await import('node:fs/promises').then(({readFile}) => readFile(briefPath, 'utf8')),
+    );
+    await writeJson(briefPath, {
+      ...brief,
+      target: {minSeconds: 12, idealSeconds: 12.5, maxSeconds: 13},
+    });
+    const onTarget = {
+      ...edit,
+      clips: [{...edit.clips[0], outSeconds: 14.5}],
+    };
+    expect((await validateEdit(projectPath, onTarget)).warnings).toEqual([]);
+
+    const outsideTarget = {
+      ...edit,
+      clips: [{...edit.clips[0], outSeconds: 22}],
+    };
+    expect((await validateEdit(projectPath, outsideTarget)).warnings).toEqual([
+      expect.stringMatching(/12.*13/),
+    ]);
+  });
 });
 
 describe('hash-bound approvals', () => {
+  it('marks final artifacts stale when rights confirmation is withdrawn', async () => {
+    const {projectPath} = await makeFixture();
+    const outputDirectory = path.join(projectPath, 'output');
+    await mkdir(outputDirectory, {recursive: true});
+    const deliveryPath = path.join(outputDirectory, 'delivery.mp4');
+    await writeFile(deliveryPath, 'rights-bound-delivery');
+    await recordRenderArtifact(
+      projectPath,
+      'delivery',
+      deliveryPath,
+      await expectedRenderFingerprint(projectPath, 'delivery'),
+    );
+    expect((await readRenderArtifactFreshness(projectPath, 'delivery')).fresh).toBe(true);
+
+    const briefPath = path.join(projectPath, 'brief.json');
+    const brief = JSON.parse(
+      await import('node:fs/promises').then(({readFile}) => readFile(briefPath, 'utf8')),
+    );
+    await writeJson(briefPath, {...brief, rightsConfirmed: false});
+
+    expect((await readRenderArtifactFreshness(projectPath, 'delivery')).fresh).toBe(false);
+  });
+
+  it('returns awaiting-analysis instead of throwing for a stale source manifest', async () => {
+    const {projectPath} = await makeFixture();
+    await writeFile(path.join(projectPath, 'input/clips/clip.mp4'), 'changed-source-bytes');
+
+    await expect(getProjectStatus(projectPath)).resolves.toEqual(
+      expect.objectContaining({
+        stage: 'awaiting-analysis',
+        nextAction: expect.stringMatching(/analy/i),
+      }),
+    );
+  });
+
   it('does not report a same-size corrupted delivery as rendered', async () => {
     const {projectPath} = await makeFixture();
     await approveEdit(projectPath);

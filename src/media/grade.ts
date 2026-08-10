@@ -4,7 +4,7 @@ import {access, mkdir} from 'node:fs/promises';
 import path from 'node:path';
 import {
   EditManifestSchema,
-  LutDefinitionSchema,
+  LutDefinitionsSchema,
   type LutDefinition,
   type SourceEntry,
 } from '../contracts/schemas';
@@ -45,7 +45,7 @@ const readLutsSync = (projectPath: string): LutDefinition[] => {
   const config = JSON.parse(readFileSync(path.join(projectPath, 'config/luts.json'), 'utf8')) as {
     luts?: unknown[];
   };
-  return (config.luts ?? []).map((lut) => LutDefinitionSchema.parse(lut));
+  return LutDefinitionsSchema.parse(config.luts ?? []);
 };
 
 export const resolveClipColor = (
@@ -156,7 +156,7 @@ export const generateGradedStills = async (
     checksums[relativeOutput] = await hashFile(resolveInside(projectPath, relativeOutput));
   }
   const lutsConfig = await readJson<{luts?: unknown[]}>(path.join(projectPath, 'config/luts.json'));
-  const luts = (lutsConfig.luts ?? []).map((lut) => LutDefinitionSchema.parse(lut));
+  const luts = LutDefinitionsSchema.parse(lutsConfig.luts ?? []);
   const result = {
     schemaVersion: '1.0.0' as const,
     generatedAt: now.toISOString(),
@@ -206,7 +206,7 @@ export const gradeSelectedClips = async (
   );
   const manifest = await readValidatedSourceManifest(projectPath);
   const lutsConfig = await readJson<{luts?: unknown[]}>(path.join(projectPath, 'config/luts.json'));
-  const luts = (lutsConfig.luts ?? []).map((lut) => LutDefinitionSchema.parse(lut));
+  const luts = LutDefinitionsSchema.parse(lutsConfig.luts ?? []);
   const reportPath = path.join(projectPath, 'analysis/graded-clips.json');
   let previewStabilization: PreviewStabilizationReport | null = null;
   if (edit.clips.some((clip) => clip.stabilization.enabled)) {

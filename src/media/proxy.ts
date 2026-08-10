@@ -1,6 +1,6 @@
 import {access, mkdir} from 'node:fs/promises';
 import path from 'node:path';
-import {LutDefinitionSchema, type LutDefinition} from '../contracts/schemas';
+import {LutDefinitionsSchema, type LutDefinition} from '../contracts/schemas';
 import {artifactFingerprint, type ArtifactIndex} from '../project/artifacts';
 import {readJson, writeJson} from '../core/json';
 import {resolveInside} from '../core/paths';
@@ -47,7 +47,7 @@ const readArtifactIndex = async (projectPath: string): Promise<ArtifactIndex> =>
 
 const loadLuts = async (projectPath: string): Promise<LutDefinition[]> => {
   const config = await readJson<{luts?: unknown[]}>(path.join(projectPath, 'config/luts.json'));
-  return (config.luts ?? []).map((lut) => LutDefinitionSchema.parse(lut));
+  return LutDefinitionsSchema.parse(config.luts ?? []);
 };
 
 const durationOf = (source: {ffprobe: {format?: Record<string, unknown>}}): number => {
