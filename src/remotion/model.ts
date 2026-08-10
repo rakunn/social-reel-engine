@@ -1,4 +1,5 @@
 import type {Caption} from '@remotion/captions';
+import {interpolate} from 'remotion';
 import type {EditManifest, AnimatedCrop} from '../contracts/schemas';
 import {
   clipDurationSeconds,
@@ -21,6 +22,24 @@ export const secondsToMediaFrames = (seconds: number, fps: number): number =>
 
 export const fontFaceRule = (fontUrl: string): string =>
   `@font-face{font-family:ReelCustom;src:url(${JSON.stringify(fontUrl)});font-display:block;}`;
+
+export const titleOpacity = (frame: number, durationInFrames: number): number => {
+  const finalFrame = Math.max(0, durationInFrames - 1);
+  if (finalFrame === 0) return 0;
+  const fadeDuration = Math.min(10, finalFrame / 2);
+  const interpolationOptions = {
+    extrapolateLeft: 'clamp' as const,
+    extrapolateRight: 'clamp' as const,
+  };
+  const fadeIn = interpolate(frame, [0, fadeDuration], [0, 1], interpolationOptions);
+  const fadeOut = interpolate(
+    frame,
+    [finalFrame - fadeDuration, finalFrame],
+    [1, 0],
+    interpolationOptions,
+  );
+  return Math.min(fadeIn, fadeOut);
+};
 
 export type ShotTiming = {
   id: string;
