@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "1.0.0",
+  "generatedAt": "2026-08-10T08:28:31.681Z",
+  "items": [
+    {
+      "clipId": "shot-01",
+      "fingerprint": "06532a6b62c4aebcec320fa81e1421aee005b11cb0eab88a058e096ca411b56d",
+      "path": null,
+      "checksumSha256": null,
+      "detectionSourceChecksumSha256": null,
+      "transformPath": null,
+      "transformChecksumSha256": null,
+      "stabilization": "disabled",
+      "cached": true
+    },
+    {
+      "clipId": "shot-02",
+      "fingerprint": "88819ee511d25ddd461893f6e914915378db27c6a70084ec40d825dde1bcf3e7",
+      "path": null,
+      "checksumSha256": null,
+      "detectionSourceChecksumSha256": null,
+      "transformPath": null,
+      "transformChecksumSha256": null,
+      "stabilization": "disabled",
+      "cached": true
+    },
+    {
+      "clipId": "shot-03",
+      "fingerprint": "155f876f6aa4f4e384cc556d2b3c90d10446a7c3939df8163a27acc3c7f71ed5",
+      "path": null,
+      "checksumSha256": null,
+      "detectionSourceChecksumSha256": null,
+      "transformPath": null,
+      "transformChecksumSha256": null,
+      "stabilization": "disabled",
+      "cached": true
+    },
+    {
+      "clipId": "shot-04",
+      "fingerprint": "0c44f8ed31d5fd48854838c5ab8b630e501f11797e2d4b0efc593dbfc51eebe3",
+      "path": null,
+      "checksumSha256": null,
+      "detectionSourceChecksumSha256": null,
+      "transformPath": null,
+      "transformChecksumSha256": null,
+      "stabilization": "disabled",
+      "cached": true
+    },
+    {
+      "clipId": "shot-05",
+      "fingerprint": "98e72fe1e3ec42cea36d22254a12036abf163e34b64dbaac5a6a3e001a139f66",
+      "path": null,
+      "checksumSha256": null,
+      "detectionSourceChecksumSha256": null,
+      "transformPath": null,
+      "transformChecksumSha256": null,
+      "stabilization": "disabled",
+      "cached": true
+    }
+  ]
+}

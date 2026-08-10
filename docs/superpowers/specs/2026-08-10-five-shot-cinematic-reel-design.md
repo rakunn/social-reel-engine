@@ -17,7 +17,7 @@ Create a 12–13 second, 9:16 cinematic reel from the five supplied DJI clips. E
 
 The reel uses a five-shot visual crescendo. Each source contributes one approximately 2–3 second selection, with the total edit targeting 12–13 seconds. The final shot order is chosen after visual analysis to build progression through motion, scale, direction, and visual impact rather than preserving capture order.
 
-Selections prioritize a clean action, readable subject, safe horizon, and strong entrance or exit motion. The edit may use 0.5× playback selectively where the 59.94 fps source produces natural 29.97 fps slow motion; otherwise footage remains at natural speed. No synthetic frames are introduced.
+Selections prioritize a clean action, readable subject, safe horizon, and strong entrance or exit motion. The edit may use 0.50051× playback selectively, the minimum practical rate above the 59.94-to-30 fps frame-synthesis boundary; otherwise footage remains at natural speed. No synthetic frames are introduced.
 
 Cuts are predominantly direct and motion-matched. One restrained fade-style dissolve may be used only if it materially improves the midpoint or closing transition. The design excludes flashy effects and repeated footage.
 
