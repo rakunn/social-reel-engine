@@ -252,6 +252,47 @@ describe('edit media validation', () => {
     }
   });
 
+  it('rejects unmuted trims outside the audio stream timeline', async () => {
+    const manifestPath = path.join(projectPath, 'analysis/sources.json');
+    const original = JSON.parse(await readFile(manifestPath, 'utf8'));
+    const changed = {
+      ...original,
+      sources: original.sources.map((source: {id: string; ffprobe: {streams: Array<Record<string, unknown>>}}) =>
+        source.id === videoWithAudioSourceId
+          ? {
+              ...source,
+              ffprobe: {
+                ...source.ffprobe,
+                streams: source.ffprobe.streams.map((stream) =>
+                  stream.codec_type === 'audio'
+                    ? {...stream, start_time: '0.2', duration: '0.5'}
+                    : stream,
+                ),
+              },
+            }
+          : source,
+      ),
+    };
+    await writeJson(manifestPath, changed);
+
+    try {
+      const base = edit({muted: false, captions: 'none'});
+      const result = await validateWithBriefOptions(
+        {music: true, captions: true, cameraAudio: true},
+        {
+          ...base,
+          clips: [{...base.clips[0], sourceId: videoWithAudioSourceId}],
+        },
+      );
+      expect(result.valid).toBe(false);
+      expect(result.failures).toContainEqual(
+        expect.stringMatching(/shot-1.*camera audio.*selected range/i),
+      );
+    } finally {
+      await writeJson(manifestPath, original);
+    }
+  });
+
   it('rejects titles whose rounded start frame is outside the timeline', async () => {
     const result = await validateEdit(projectPath, {
       ...edit({muted: true, captions: 'none'}),

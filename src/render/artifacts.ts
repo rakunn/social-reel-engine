@@ -160,6 +160,15 @@ export const expectedRenderFingerprint = async (
           (file) => previewInputKinds.has(file.kind) || previewLutFiles.has(file.relativePath),
         )
       : ingest.files;
+  const stabilizationReviewContext =
+    target === 'preview'
+      ? {fresh: true, reason: null, reviewContextHash: null}
+      : await readPreviewStabilizationContext(projectPath);
+  if (!stabilizationReviewContext.fresh) {
+    throw new Error(
+      `Final render fingerprint requires a fresh preview stabilization context: ${stabilizationReviewContext.reason ?? 'unknown mismatch'}`,
+    );
+  }
   return hashValue({
     contractVersion: '1.0.0',
     pipelineBuild,
@@ -168,6 +177,8 @@ export const expectedRenderFingerprint = async (
     inputs,
     sourceConfirmations,
     sourceManifest: sourceManifestFingerprintProjection(sourceManifest),
+    stabilizationReviewContextHash:
+      target === 'preview' ? 'not-required' : stabilizationReviewContext.reviewContextHash,
     luts: target === 'preview' ? previewLuts : luts,
     settings: renderSettingsFingerprintProjection(target, settings),
     rightsConfirmed: target === 'preview' ? 'not-required' : rightsConfirmed,

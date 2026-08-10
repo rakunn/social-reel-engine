@@ -51,7 +51,14 @@ const loadLuts = async (projectPath: string): Promise<LutDefinition[]> => {
   return LutDefinitionsSchema.parse(config.luts ?? []);
 };
 
-const durationOf = (source: {ffprobe: {format?: Record<string, unknown>}}): number => {
+const durationOf = (source: {
+  ffprobe: {format?: Record<string, unknown>; streams?: Array<Record<string, unknown>>};
+}): number => {
+  const video = source.ffprobe.streams?.find((stream) => stream.codec_type === 'video');
+  const videoDuration = Number(video?.duration);
+  if (Number.isFinite(videoDuration) && videoDuration > 0) {
+    return videoDuration;
+  }
   const duration = Number(source.ffprobe.format?.duration);
   return Number.isFinite(duration) && duration > 0 ? duration : 1;
 };
