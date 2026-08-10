@@ -1,0 +1,187 @@
+{
+  "schemaVersion": "1.0.0",
+  "generatedAt": "2026-08-10T08:28:46.999Z",
+  "target": "preview",
+  "readable": true,
+  "approvals": {
+    "edit": false,
+    "color": false
+  },
+  "expected": {
+    "width": 540,
+    "height": 960,
+    "fps": 30,
+    "videoCodec": "h264",
+    "pixelFormat": "yuv420p",
+    "audioCodec": "aac",
+    "audioSampleRate": 48000,
+    "audioBitRate": 192000,
+    "fastStart": true,
+    "colorPrimaries": "bt709",
+    "colorTransfer": "bt709",
+    "colorSpace": "bt709",
+    "durationSeconds": 12.5
+  },
+  "observed": {
+    "durationSeconds": 12.544,
+    "formatName": "mov,mp4,m4a,3gp,3g2,mj2",
+    "width": 540,
+    "height": 960,
+    "fps": 30,
+    "videoCodec": "h264",
+    "videoProfile": "High",
+    "videoBitRate": 2544194,
+    "pixelFormat": "yuv420p",
+    "colorPrimaries": "bt709",
+    "colorTransfer": "bt709",
+    "colorSpace": "bt709",
+    "audioCodec": "aac",
+    "audioSampleRate": 48000,
+    "audioBitRate": 189375,
+    "audioChannels": 2,
+    "fastStart": true,
+    "blackFrames": [],
+    "freezeSections": [],
+    "loudness": null
+  },
+  "checks": [
+    {
+      "id": "readable",
+      "status": "pass",
+      "expected": true,
+      "observed": true,
+      "message": "Output is readable"
+    },
+    {
+      "id": "render-freshness",
+      "status": "pass",
+      "expected": true,
+      "observed": true,
+      "message": "Output is checksum-bound to the current manifests and render policy"
+    },
+    {
+      "id": "approvals",
+      "status": "pass",
+      "expected": "not-required",
+      "observed": {
+        "edit": false,
+        "color": false
+      },
+      "message": "Preview does not require final approvals"
+    },
+    {
+      "id": "missing-media",
+      "status": "pass",
+      "expected": [],
+      "observed": [],
+      "message": "All edit media is present and checksum-matched"
+    },
+    {
+      "id": "durationSeconds",
+      "status": "pass",
+      "expected": 12.5,
+      "observed": 12.544,
+      "message": "Duration matches the approved timeline"
+    },
+    {
+      "id": "width",
+      "status": "pass",
+      "expected": 540,
+      "observed": 540,
+      "message": "width matches"
+    },
+    {
+      "id": "height",
+      "status": "pass",
+      "expected": 960,
+      "observed": 960,
+      "message": "height matches"
+    },
+    {
+      "id": "fps",
+      "status": "pass",
+      "expected": 30,
+      "observed": 30,
+      "message": "fps matches"
+    },
+    {
+      "id": "videoCodec",
+      "status": "pass",
+      "expected": "h264",
+      "observed": "h264",
+      "message": "videoCodec matches"
+    },
+    {
+      "id": "pixelFormat",
+      "status": "pass",
+      "expected": "yuv420p",
+      "observed": "yuv420p",
+      "message": "pixelFormat matches"
+    },
+    {
+      "id": "audioCodec",
+      "status": "pass",
+      "expected": "aac",
+      "observed": "aac",
+      "message": "audioCodec matches"
+    },
+    {
+      "id": "audioSampleRate",
+      "status": "pass",
+      "expected": 48000,
+      "observed": 48000,
+      "message": "audioSampleRate matches"
+    },
+    {
+      "id": "audioBitRate",
+      "status": "pass",
+      "expected": 192000,
+      "observed": 189375,
+      "message": "audioBitRate is within tolerance"
+    },
+    {
+      "id": "fastStart",
+      "status": "pass",
+      "expected": true,
+      "observed": true,
+      "message": "fastStart matches"
+    },
+    {
+      "id": "colorPrimaries",
+      "status": "pass",
+      "expected": "bt709",
+      "observed": "bt709",
+      "message": "colorPrimaries matches"
+    },
+    {
+      "id": "colorTransfer",
+      "status": "pass",
+      "expected": "bt709",
+      "observed": "bt709",
+      "message": "colorTransfer matches"
+    },
+    {
+      "id": "colorSpace",
+      "status": "pass",
+      "expected": "bt709",
+      "observed": "bt709",
+      "message": "colorSpace matches"
+    },
+    {
+      "id": "black-frames",
+      "status": "pass",
+      "expected": [],
+      "observed": [],
+      "message": "No black section longer than 0.5s detected"
+    },
+    {
+      "id": "freeze-sections",
+      "status": "pass",
+      "expected": [],
+      "observed": [],
+      "message": "No frozen section longer than 2s detected"
+    }
+  ],
+  "warnings": [],
+  "failures": []
+}

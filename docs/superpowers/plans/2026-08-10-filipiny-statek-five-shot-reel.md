@@ -15,7 +15,7 @@
 - Use all five sources exactly once, selecting only the strongest 2–3 second moment from each.
 - Target 12–13 seconds, with 12.5 seconds as the ideal timeline duration; output is 1080×1920 at 30 fps and preview is 540×960 at 30 fps.
 - Order shots by motion, scale, direction, and visual impact rather than capture time.
-- Use selective 0.5× playback only when the 59.94 fps source yields natural 29.97 fps slow motion; otherwise use 1.0×.
+- Use selective 0.50051× playback only when it improves motion; this remains just above the 59.94-to-30 fps frame-synthesis boundary. Otherwise use 1.0×.
 - Use direct motion-matched cuts by default and no more than one restrained `fade` transition.
 - Use subject-aware animated 9:16 crops; do not blindly center-crop the 16:9 footage.
 - Stabilization is off unless proxy review reveals distracting motion. If enabled, use `fallbackToUnstabilized: false`.
@@ -187,7 +187,7 @@ Order the five selected moments so scale, motion direction, and visual impact pr
 
 For each shot:
 
-- choose 1.0× unless 0.5× clearly improves motion while preserving a natural 29.97 fps cadence;
+- choose 1.0× unless 0.50051× clearly improves motion while remaining above the 59.94-to-30 fps frame-synthesis boundary;
 - set crop start/end `x` and `y` from subject tracking and use the minimum safe scale between 1 and 4;
 - verify the subject and horizon remain safe through the entire animated crop;
 - leave stabilization disabled with strength `0` unless visible jitter remains;
@@ -246,7 +246,7 @@ Expected: a readable 540×960, 30 fps, H.264/yuv420p, BT.709, fast-start preview
 
 - [ ] **Step 4: Inspect the rendered preview itself**
 
-Watch the complete `previews/preview.mp4` and inspect frame samples at every cut. Verify all five sources appear once, pace builds, crop motion tracks the subject, horizons remain safe, 0.5× footage is smooth, the optional fade is restrained, and there are no unintended black/frozen sections, text, audible content, or compression defects. Review every warning in `analysis/qc-preview.md`.
+Watch the complete `previews/preview.mp4` and inspect frame samples at every cut. Verify all five sources appear once, pace builds, crop motion tracks the subject, horizons remain safe, 0.50051× footage is smooth, the optional fade is restrained, and there are no unintended black/frozen sections, text, audible content, or compression defects. Review every warning in `analysis/qc-preview.md`.
 
 If any timeline, crop, rate, transition, grade baseline, audio, or stabilization decision changes, repeat Steps 2–4 and discard the stale review artifact.
 
