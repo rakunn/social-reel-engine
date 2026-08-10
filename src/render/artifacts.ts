@@ -5,12 +5,18 @@ import {
   EditManifestSchema,
   LutDefinitionsSchema,
   ReelBriefSchema,
+  type EditManifest,
+  type LutDefinition,
   type RenderSettings,
+  type SourceEntry,
+  type SourceManifest,
 } from '../contracts/schemas';
 import {createEditHash} from '../core/approvals';
 import {hashFile, hashValue} from '../core/hash';
 import {readJson, writeJson} from '../core/json';
 import {resolveInside} from '../core/paths';
+import type {SourcesConfig} from '../media/analyze';
+import {lutCompatibilityFailures} from '../core/lut-compatibility';
 import {scanInputs} from '../project/ingest';
 import {
   readValidatedSourceManifest,
@@ -130,6 +136,60 @@ const renderSettingsFingerprintProjection = (
   };
 };
 
+const referencedRenderSources = (
+  edit: EditManifest,
+  sourceManifest: SourceManifest,
+): SourceEntry[] => {
+  const sourceIds = new Set(edit.clips.map((clip) => clip.sourceId));
+  if (edit.music) sourceIds.add(edit.music.sourceId);
+  if (edit.captions) {
+    const caption = sourceManifest.sources.find(
+      (source) => source.relativePath === edit.captions?.relativePath,
+    );
+    if (caption) sourceIds.add(caption.id);
+  }
+  const font = sourceManifest.sources
+    .filter(
+      (source) =>
+        source.mediaType === 'font' && /\.(woff2?|ttf|otf)$/i.test(source.relativePath),
+    )
+    .sort((left, right) => left.relativePath.localeCompare(right.relativePath))[0];
+  if (font) sourceIds.add(font.id);
+  return sourceManifest.sources.filter((source) => sourceIds.has(source.id));
+};
+
+const referencedRenderLuts = (
+  target: OutputTarget,
+  edit: EditManifest,
+  sources: readonly SourceEntry[],
+  luts: readonly LutDefinition[],
+): LutDefinition[] => {
+  if (target === 'preview') {
+    const videoSourceIds = new Set(edit.clips.map((clip) => clip.sourceId));
+    const videoSources = sources.filter(
+      (source) => source.mediaType === 'video' && videoSourceIds.has(source.id),
+    );
+    return luts.filter(
+      (lut) =>
+        lut.kind !== 'creative' &&
+        videoSources.some(
+          (source) =>
+            source.camera.confirmed && lutCompatibilityFailures(source, lut).length === 0,
+        ),
+    );
+  }
+  const lutIds = new Set(
+    edit.clips.flatMap((clip) =>
+      [
+        clip.grade.technicalLutId,
+        clip.grade.creativeLutId,
+        clip.grade.combinedLutId,
+      ].filter((id): id is string => Boolean(id)),
+    ),
+  );
+  return luts.filter((lut) => lutIds.has(lut.id));
+};
+
 export const expectedRenderFingerprint = async (
   projectPath: string,
   target: OutputTarget,
@@ -140,7 +200,7 @@ export const expectedRenderFingerprint = async (
   const ingest = await scanInputs(projectPath);
   const [sourceConfirmations, sourceManifest, lutsConfig, settings, pipelineBuild, brief] =
     await Promise.all([
-      readJson(path.join(projectPath, 'config/sources.json')),
+      readJson<SourcesConfig>(path.join(projectPath, 'config/sources.json')),
       readValidatedSourceManifest(projectPath),
       readJson<{schemaVersion: '1.0.0'; luts: unknown[]}>(
         path.join(projectPath, 'config/luts.json'),
@@ -151,15 +211,29 @@ export const expectedRenderFingerprint = async (
     ]);
   const luts = LutDefinitionsSchema.parse(lutsConfig.luts);
   const rightsConfirmed = ReelBriefSchema.parse(brief).rightsConfirmed;
-  const previewLuts = luts.filter((lut) => lut.kind !== 'creative');
-  const previewLutFiles = new Set(previewLuts.map((lut) => lut.file));
-  const previewInputKinds = new Set(['clips', 'music', 'captions', 'fonts', 'brand']);
-  const inputs =
-    target === 'preview'
-      ? ingest.files.filter(
-          (file) => previewInputKinds.has(file.kind) || previewLutFiles.has(file.relativePath),
-        )
-      : ingest.files;
+  const renderSources = referencedRenderSources(edit, sourceManifest);
+  const renderLuts = referencedRenderLuts(target, edit, renderSources, luts);
+  const renderInputPaths = new Set([
+    ...renderSources.map((source) => source.relativePath),
+    ...renderLuts.map((lut) => lut.file),
+  ]);
+  const inputs = ingest.files.filter((file) => renderInputPaths.has(file.relativePath));
+  const referencedVideoPaths = new Set(
+    renderSources
+      .filter((source) => source.mediaType === 'video')
+      .map((source) => source.relativePath),
+  );
+  const scopedSourceConfirmations = {
+    schemaVersion: sourceConfirmations.schemaVersion,
+    sources: Object.fromEntries(
+      [...referencedVideoPaths]
+        .sort((left, right) => left.localeCompare(right))
+        .map((relativePath) => [
+          relativePath,
+          sourceConfirmations.sources[relativePath] ?? {},
+        ]),
+    ),
+  };
   const stabilizationReviewContext =
     target === 'preview'
       ? {fresh: true, reason: null, reviewContextHash: null}
@@ -175,11 +249,14 @@ export const expectedRenderFingerprint = async (
     target,
     edit: target === 'preview' ? {editorialHash: createEditHash(edit)} : edit,
     inputs,
-    sourceConfirmations,
-    sourceManifest: sourceManifestFingerprintProjection(sourceManifest),
+    sourceConfirmations: scopedSourceConfirmations,
+    sourceManifest: sourceManifestFingerprintProjection({
+      ...sourceManifest,
+      sources: renderSources,
+    }),
     stabilizationReviewContextHash:
       target === 'preview' ? 'not-required' : stabilizationReviewContext.reviewContextHash,
-    luts: target === 'preview' ? previewLuts : luts,
+    luts: renderLuts,
     settings: renderSettingsFingerprintProjection(target, settings),
     rightsConfirmed: target === 'preview' ? 'not-required' : rightsConfirmed,
     outputPolicy: targetExpectations(target, settings),

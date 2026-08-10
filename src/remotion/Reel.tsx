@@ -10,7 +10,6 @@ import {
   AbsoluteFill,
   OffthreadVideo,
   Sequence,
-  interpolate,
   staticFile,
   useCurrentFrame,
   useVideoConfig,
@@ -22,6 +21,7 @@ import {
   cropTransform,
   fontFaceRule,
   secondsToMediaFrames,
+  titleOpacity,
   type ReelRenderProps,
 } from './model';
 
@@ -88,12 +88,7 @@ const TitleCard: React.FC<{
   durationInFrames: number;
 }> = ({title, durationInFrames}) => {
   const frame = useCurrentFrame();
-  const opacity = interpolate(
-    frame,
-    [0, Math.min(10, durationInFrames / 4), Math.max(10, durationInFrames - 10), durationInFrames],
-    [0, 1, 1, 0],
-    {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'},
-  );
+  const opacity = titleOpacity(frame, durationInFrames);
   const align =
     title.position === 'top'
       ? {justifyContent: 'flex-start', paddingTop: 180}

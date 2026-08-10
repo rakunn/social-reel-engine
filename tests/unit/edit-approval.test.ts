@@ -316,6 +316,37 @@ describe('edit validation', () => {
 });
 
 describe('hash-bound approvals', () => {
+  it('keeps render fingerprints stable when unreferenced footage changes', async () => {
+    const {projectPath} = await makeFixture();
+    const before = {
+      preview: await expectedRenderFingerprint(projectPath, 'preview'),
+      master: await expectedRenderFingerprint(projectPath, 'master'),
+      delivery: await expectedRenderFingerprint(projectPath, 'delivery'),
+    };
+    const alternatePath = path.join(projectPath, 'input/clips/alternate.mp4');
+    const alternateBytes = 'changed-unreferenced-media';
+    await writeFile(alternatePath, alternateBytes);
+    const alternateChecksum = await hashFile(alternatePath);
+    const manifestPath = path.join(projectPath, 'analysis/sources.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+    const alternate = manifest.sources.find(
+      (source: {relativePath: string}) =>
+        source.relativePath === 'input/clips/alternate.mp4',
+    );
+    Object.assign(alternate, {
+      id: sourceIdFor('video', 'input/clips/alternate.mp4', alternateChecksum),
+      checksumSha256: alternateChecksum,
+      sizeBytes: Buffer.byteLength(alternateBytes),
+    });
+    await writeJson(manifestPath, manifest);
+
+    expect({
+      preview: await expectedRenderFingerprint(projectPath, 'preview'),
+      master: await expectedRenderFingerprint(projectPath, 'master'),
+      delivery: await expectedRenderFingerprint(projectPath, 'delivery'),
+    }).toEqual(before);
+  });
+
   it('keeps preview and master fingerprints stable for delivery-only settings', async () => {
     const {projectPath} = await makeFixture();
     const before = {

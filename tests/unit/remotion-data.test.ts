@@ -118,4 +118,18 @@ describe('data-driven Remotion model', () => {
       `@font-face{font-family:ReelCustom;src:url("/fonts/Director's Cut.ttf");font-display:block;}`,
     );
   });
+
+  it('fades a title to zero on its final rendered frame', () => {
+    const titleOpacity = (
+      remotionModel as typeof remotionModel & {
+        titleOpacity?: (frame: number, durationInFrames: number) => number;
+      }
+    ).titleOpacity;
+
+    expect(titleOpacity).toBeTypeOf('function');
+    expect(titleOpacity?.(0, 11)).toBe(0);
+    expect(titleOpacity?.(5, 11)).toBeGreaterThan(0);
+    expect(titleOpacity?.(10, 11)).toBe(0);
+    expect(titleOpacity?.(0, 1)).toBe(0);
+  });
 });

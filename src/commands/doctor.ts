@@ -39,6 +39,14 @@ const REQUIRED_FFMPEG_FILTERS = [
   'zscale',
 ] as const;
 
+const REQUIRED_FFMPEG_ENCODERS = [
+  'aac',
+  'libx264',
+  'pcm_s16le',
+  'png',
+  'prores_ks',
+] as const;
+
 const hasRequiredFfmpegFilters = (output: string): boolean => {
   const available = new Set(output.split(/\s+/));
   return REQUIRED_FFMPEG_FILTERS.every((name) => available.has(name));
@@ -166,8 +174,11 @@ export const runDoctor = async (engineRoot: string): Promise<DoctorReport> => {
       'ffmpeg-encoders',
       FFMPEG,
       ['-hide_banner', '-encoders'],
-      (output) => ['libx264', 'prores_ks', 'aac'].every((name) => output.includes(name)),
-      'FFmpeg has H.264, ProRes, and AAC encoders',
+      (output) => {
+        const available = new Set(output.split(/\s+/));
+        return REQUIRED_FFMPEG_ENCODERS.every((name) => available.has(name));
+      },
+      `FFmpeg has all ${REQUIRED_FFMPEG_ENCODERS.length} pipeline encoders`,
     ),
   );
   checks.push(

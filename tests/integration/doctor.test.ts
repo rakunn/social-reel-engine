@@ -60,4 +60,39 @@ describe('doctor', () => {
       expect.objectContaining({id: 'ffmpeg-filters', status: 'fail'}),
     );
   }, 30_000);
+
+  it('fails preflight when FFmpeg omits an encoder directly invoked by the pipeline', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'reel-doctor-encoders-'));
+    const fakeFfmpeg = path.join(root, 'ffmpeg');
+    await writeFile(
+      fakeFfmpeg,
+      '#!/bin/sh\n' +
+        'case "$*" in\n' +
+        '  *-filters*) printf "%s\\n" "blackdetect blend colorbalance colortemperature drawbox drawtext exposure format fps freezedetect loudnorm lut3d scale setparams split tile vidstabdetect vidstabtransform zscale" ;;\n' +
+        '  *-encoders*) printf "%s\\n" "libx264" "prores_ks" "aac" ;;\n' +
+        '  *) printf "%s\\n" "ffmpeg version synthetic" "ffprobe version synthetic" ;;\n' +
+        'esac\n',
+    );
+    await chmod(fakeFfmpeg, 0o755);
+    const code =
+      `const {runDoctor} = await import('./src/commands/doctor.ts');` +
+      `const report = await runDoctor(${JSON.stringify(repositoryRoot)});` +
+      `process.stdout.write(JSON.stringify(report));`;
+    const {stdout} = await execFileAsync(
+      process.execPath,
+      ['--import', 'tsx', '--input-type=module', '--eval', code],
+      {
+        cwd: repositoryRoot,
+        env: {
+          ...process.env,
+          REEL_FFMPEG_PATH: fakeFfmpeg,
+          REEL_FFPROBE_PATH: fakeFfmpeg,
+        },
+      },
+    );
+    const report = JSON.parse(stdout);
+    expect(report.checks).toContainEqual(
+      expect.objectContaining({id: 'ffmpeg-encoders', status: 'fail'}),
+    );
+  }, 30_000);
 });
