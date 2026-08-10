@@ -1,4 +1,4 @@
-import {access} from 'node:fs/promises';
+import {access, readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {
   EditManifestSchema,
@@ -13,6 +13,7 @@ import {
   validateTransitionDurations,
 } from '../core/timeline';
 import {readValidatedSourceManifest} from '../media/source-integrity';
+import {parseCaptionContent} from '../remotion/captions';
 
 const parseFps = (value: unknown): number | null => {
   if (typeof value === 'number') {
@@ -73,6 +74,10 @@ export const validateEdit = async (
         failures.push(`${clip.id}: selected out point exceeds source duration`);
       }
       const video = source.ffprobe.streams.find((stream) => stream.codec_type === 'video');
+      const audio = source.ffprobe.streams.find((stream) => stream.codec_type === 'audio');
+      if (!clip.audio.muted && !audio) {
+        failures.push(`${clip.id}: camera audio is enabled but the source has no audio stream`);
+      }
       const sourceFps = parseFps(video?.avg_frame_rate ?? video?.r_frame_rate);
       if (!sourceFps) {
         failures.push(`${clip.id}: source frame rate is unavailable`);
@@ -110,14 +115,25 @@ export const validateEdit = async (
     );
     if (!caption) {
       failures.push(`Caption source is missing from the manifest (${edit.captions.relativePath})`);
-    } else try {
+    } else {
       const captionPath = path.join(projectPath, caption.relativePath);
-      await access(captionPath);
-      if ((await hashFile(captionPath)) !== caption.checksumSha256) {
-        failures.push('Caption source checksum changed after ingest');
+      let captionExists = true;
+      try {
+        await access(captionPath);
+      } catch {
+        captionExists = false;
+        failures.push(`Caption file is missing (${edit.captions.relativePath})`);
       }
-    } catch {
-      failures.push(`Caption file is missing (${edit.captions.relativePath})`);
+      if (captionExists) {
+        if ((await hashFile(captionPath)) !== caption.checksumSha256) {
+          failures.push('Caption source checksum changed after ingest');
+        }
+        try {
+          parseCaptionContent(await readFile(captionPath, 'utf8'), edit.captions.format);
+        } catch (error) {
+          failures.push(`Caption file is invalid: ${(error as Error).message}`);
+        }
+      }
     }
   }
 

@@ -23,6 +23,7 @@ import {
   readApprovalStatus,
 } from '../../src/edit/approve';
 import {validateEdit} from '../../src/edit/validate';
+import {sourceIdFor} from '../../src/media/analyze';
 import {
   expectedRenderFingerprint,
   recordRenderArtifact,
@@ -61,7 +62,7 @@ const makeFixture = async () => {
   const alternateClipChecksum = await hashFile(alternateClipPath);
   const technicalLutChecksum = await hashFile(lutPath);
   const creativeLutChecksum = await hashFile(creativeLutPath);
-  const sourceId = `video-${clipChecksum.slice(0, 16)}`;
+  const sourceId = sourceIdFor('video', 'input/clips/clip.mp4', clipChecksum);
   const camera = {
     manufacturer: 'Synthetic',
     model: 'Camera',
@@ -87,7 +88,7 @@ const makeFixture = async () => {
         camera,
       },
       {
-        id: `video-${alternateClipChecksum.slice(0, 16)}`,
+        id: sourceIdFor('video', 'input/clips/alternate.mp4', alternateClipChecksum),
         relativePath: 'input/clips/alternate.mp4',
         checksumSha256: alternateClipChecksum,
         sizeBytes: Buffer.byteLength('alternate-media-marker'),
@@ -99,7 +100,7 @@ const makeFixture = async () => {
         camera,
       },
       {
-        id: `lut-${technicalLutChecksum.slice(0, 16)}`,
+        id: sourceIdFor('lut', 'input/luts/technical/identity.cube', technicalLutChecksum),
         relativePath: 'input/luts/technical/identity.cube',
         checksumSha256: technicalLutChecksum,
         sizeBytes: Buffer.byteLength('synthetic-lut-marker'),
@@ -108,7 +109,7 @@ const makeFixture = async () => {
         camera: {confirmed: false, profileId: null},
       },
       {
-        id: `lut-${creativeLutChecksum.slice(0, 16)}`,
+        id: sourceIdFor('lut', 'input/luts/creative/look.cube', creativeLutChecksum),
         relativePath: 'input/luts/creative/look.cube',
         checksumSha256: creativeLutChecksum,
         sizeBytes: Buffer.byteLength('synthetic-creative-lut-marker'),

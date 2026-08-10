@@ -210,6 +210,60 @@ describe('versioned public contracts', () => {
       }).readable,
     ).toBe(true);
   });
+
+  it('rejects a combined LUT stacked with a creative LUT', () => {
+    expect(() =>
+      EditManifestSchema.parse({
+        ...edit,
+        clips: [
+          {
+            ...edit.clips[0],
+            grade: {
+              ...edit.clips[0].grade,
+              technicalLutId: null,
+              combinedLutId: 'combined-look',
+              creativeLutId: 'second-look',
+              creativeMix: 0.4,
+            },
+          },
+          ...edit.clips.slice(1),
+        ],
+      }),
+    ).toThrow(/combined.*creative|creative.*combined/i);
+  });
+
+  it('rejects clip selections that round to zero output frames', () => {
+    expect(() =>
+      EditManifestSchema.parse({
+        ...edit,
+        clips: [
+          {
+            ...edit.clips[0],
+            inSeconds: 1,
+            outSeconds: 1.01,
+            playbackRate: 2,
+          },
+          ...edit.clips.slice(1),
+        ],
+      }),
+    ).toThrow(/output frame/i);
+  });
+
+  it('rejects titles too short for monotonic fade ranges at 30 fps', () => {
+    expect(() =>
+      EditManifestSchema.parse({
+        ...edit,
+        titles: [
+          {
+            text: 'Flash',
+            startSeconds: 0,
+            durationSeconds: 1 / 3,
+            position: 'center',
+          },
+        ],
+      }),
+    ).toThrow(/title.*duration|11 output frames/i);
+  });
 });
 
 describe('path safety', () => {
@@ -320,8 +374,18 @@ describe('color and approvals', () => {
 
   it('binds approvals to canonical edit and color hashes', () => {
     const parsedEdit = EditManifestSchema.parse(edit);
-    const preview = {fingerprint: 'preview-fingerprint', checksumSha256: 'e'.repeat(64)};
+    const preview = {
+      fingerprint: 'preview-fingerprint',
+      checksumSha256: 'e'.repeat(64),
+      reviewContextHash: 'd'.repeat(64),
+    };
     const editHash = createEditReviewHash(createEditHash(parsedEdit), preview);
+    expect(
+      createEditReviewHash(createEditHash(parsedEdit), {
+        ...preview,
+        reviewContextHash: 'c'.repeat(64),
+      }),
+    ).not.toBe(editHash);
     const reviewedStills = parsedEdit.clips.map((clip) => ({
       clipId: clip.id,
       file: `previews/graded-stills/${clip.id}.png`,

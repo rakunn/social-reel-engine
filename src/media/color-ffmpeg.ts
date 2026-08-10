@@ -1,9 +1,7 @@
 import path from 'node:path';
 import type {ColorOperation} from '../core/color';
 import {resolveInside} from '../core/paths';
-
-const escapeFilterPath = (filePath: string): string =>
-  filePath.replaceAll('\\', '\\\\').replaceAll(':', '\\:').replaceAll("'", "\\'");
+import {escapeFfmpegFilterValue} from './filter-escape';
 
 const label = (value: string): string => `[${value}]`;
 
@@ -24,20 +22,20 @@ export const buildFfmpegColorGraph = (
 
   const exposure = Number(pre.exposureStops.toFixed(4));
   const tint = Number((-pre.tint).toFixed(4));
-  const normalizerPath = escapeFilterPath(resolveInside(projectPath, normalizer.lut.file));
+  const normalizerPath = escapeFfmpegFilterValue(resolveInside(projectPath, normalizer.lut.file));
   const segments = [
     `${label(inputLabel)}format=gbrp16le,exposure=exposure=${exposure}:black=0,` +
       `colortemperature=temperature=${pre.whiteBalanceKelvin}:pl=1,` +
       `colorbalance=gm=${tint}[pre_color]`,
-    `[pre_color]lut3d=file='${normalizerPath}'[normalized]`,
+    `[pre_color]lut3d=file=${normalizerPath}[normalized]`,
   ];
 
   let outputInput = 'normalized';
   if (creative) {
-    const creativePath = escapeFilterPath(resolveInside(projectPath, creative.lut.file));
+    const creativePath = escapeFfmpegFilterValue(resolveInside(projectPath, creative.lut.file));
     const mix = Number(creative.mix.toFixed(4));
     segments.push('[normalized]split=2[creative_base][creative_input]');
-    segments.push(`[creative_input]lut3d=file='${creativePath}'[creative_look]`);
+    segments.push(`[creative_input]lut3d=file=${creativePath}[creative_look]`);
     segments.push(
       `[creative_base][creative_look]blend=all_expr='A*(1-${mix})+B*${mix}'[creative_blend]`,
     );

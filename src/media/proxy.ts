@@ -9,13 +9,16 @@ import {runFfmpeg} from './ffmpeg';
 import {hashFile} from '../core/hash';
 import {lutCompatibilityFailures} from '../core/lut-compatibility';
 import {pipelineBuildFingerprint} from '../render/artifacts';
+import {escapeFfmpegFilterValue} from './filter-escape';
 
-type ProxyItem = {
+export type ProxyItem = {
   sourceId: string;
   proxy: string;
   representativeFrame: string;
   contactSheet: string;
   normalization: 'technical' | 'combined' | 'unconfirmed-watermarked';
+  normalizerFile: string | null;
+  maximumDimension: number;
   cached: boolean;
 };
 
@@ -50,6 +53,41 @@ const loadLuts = async (projectPath: string): Promise<LutDefinition[]> => {
 const durationOf = (source: {ffprobe: {format?: Record<string, unknown>}}): number => {
   const duration = Number(source.ffprobe.format?.duration);
   return Number.isFinite(duration) && duration > 0 ? duration : 1;
+};
+
+const cachedFilesAreValid = async (
+  projectPath: string,
+  record: ArtifactIndex['artifacts'][string] | undefined,
+  expectedFiles: string[],
+): Promise<boolean> => {
+  if (!record?.checksums || record.files.length !== expectedFiles.length) {
+    return false;
+  }
+  for (const file of expectedFiles) {
+    const filePath = resolveInside(projectPath, file);
+    if (
+      !record.files.includes(file) ||
+      !(await fileExists(filePath)) ||
+      (await hashFile(filePath)) !== record.checksums[file]
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
+
+export const buildProxyVideoFilter = (
+  projectPath: string,
+  normalizerFile: string | null,
+  maximumDimension: number,
+): string => {
+  const baseScale =
+    `scale='if(gt(iw,ih),${maximumDimension},-2)':` +
+    `'if(gt(iw,ih),-2,${maximumDimension})'`;
+  return normalizerFile
+    ? `lut3d=file=${escapeFfmpegFilterValue(resolveInside(projectPath, normalizerFile))},${baseScale}`
+    : `${baseScale},drawbox=x=0:y=ih-100:w=iw:h=100:color=black@0.72:t=fill,` +
+        "drawtext=text='UNNORMALIZED LOG PREVIEW - PROFILE NOT CONFIRMED':fontcolor=white:fontsize=h/28:x=(w-text_w)/2:y=h-66";
 };
 
 export const generateProxies = async (
@@ -118,19 +156,15 @@ export const generateProxies = async (
     const relativeFiles = [proxy, representativeFrame, contactSheet];
     const cached =
       artifacts.artifacts[key]?.fingerprint === fingerprint &&
-      (await Promise.all(relativeFiles.map((file) => fileExists(path.join(projectPath, file))))).every(
-        Boolean,
-      );
+      (await cachedFilesAreValid(projectPath, artifacts.artifacts[key], relativeFiles));
     if (!cached) {
       const inputPath = resolveInside(projectPath, source.relativePath);
       const proxyPath = resolveInside(projectPath, proxy);
-      const baseScale =
-        `scale='if(gt(iw,ih),${maximumDimension},-2)':` +
-        `'if(gt(iw,ih),-2,${maximumDimension})'`;
-      const videoFilter = normalizer
-        ? `lut3d=file='${resolveInside(projectPath, normalizer.file).replaceAll(':', '\\:')}',${baseScale}`
-        : `${baseScale},drawbox=x=0:y=ih-100:w=iw:h=100:color=black@0.72:t=fill,` +
-          "drawtext=text='UNNORMALIZED LOG PREVIEW - PROFILE NOT CONFIRMED':fontcolor=white:fontsize=h/28:x=(w-text_w)/2:y=h-66";
+      const videoFilter = buildProxyVideoFilter(
+        projectPath,
+        normalizer?.file ?? null,
+        maximumDimension,
+      );
       await runFfmpeg([
         '-i',
         inputPath,
@@ -180,9 +214,26 @@ export const generateProxies = async (
         fingerprint,
         generatedAt: now.toISOString(),
         files: relativeFiles,
+        checksums: Object.fromEntries(
+          await Promise.all(
+            relativeFiles.map(async (file) => [
+              file,
+              await hashFile(resolveInside(projectPath, file)),
+            ]),
+          ),
+        ),
       };
     }
-    items.push({sourceId: source.id, proxy, representativeFrame, contactSheet, normalization, cached});
+    items.push({
+      sourceId: source.id,
+      proxy,
+      representativeFrame,
+      contactSheet,
+      normalization,
+      normalizerFile: normalizer?.file ?? null,
+      maximumDimension,
+      cached,
+    });
   }
 
   await writeJson(path.join(projectPath, 'analysis/artifacts.json'), artifacts);

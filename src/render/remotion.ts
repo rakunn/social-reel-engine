@@ -3,6 +3,7 @@ import {renderMedia, selectComposition} from '@remotion/renderer';
 import {mkdir} from 'node:fs/promises';
 import path from 'node:path';
 import {assertFinalReadiness} from '../edit/approve';
+import {validateEdit} from '../edit/validate';
 import {runFfmpeg} from '../media/ffmpeg';
 import {isSilentLoudness, parseLoudnormMeasurement} from '../media/qc';
 import {deliveryFfmpegArgs, renderOptionsFor} from './policy';
@@ -31,6 +32,10 @@ const renderTarget = async (
   engineRoot: string,
   target: 'preview' | 'master',
 ): Promise<string> => {
+  const validation = await validateEdit(projectPath);
+  if (!validation.valid) {
+    throw new Error(`Edit is not valid:\n- ${validation.failures.join('\n- ')}`);
+  }
   if (target === 'master') {
     await assertFinalReadiness(projectPath);
   }

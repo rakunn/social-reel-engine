@@ -224,6 +224,14 @@ export const EditClipSchema = z
         path: ['outSeconds'],
         message: 'outSeconds must be greater than inSeconds',
       });
+    } else if (
+      Math.round(((clip.outSeconds - clip.inSeconds) / clip.playbackRate) * 30) < 1
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['outSeconds'],
+        message: 'Clip selection must produce at least one output frame at 30 fps',
+      });
     }
     if (clip.transitionAfter.type === 'none' && clip.transitionAfter.durationSeconds !== 0) {
       context.addIssue({
@@ -240,6 +248,13 @@ export const EditClipSchema = z
         message: 'A combined LUT replaces a technical LUT and must not be stacked',
       });
     }
+    if (clip.grade.combinedLutId && clip.grade.creativeLutId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['grade'],
+        message: 'A combined LUT already includes a look and cannot be stacked with a creative LUT',
+      });
+    }
     if (!clip.grade.creativeLutId && clip.grade.creativeMix !== 0) {
       context.addIssue({
         code: 'custom',
@@ -252,7 +267,12 @@ export const EditClipSchema = z
 const TitleSchema = z.object({
   text: z.string().min(1).max(300),
   startSeconds: z.number().nonnegative(),
-  durationSeconds: z.number().positive(),
+  durationSeconds: z
+    .number()
+    .positive()
+    .refine((seconds) => Math.round(seconds * 30) >= 11, {
+      message: 'Title duration must produce at least 11 output frames at 30 fps',
+    }),
   position: z.enum(['top', 'center', 'bottom']).default('center'),
 });
 

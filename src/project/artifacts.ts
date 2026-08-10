@@ -4,6 +4,7 @@ export type ArtifactRecord = {
   fingerprint: string;
   generatedAt: string;
   files: string[];
+  checksums?: Record<string, string>;
 };
 
 export type ArtifactIndex = {
