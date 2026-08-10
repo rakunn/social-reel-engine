@@ -10,6 +10,7 @@ import {
   summarizeProbe,
 } from '../../src/media/qc';
 import {stabilizationOutcome, validateStabilizedCrop} from '../../src/media/stabilize';
+import * as previewStabilization from '../../src/media/preview-stabilize';
 
 describe('FFmpeg color graph policy', () => {
   it('orders pre-transform, normalization, creative blend, and Rec.709 output', () => {
@@ -107,6 +108,37 @@ describe('stabilization safeguards', () => {
     expect(stabilizationOutcome(true, true)).toBe('applied');
     expect(stabilizationOutcome(false, true)).toBe('fallback');
     expect(() => stabilizationOutcome(false, false)).toThrow(/fallback is disabled/i);
+  });
+
+  it('changes the stabilized-preview cache identity when normalization LUT bytes change', () => {
+    const fingerprint = (
+      previewStabilization as typeof previewStabilization & {
+        previewStabilizationFingerprint?: (input: {
+          pipelineBuild: string;
+          detectionSourceChecksumSha256: string;
+          normalizationInputChecksumSha256: string | null;
+          reviewVideoFilter: string;
+          selection: {inSeconds: number; outSeconds: number};
+          stabilization: {enabled: boolean; strength: number; fallbackToUnstabilized: boolean};
+          normalized: boolean;
+        }) => string;
+      }
+    ).previewStabilizationFingerprint;
+    const input = {
+      pipelineBuild: 'pipeline-build',
+      detectionSourceChecksumSha256: 'a'.repeat(64),
+      reviewVideoFilter: 'lut3d=file=/project/input/luts/technical/normalizer.cube',
+      selection: {inSeconds: 1, outSeconds: 2},
+      stabilization: {enabled: true, strength: 0.2, fallbackToUnstabilized: false},
+      normalized: true,
+    };
+
+    expect(fingerprint).toBeTypeOf('function');
+    expect(
+      fingerprint?.({...input, normalizationInputChecksumSha256: 'b'.repeat(64)}),
+    ).not.toBe(
+      fingerprint?.({...input, normalizationInputChecksumSha256: 'c'.repeat(64)}),
+    );
   });
 });
 

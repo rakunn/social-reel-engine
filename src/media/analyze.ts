@@ -57,6 +57,13 @@ export const cameraFromConfirmation = (confirmation: SourceConfirmation = {}) =>
   confirmed: confirmation.confirmed === true,
 });
 
+const probeForManifest = async (filePath: string) => {
+  const probe = await probeFile(filePath);
+  const format = {...(probe.format ?? {})};
+  delete format.filename;
+  return {...probe, format};
+};
+
 export const analyzeSources = async (
   projectPath: string,
   now = new Date(),
@@ -77,7 +84,7 @@ export const analyzeSources = async (
       sizeBytes: file.sizeBytes,
       mediaType,
       ffprobe: shouldProbe
-        ? await probeFile(path.join(projectPath, file.relativePath))
+        ? await probeForManifest(path.join(projectPath, file.relativePath))
         : {format: {}, streams: []},
       camera: cameraFromConfirmation(confirmation),
     };

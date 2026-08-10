@@ -12,6 +12,7 @@ import {
   createColorReviewHash,
   createEditHash,
   createEditReviewHash,
+  selectedColorLuts,
   type ReviewedStillFingerprint,
 } from '../core/approvals';
 import {hashFile} from '../core/hash';
@@ -157,7 +158,10 @@ const currentReviewHashes = async (
   }
   const editReviewHash = createEditReviewHash(createEditHash(loaded.edit), preview);
   const colorManifestHash = createColorHash(loaded.edit, loaded.luts);
-  const invalidLut = await invalidLutReason(projectPath, loaded.luts);
+  const invalidLut = await invalidLutReason(
+    projectPath,
+    selectedColorLuts(loaded.edit, loaded.luts),
+  );
   const stillReview = invalidLut
     ? {items: null, reason: invalidLut}
     : await readCurrentGradedStillReview(

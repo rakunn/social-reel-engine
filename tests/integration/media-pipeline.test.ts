@@ -124,6 +124,7 @@ describe('source analysis and viewing proxies', () => {
       }),
     );
     expect(video?.ffprobe.streams[0]).toEqual(expect.objectContaining({width: 640, height: 360}));
+    expect(video?.ffprobe.format?.filename).toBeUndefined();
     expect(await hashFile(originalClipPath)).toBe(originalClipHash);
   });
 
