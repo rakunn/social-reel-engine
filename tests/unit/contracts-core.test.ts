@@ -232,6 +232,25 @@ describe('versioned public contracts', () => {
     ).toThrow(/combined.*creative|creative.*combined/i);
   });
 
+  it('preserves an omitted creative mix so the selected LUT default can apply', () => {
+    const parsed = EditManifestSchema.parse({
+      ...edit,
+      clips: [
+        {
+          ...edit.clips[0],
+          grade: {
+            ...edit.clips[0].grade,
+            creativeLutId: 'warm-film',
+          },
+        },
+        ...edit.clips.slice(1),
+      ],
+    });
+
+    expect(parsed.clips[0].grade.creativeLutId).toBe('warm-film');
+    expect(parsed.clips[0].grade.creativeMix).toBeUndefined();
+  });
+
   it('rejects clip selections that round to zero output frames', () => {
     expect(() =>
       EditManifestSchema.parse({
@@ -279,6 +298,23 @@ describe('versioned public contracts', () => {
         ],
       }),
     ).toThrow(/final.*transition|transition.*final/i);
+  });
+
+  it('rejects real transitions that round to zero output frames', () => {
+    for (const durationSeconds of [0, 0.01]) {
+      expect(() =>
+        EditManifestSchema.parse({
+          ...edit,
+          clips: [
+            {
+              ...edit.clips[0],
+              transitionAfter: {type: 'fade', durationSeconds},
+            },
+            ...edit.clips.slice(1),
+          ],
+        }),
+      ).toThrow(/transition.*output frame|output frame.*transition/i);
+    }
   });
 
   it('rejects titles too short for monotonic fade ranges at 30 fps', () => {

@@ -50,6 +50,57 @@ export const ReelBriefSchema = z
   })
   .strict();
 
+type EncoderBitrateValue = `${number}k` | `${number}K` | `${number}M`;
+
+const EncoderBitrate = z
+  .string()
+  .regex(/^[1-9]\d*(?:\.\d+)?[kKM]$/, 'Encoder bitrate must use a k, K, or M suffix')
+  .transform((value) => value as EncoderBitrateValue);
+
+export const RenderSettingsSchema = z
+  .object({
+    schemaVersion: SchemaVersion,
+    proxy: z
+      .object({
+        width: z.number().int().positive(),
+        height: z.number().int().positive(),
+        crf: z.number().int().min(0).max(51),
+      })
+      .strict(),
+    preview: z
+      .object({
+        width: z.literal(540),
+        height: z.literal(960),
+        crf: z.number().int().min(0).max(51),
+        audioBitrate: EncoderBitrate.default('192k'),
+      })
+      .strict(),
+    master: z
+      .object({
+        width: z.literal(1080),
+        height: z.literal(1920),
+        fps: z.literal(30),
+        videoCodec: z.literal('prores_ks'),
+        profile: z.literal(3),
+        pixelFormat: z.literal('yuv422p10le'),
+        audioCodec: z.literal('pcm_s16le'),
+        audioSampleRate: z.literal(48_000),
+      })
+      .strict(),
+    delivery: z
+      .object({
+        videoCodec: z.literal('libx264'),
+        pixelFormat: z.literal('yuv420p'),
+        crf: z.number().int().min(0).max(51),
+        audioCodec: z.literal('aac'),
+        audioBitrate: EncoderBitrate,
+        integratedLufs: z.number().min(-70).max(-5),
+        truePeakDbtp: z.number().min(-9).max(0),
+      })
+      .strict(),
+  })
+  .strict();
+
 const FfprobeSchema = z.object({
   format: z.record(z.string(), z.unknown()).optional().default({}),
   streams: z.array(z.record(z.string(), z.unknown())).optional().default([]),
@@ -222,7 +273,7 @@ export const EditClipSchema = z
       technicalLutId: z.string().min(1).nullable().optional().default(null),
       creativeLutId: z.string().min(1).nullable().optional().default(null),
       combinedLutId: z.string().min(1).nullable().optional().default(null),
-      creativeMix: z.number().min(0).max(1).optional().default(0),
+      creativeMix: z.number().min(0).max(1).optional(),
     }),
     audio: z.object({
       muted: z.boolean(),
@@ -255,6 +306,15 @@ export const EditClipSchema = z
         path: ['transitionAfter', 'durationSeconds'],
         message: 'A none transition must have zero duration',
       });
+    } else if (
+      clip.transitionAfter.type !== 'none' &&
+      Math.round(clip.transitionAfter.durationSeconds * 30) < 1
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['transitionAfter', 'durationSeconds'],
+        message: 'A real transition must produce at least one output frame at 30 fps',
+      });
     }
     const normalizers = Number(Boolean(clip.grade.technicalLutId)) + Number(Boolean(clip.grade.combinedLutId));
     if (normalizers > 1) {
@@ -271,7 +331,7 @@ export const EditClipSchema = z
         message: 'A combined LUT already includes a look and cannot be stacked with a creative LUT',
       });
     }
-    if (!clip.grade.creativeLutId && clip.grade.creativeMix !== 0) {
+    if (!clip.grade.creativeLutId && (clip.grade.creativeMix ?? 0) !== 0) {
       context.addIssue({
         code: 'custom',
         path: ['grade', 'creativeMix'],
@@ -380,6 +440,7 @@ export const QcReportSchema = z
   .strict();
 
 export type ReelBrief = z.infer<typeof ReelBriefSchema>;
+export type RenderSettings = z.infer<typeof RenderSettingsSchema>;
 export type SourceEntry = z.infer<typeof SourceEntrySchema>;
 export type SourceManifest = z.infer<typeof SourceManifestSchema>;
 export type LutDefinition = z.infer<typeof LutDefinitionSchema>;

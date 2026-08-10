@@ -9,7 +9,9 @@ import {
 import {hashFile} from '../core/hash';
 import {readJson} from '../core/json';
 import {
+  secondsToFrames,
   timelineDurationSeconds,
+  timelineDurationFrames,
   validatePlaybackRate,
   validateTransitionDurations,
 } from '../core/timeline';
@@ -18,7 +20,7 @@ import {parseCaptionContent} from '../remotion/captions';
 
 const parseFps = (value: unknown): number | null => {
   if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : null;
+    return Number.isFinite(value) && value > 0 ? value : null;
   }
   if (typeof value !== 'string') {
     return null;
@@ -26,9 +28,11 @@ const parseFps = (value: unknown): number | null => {
   const parts = value.split('/');
   const numerator = Number(parts[0]);
   const denominator = Number(parts[1] ?? 1);
-  return denominator !== 0 && Number.isFinite(numerator) && Number.isFinite(denominator)
-    ? numerator / denominator
-    : null;
+  const fps =
+    denominator !== 0 && Number.isFinite(numerator) && Number.isFinite(denominator)
+      ? numerator / denominator
+      : null;
+  return fps !== null && fps > 0 ? fps : null;
 };
 
 export type EditValidation = {
@@ -80,7 +84,7 @@ export const validateEdit = async (
       if (!clip.audio.muted && !audio) {
         failures.push(`${clip.id}: camera audio is enabled but the source has no audio stream`);
       }
-      const sourceFps = parseFps(video?.avg_frame_rate ?? video?.r_frame_rate);
+      const sourceFps = parseFps(video?.avg_frame_rate) ?? parseFps(video?.r_frame_rate);
       if (!sourceFps) {
         failures.push(`${clip.id}: source frame rate is unavailable`);
       } else {
@@ -158,6 +162,16 @@ export const validateEdit = async (
           failures.push(`Caption file is invalid: ${(error as Error).message}`);
         }
       }
+    }
+  }
+
+  const durationFrames = timelineDurationFrames(edit);
+  for (const [index, title] of edit.titles.entries()) {
+    const startFrame = secondsToFrames(title.startSeconds, edit.output.fps);
+    if (startFrame >= durationFrames) {
+      failures.push(
+        `Title ${index + 1} starts outside the rendered timeline at frame ${startFrame}`,
+      );
     }
   }
 

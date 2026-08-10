@@ -6,7 +6,12 @@ import {assertFinalReadiness} from '../edit/approve';
 import {validateEdit} from '../edit/validate';
 import {runFfmpeg} from '../media/ffmpeg';
 import {isSilentLoudness, parseLoudnormMeasurement} from '../media/qc';
-import {deliveryFfmpegArgs, renderOptionsFor} from './policy';
+import {
+  deliveryFfmpegArgs,
+  deliveryLoudnormAnalysisFilter,
+  readRenderSettings,
+  renderOptionsFor,
+} from './policy';
 import {prepareRenderProps} from './stage';
 import {
   expectedRenderFingerprint,
@@ -57,7 +62,8 @@ const renderTarget = async (
     inputProps: props as unknown as Record<string, unknown>,
     timeoutInMilliseconds: 120_000,
   });
-  const options = renderOptionsFor(target);
+  const settings = await readRenderSettings(projectPath);
+  const options = renderOptionsFor(target, settings);
   await mkdir(path.dirname(outputLocation), {recursive: true});
   const rawDirectory = path.join(projectPath, 'work/render');
   await mkdir(rawDirectory, {recursive: true});
@@ -75,7 +81,7 @@ const renderTarget = async (
     imageFormat: options.imageFormat,
     audioCodec: options.audioCodec,
     colorSpace: options.colorSpace,
-    scale: target === 'preview' ? 0.5 : 1,
+    scale: options.scale,
     overwrite: true,
     enforceAudioTrack: true,
     logLevel: 'info',
@@ -121,6 +127,7 @@ export const renderMasterAndDelivery = async (
 ): Promise<{master: string; delivery: string}> => {
   const master = await renderTarget(projectPath, engineRoot, 'master');
   const delivery = path.join(projectPath, 'output/delivery.mp4');
+  const settings = await readRenderSettings(projectPath);
   const deliveryFingerprint = await expectedRenderFingerprint(projectPath, 'delivery');
   const current = await readRenderArtifactFreshness(projectPath, 'delivery', {
     expectedFingerprint: deliveryFingerprint,
@@ -132,7 +139,7 @@ export const renderMasterAndDelivery = async (
     master,
     '-vn',
     '-af',
-    'loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json',
+    deliveryLoudnormAnalysisFilter(settings),
     '-f',
     'null',
     '-',
@@ -142,7 +149,9 @@ export const renderMasterAndDelivery = async (
   if (!measurement && !silent) {
     throw new Error('Could not parse first-pass loudness measurement for delivery encoding');
   }
-  await runFfmpeg(deliveryFfmpegArgs(master, delivery, silent ? null : measurement));
+  await runFfmpeg(
+    deliveryFfmpegArgs(master, delivery, silent ? null : measurement, settings),
+  );
   await recordRenderArtifact(
     projectPath,
     'delivery',

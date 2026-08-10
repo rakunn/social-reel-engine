@@ -1,4 +1,4 @@
-import {mkdtemp, writeFile} from 'node:fs/promises';
+import {mkdtemp, readFile, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -8,7 +8,7 @@ import {validateEdit} from '../../src/edit/validate';
 import {analyzeSources} from '../../src/media/analyze';
 import {runFfmpeg} from '../../src/media/ffmpeg';
 import {ingestFiles} from '../../src/project/ingest';
-import {createReelProject} from '../../src/project/workspace';
+import {createReelProject, getProjectStatus} from '../../src/project/workspace';
 import {renderPreview} from '../../src/render/remotion';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -134,6 +134,55 @@ describe('edit media validation', () => {
     );
   });
 
+  it('falls back to the real frame rate when the average rate is unusable', async () => {
+    const manifestPath = path.join(projectPath, 'analysis/sources.json');
+    const original = JSON.parse(await readFile(manifestPath, 'utf8'));
+    const changed = {
+      ...original,
+      sources: original.sources.map((source: {id: string; ffprobe: {streams: Array<Record<string, unknown>>}}) =>
+        source.id === videoSourceId
+          ? {
+              ...source,
+              ffprobe: {
+                ...source.ffprobe,
+                streams: source.ffprobe.streams.map((stream) =>
+                  stream.codec_type === 'video'
+                    ? {...stream, avg_frame_rate: '0/0', r_frame_rate: '30/1'}
+                    : stream,
+                ),
+              },
+            }
+          : source,
+      ),
+    };
+    await writeJson(manifestPath, changed);
+
+    try {
+      const result = await validateEdit(projectPath, edit({muted: true, captions: 'none'}));
+      expect(result.valid).toBe(true);
+      expect(result.failures).not.toContainEqual(expect.stringMatching(/frame rate/i));
+    } finally {
+      await writeJson(manifestPath, original);
+    }
+  });
+
+  it('rejects titles whose rounded start frame is outside the timeline', async () => {
+    const result = await validateEdit(projectPath, {
+      ...edit({muted: true, captions: 'none'}),
+      titles: [
+        {
+          text: 'Too late',
+          startSeconds: 0.9,
+          durationSeconds: 0.5,
+          position: 'center',
+        },
+      ],
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.failures).toContainEqual(expect.stringMatching(/title.*timeline/i));
+  });
+
   it('rejects malformed Remotion Caption JSON before rendering', async () => {
     const result = await validateEdit(
       projectPath,
@@ -159,5 +208,21 @@ describe('edit media validation', () => {
       edit({muted: false, captions: 'none'}),
     );
     await expect(renderPreview(projectPath, repositoryRoot)).rejects.toThrow(/audio stream/i);
+  });
+
+  it('reports awaiting-edit when status encounters a semantically invalid edit', async () => {
+    await writeJson(path.join(projectPath, 'edits/edit.json'), {
+      ...edit({muted: true, captions: 'none'}),
+      clips: [
+        {
+          ...edit({muted: true, captions: 'none'}).clips[0],
+          outSeconds: 2,
+        },
+      ],
+    });
+
+    const status = await getProjectStatus(projectPath);
+    expect(status.stage).toBe('awaiting-edit');
+    expect(status.nextAction).toMatch(/validate|edit/i);
   });
 });

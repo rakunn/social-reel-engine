@@ -1,6 +1,7 @@
 import path from 'node:path';
 import {
   QcReportSchema,
+  type RenderSettings,
   type QcReport,
 } from '../contracts/schemas';
 import {renderedTimelineDurationSeconds} from '../core/timeline';
@@ -8,7 +9,13 @@ import {readJson, writeJson} from '../core/json';
 import {EditManifestSchema} from '../contracts/schemas';
 import {readApprovalStatus} from '../edit/approve';
 import {validateEdit} from '../edit/validate';
-import {targetExpectations, type OutputTarget} from '../render/policy';
+import {
+  DEFAULT_RENDER_SETTINGS,
+  deliveryLoudnormAnalysisFilter,
+  readRenderSettings,
+  targetExpectations,
+  type OutputTarget,
+} from '../render/policy';
 import {readRenderArtifactFreshness} from '../render/artifacts';
 import {probeFile, runFfmpeg} from './ffmpeg';
 import {
@@ -45,6 +52,7 @@ export type QcEvaluationInput = {
   blackDetectionSucceeded: boolean;
   freezeDetectionSucceeded: boolean;
   loudness: Loudness | null;
+  renderSettings?: RenderSettings;
 };
 
 const valuesEqual = (key: string, expected: unknown, observed: unknown): boolean => {
@@ -61,8 +69,10 @@ const valuesEqual = (key: string, expected: unknown, observed: unknown): boolean
 };
 
 export const evaluateQc = (input: QcEvaluationInput): QcReport => {
+  const renderSettings = input.renderSettings ?? DEFAULT_RENDER_SETTINGS;
+  const targetExpected = targetExpectations(input.target, renderSettings);
   const expected = {
-    ...targetExpectations(input.target),
+    ...targetExpected,
     durationSeconds: input.expectedDurationSeconds,
   };
   const checks: QcReport['checks'] = [];
@@ -137,7 +147,7 @@ export const evaluateQc = (input: QcEvaluationInput): QcReport => {
     observedDuration,
   );
 
-  for (const [key, expectedValue] of Object.entries(targetExpectations(input.target))) {
+  for (const [key, expectedValue] of Object.entries(targetExpected)) {
     if (key === 'integratedLufs' || key === 'truePeakDbtp') continue;
     const observedValue = input.observed[key];
     if (key === 'audioBitRate') {
@@ -203,29 +213,30 @@ export const evaluateQc = (input: QcEvaluationInput): QcReport => {
   }
 
   if (input.target === 'delivery') {
+    const {integratedLufs, truePeakDbtp} = renderSettings.delivery;
     if (!input.loudness && input.silenceAllowed && input.observedSilent) {
       add(
         'loudness',
         'pass',
         'Delivery is intentionally silent and retains the required AAC track',
-        'intentional silence or −14 LUFS / −1.5 dBTP',
+        `intentional silence or ${integratedLufs} LUFS / ${truePeakDbtp} dBTP`,
         'intentional silence',
       );
     } else if (!input.loudness) {
       add('loudness', 'fail', 'Delivery loudness could not be measured', {
-        integratedLufs: -14,
-        truePeakDbtp: -1.5,
+        integratedLufs,
+        truePeakDbtp,
       });
     } else {
-      const integratedPass = Math.abs(input.loudness.integratedLufs - -14) <= 0.5;
-      const truePeakPass = input.loudness.truePeakDbtp <= -1.4;
+      const integratedPass = Math.abs(input.loudness.integratedLufs - integratedLufs) <= 0.5;
+      const truePeakPass = input.loudness.truePeakDbtp <= truePeakDbtp + 0.1;
       add(
         'loudness',
         integratedPass && truePeakPass ? 'pass' : 'fail',
         integratedPass && truePeakPass
           ? 'Delivery loudness and true peak are within tolerance'
-          : `loudness expected −14 LUFS / ≤−1.4 dBTP, observed ${input.loudness.integratedLufs} LUFS / ${input.loudness.truePeakDbtp} dBTP`,
-        {integratedLufs: -14, truePeakDbtp: -1.5},
+          : `loudness expected ${integratedLufs} LUFS / ≤${truePeakDbtp + 0.1} dBTP, observed ${input.loudness.integratedLufs} LUFS / ${input.loudness.truePeakDbtp} dBTP`,
+        {integratedLufs, truePeakDbtp},
         input.loudness,
       );
     }
@@ -289,6 +300,7 @@ export const runQc = async (
   now = new Date(),
 ): Promise<QcReport> => {
   const outputPath = outputFor(projectPath, target);
+  const renderSettings = await readRenderSettings(projectPath);
   const edit = EditManifestSchema.parse(
     await readJson(path.join(projectPath, 'edits/edit.json')),
   );
@@ -343,7 +355,7 @@ export const runQc = async (
           outputPath,
           '-vn',
           '-af',
-          'loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json',
+          deliveryLoudnormAnalysisFilter(renderSettings),
           '-f',
           'null',
           '-',
@@ -372,6 +384,7 @@ export const runQc = async (
     blackDetectionSucceeded,
     freezeDetectionSucceeded,
     loudness,
+    renderSettings,
   });
   const jsonPath = path.join(projectPath, `analysis/qc-${target}.json`);
   const markdownPath = path.join(projectPath, `analysis/qc-${target}.md`);

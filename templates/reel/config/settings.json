@@ -8,7 +8,8 @@
   "preview": {
     "width": 540,
     "height": 960,
-    "crf": 20
+    "crf": 20,
+    "audioBitrate": "192k"
   },
   "master": {
     "width": 1080,

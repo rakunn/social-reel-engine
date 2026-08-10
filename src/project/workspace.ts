@@ -1,4 +1,4 @@
-import {access, cp, mkdir, readdir, readFile} from 'node:fs/promises';
+import {access, cp, mkdir, readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {
   ApprovalStateSchema,
@@ -7,6 +7,8 @@ import {
 } from '../contracts/schemas';
 import {readJson, writeJson} from '../core/json';
 import {assertSafeReelName} from '../core/paths';
+import {validateEdit} from '../edit/validate';
+import {scanInputs} from './ingest';
 
 type CreateReelProjectOptions = {
   engineRoot: string;
@@ -81,13 +83,10 @@ export type ProjectStatus = {
   colorApproved: boolean;
 };
 
-const countFiles = async (directory: string): Promise<number> => {
-  const entries = await readdir(directory, {withFileTypes: true});
-  return entries.filter((entry) => entry.isFile() && !entry.name.startsWith('.')).length;
-};
-
 export const getProjectStatus = async (projectPath: string): Promise<ProjectStatus> => {
-  const inputs = await countFiles(path.join(projectPath, 'input/clips'));
+  const inputs = (await scanInputs(projectPath)).files.filter(
+    (file) => file.kind === 'clips',
+  ).length;
   const base = {inputs, editApproved: false, colorApproved: false};
   if (inputs === 0) {
     return {
@@ -110,6 +109,22 @@ export const getProjectStatus = async (projectPath: string): Promise<ProjectStat
     edit = EditManifestSchema.parse(await readJson(path.join(projectPath, 'edits/edit.json')));
   } catch {
     return {...base, stage: 'awaiting-edit', nextAction: 'Create and validate edits/edit.json.'};
+  }
+  try {
+    const validation = await validateEdit(projectPath, edit);
+    if (!validation.valid) {
+      return {
+        ...base,
+        stage: 'awaiting-edit',
+        nextAction: 'Fix and validate edits/edit.json before rendering a rough cut.',
+      };
+    }
+  } catch {
+    return {
+      ...base,
+      stage: 'awaiting-edit',
+      nextAction: 'Fix and validate edits/edit.json before rendering a rough cut.',
+    };
   }
   ApprovalStateSchema.parse(await readJson(path.join(projectPath, 'analysis/approvals.json')));
   const {readApprovalStatus} = await import('../edit/approve');

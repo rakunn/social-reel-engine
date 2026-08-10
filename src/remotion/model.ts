@@ -19,6 +19,9 @@ export type ReelRenderProps = {
 export const secondsToMediaFrames = (seconds: number, fps: number): number =>
   secondsToFrames(seconds, fps);
 
+export const fontFaceRule = (fontUrl: string): string =>
+  `@font-face{font-family:ReelCustom;src:url(${JSON.stringify(fontUrl)});font-display:block;}`;
+
 export type ShotTiming = {
   id: string;
   startFrame: number;

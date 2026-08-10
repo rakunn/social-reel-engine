@@ -15,7 +15,12 @@ import {
   readValidatedSourceManifest,
   sourceManifestFingerprintProjection,
 } from '../media/source-integrity';
-import {renderOptionsFor, targetExpectations, type OutputTarget} from './policy';
+import {
+  readRenderSettings,
+  renderOptionsFor,
+  targetExpectations,
+  type OutputTarget,
+} from './policy';
 import {readPreviewStabilizationContext} from '../media/preview-stabilization-integrity';
 
 export type RenderArtifactRecord = {
@@ -118,7 +123,7 @@ export const expectedRenderFingerprint = async (
       readJson<{schemaVersion: '1.0.0'; luts: unknown[]}>(
         path.join(projectPath, 'config/luts.json'),
       ),
-      readJson(path.join(projectPath, 'config/settings.json')),
+      readRenderSettings(projectPath),
       pipelineBuildFingerprint(),
       readJson(path.join(projectPath, 'brief.json')),
     ]);
@@ -144,11 +149,11 @@ export const expectedRenderFingerprint = async (
     luts: target === 'preview' ? previewLuts : luts,
     settings,
     rightsConfirmed: target === 'preview' ? 'not-required' : rightsConfirmed,
-    outputPolicy: targetExpectations(target),
+    outputPolicy: targetExpectations(target, settings),
     renderer:
       target === 'delivery'
         ? {pipeline: 'ffmpeg-two-pass-loudnorm-v1'}
-        : renderOptionsFor(target),
+        : renderOptionsFor(target, settings),
   });
 };
 

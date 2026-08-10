@@ -1,4 +1,4 @@
-import {access, mkdtemp, readFile, writeFile} from 'node:fs/promises';
+import {access, mkdir, mkdtemp, readFile, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -89,6 +89,22 @@ describe('reel project workspace', () => {
     const status: ProjectStatus = await getProjectStatus(projectPath);
     expect(status.stage).toBe('awaiting-inputs');
     expect(status.nextAction).toMatch(/input\/clips/i);
+  });
+
+  it('counts clips recursively when reporting status', async () => {
+    const projectsRoot = await makeProjectsRoot();
+    const projectPath = await createReelProject({
+      engineRoot: repositoryRoot,
+      projectsRoot,
+      reelName: 'nested-clips',
+    });
+    const nestedDirectory = path.join(projectPath, 'input/clips/day-one');
+    await mkdir(nestedDirectory, {recursive: true});
+    await writeFile(path.join(nestedDirectory, 'clip.mp4'), 'synthetic nested clip');
+
+    const status = await getProjectStatus(projectPath);
+    expect(status.inputs).toBe(1);
+    expect(status.stage).toBe('awaiting-analysis');
   });
 
   it('does not leave a project directory when the title is invalid', async () => {
