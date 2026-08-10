@@ -169,6 +169,24 @@ describe('strict color gating', () => {
     expect((await generateProxies(projectPath)).items[0].normalization).toBe('technical');
   });
 
+  it('rejects ambiguous duplicate LUT identifiers', async () => {
+    await confirmSyntheticColor();
+    const manifest = await analyzeSources(projectPath);
+    const source = manifest.sources.find((entry) => entry.mediaType === 'video')!;
+    const lutsPath = path.join(projectPath, 'config/luts.json');
+    const luts = JSON.parse(await readFile(lutsPath, 'utf8'));
+    await writeJson(lutsPath, {...luts, luts: [luts.luts[0], luts.luts[0]]});
+    try {
+      expect(() =>
+        resolveClipColor(projectPath, source, {
+          technicalLutId: 'synthetic-to-rec709',
+        }),
+      ).toThrow(/duplicate.*LUT|LUT.*duplicate/i);
+    } finally {
+      await writeJson(lutsPath, luts);
+    }
+  });
+
   it('resolves and applies a matching technical LUT after explicit confirmation', async () => {
     await confirmSyntheticColor();
     const manifest = await analyzeSources(projectPath);

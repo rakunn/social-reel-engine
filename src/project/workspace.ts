@@ -99,6 +99,12 @@ export const getProjectStatus = async (projectPath: string): Promise<ProjectStat
   if (!(await exists(path.join(projectPath, 'analysis/sources.json')))) {
     return {...base, stage: 'awaiting-analysis', nextAction: 'Run analyze, proxy, and beats.'};
   }
+  try {
+    const {readValidatedSourceManifest} = await import('../media/source-integrity');
+    await readValidatedSourceManifest(projectPath);
+  } catch {
+    return {...base, stage: 'awaiting-analysis', nextAction: 'Run analyze, proxy, and beats.'};
+  }
   let edit;
   try {
     edit = EditManifestSchema.parse(await readJson(path.join(projectPath, 'edits/edit.json')));

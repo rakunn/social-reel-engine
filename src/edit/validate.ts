@@ -2,6 +2,7 @@ import {access, readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {
   EditManifestSchema,
+  ReelBriefSchema,
   type SourceManifest,
   type EditManifest,
 } from '../contracts/schemas';
@@ -44,6 +45,7 @@ export const validateEdit = async (
   const edit = EditManifestSchema.parse(
     input ?? (await readJson(path.join(projectPath, 'edits/edit.json'))),
   );
+  const brief = ReelBriefSchema.parse(await readJson(path.join(projectPath, 'brief.json')));
   const failures = validateTransitionDurations(edit);
   const warnings: string[] = [];
   let manifest: SourceManifest | null = null;
@@ -97,8 +99,27 @@ export const validateEdit = async (
     if (!music) {
       failures.push(`Music source ${edit.music.sourceId} is missing`);
     } else {
-      if (!music.ffprobe.streams.some((stream) => stream.codec_type === 'audio')) {
+      const audioStream = music.ffprobe.streams.find(
+        (stream) => stream.codec_type === 'audio',
+      );
+      if (!audioStream) {
         failures.push(`Music source ${edit.music.sourceId} has no audio stream`);
+      } else {
+        const streamDuration = Number(audioStream.duration);
+        const formatDuration = Number(music.ffprobe.format?.duration);
+        const musicDuration =
+          Number.isFinite(streamDuration) && streamDuration > 0
+            ? streamDuration
+            : Number.isFinite(formatDuration) && formatDuration > 0
+              ? formatDuration
+              : null;
+        if (musicDuration === null) {
+          failures.push(`Music source ${edit.music.sourceId} duration is unavailable`);
+        } else if (edit.music.startSeconds >= musicDuration) {
+          failures.push(
+            `Music start offset ${edit.music.startSeconds}s is at or beyond the ${musicDuration}s audio duration`,
+          );
+        }
       }
       try {
         const musicPath = path.join(projectPath, music.relativePath);
@@ -141,9 +162,12 @@ export const validateEdit = async (
   }
 
   const durationSeconds = timelineDurationSeconds(edit);
-  if (durationSeconds < 20 || durationSeconds > 30) {
+  if (
+    durationSeconds < brief.target.minSeconds ||
+    durationSeconds > brief.target.maxSeconds
+  ) {
     warnings.push(
-      `Timeline is ${durationSeconds.toFixed(2)}s; the standard social-reel target is 20–30s`,
+      `Timeline is ${durationSeconds.toFixed(2)}s; the project target is ${brief.target.minSeconds}–${brief.target.maxSeconds}s`,
     );
   }
   return {valid: failures.length === 0, durationSeconds, failures, warnings};

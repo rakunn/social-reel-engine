@@ -38,6 +38,10 @@ export const sourceManifestFingerprintProjection = (manifest: SourceManifest) =>
   schemaVersion: manifest.schemaVersion,
   sources: manifest.sources
     .filter((source) => PIPELINE_MEDIA_TYPES.has(source.mediaType))
+    .map((source) => {
+      const {filename: _absoluteFilename, ...format} = source.ffprobe.format ?? {};
+      return {...source, ffprobe: {...source.ffprobe, format}};
+    })
     .sort((left, right) => left.relativePath.localeCompare(right.relativePath)),
 });
 

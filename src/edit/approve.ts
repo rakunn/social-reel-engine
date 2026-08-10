@@ -2,7 +2,7 @@ import path from 'node:path';
 import {
   ApprovalStateSchema,
   EditManifestSchema,
-  LutDefinitionSchema,
+  LutDefinitionsSchema,
   ReelBriefSchema,
   type ApprovalState,
 } from '../contracts/schemas';
@@ -31,7 +31,7 @@ const loadState = async (projectPath: string) => {
     await readJson(path.join(projectPath, 'edits/edit.json')),
   );
   const lutsConfig = await readJson<{luts?: unknown[]}>(path.join(projectPath, 'config/luts.json'));
-  const luts = (lutsConfig.luts ?? []).map((lut) => LutDefinitionSchema.parse(lut));
+  const luts = LutDefinitionsSchema.parse(lutsConfig.luts ?? []);
   const approvals = ApprovalStateSchema.parse(
     await readJson(path.join(projectPath, 'analysis/approvals.json')),
   );

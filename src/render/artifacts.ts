@@ -1,7 +1,11 @@
 import {access, readdir, stat} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {EditManifestSchema, LutDefinitionSchema} from '../contracts/schemas';
+import {
+  EditManifestSchema,
+  LutDefinitionsSchema,
+  ReelBriefSchema,
+} from '../contracts/schemas';
 import {createEditHash} from '../core/approvals';
 import {hashFile, hashValue} from '../core/hash';
 import {readJson, writeJson} from '../core/json';
@@ -107,16 +111,19 @@ export const expectedRenderFingerprint = async (
     await readJson(path.join(projectPath, 'edits/edit.json')),
   );
   const ingest = await scanInputs(projectPath);
-  const [sourceConfirmations, sourceManifest, lutsConfig, settings, pipelineBuild] = await Promise.all([
-    readJson(path.join(projectPath, 'config/sources.json')),
-    readValidatedSourceManifest(projectPath),
-    readJson<{schemaVersion: '1.0.0'; luts: unknown[]}>(
-      path.join(projectPath, 'config/luts.json'),
-    ),
-    readJson(path.join(projectPath, 'config/settings.json')),
-    pipelineBuildFingerprint(),
-  ]);
-  const luts = lutsConfig.luts.map((lut) => LutDefinitionSchema.parse(lut));
+  const [sourceConfirmations, sourceManifest, lutsConfig, settings, pipelineBuild, brief] =
+    await Promise.all([
+      readJson(path.join(projectPath, 'config/sources.json')),
+      readValidatedSourceManifest(projectPath),
+      readJson<{schemaVersion: '1.0.0'; luts: unknown[]}>(
+        path.join(projectPath, 'config/luts.json'),
+      ),
+      readJson(path.join(projectPath, 'config/settings.json')),
+      pipelineBuildFingerprint(),
+      readJson(path.join(projectPath, 'brief.json')),
+    ]);
+  const luts = LutDefinitionsSchema.parse(lutsConfig.luts);
+  const rightsConfirmed = ReelBriefSchema.parse(brief).rightsConfirmed;
   const previewLuts = luts.filter((lut) => lut.kind !== 'creative');
   const previewLutFiles = new Set(previewLuts.map((lut) => lut.file));
   const previewInputKinds = new Set(['clips', 'music', 'captions', 'fonts', 'brand']);
@@ -136,6 +143,7 @@ export const expectedRenderFingerprint = async (
     sourceManifest: sourceManifestFingerprintProjection(sourceManifest),
     luts: target === 'preview' ? previewLuts : luts,
     settings,
+    rightsConfirmed: target === 'preview' ? 'not-required' : rightsConfirmed,
     outputPolicy: targetExpectations(target),
     renderer:
       target === 'delivery'

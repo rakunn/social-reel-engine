@@ -1,5 +1,9 @@
 import path from 'node:path';
-import {LutDefinitionSchema, type LutDefinition} from '../contracts/schemas';
+import {
+  LutDefinitionSchema,
+  LutDefinitionsSchema,
+  type LutDefinition,
+} from '../contracts/schemas';
 import {hashFile} from '../core/hash';
 import {readJson, writeJson} from '../core/json';
 import {ingestFiles} from './ingest';
@@ -42,7 +46,7 @@ export const installCatalogLut = async (
   const definition = LutDefinitionSchema.parse({...entry, file: projectFile});
   const configPath = path.join(projectPath, 'config/luts.json');
   const config = await readJson<{schemaVersion: '1.0.0'; luts: unknown[]}>(configPath);
-  const existing = config.luts.map((lut) => LutDefinitionSchema.parse(lut));
+  const existing = LutDefinitionsSchema.parse(config.luts);
   const sameId = existing.find((lut) => lut.id === definition.id);
   if (sameId && JSON.stringify(sameId) !== JSON.stringify(definition)) {
     throw new Error(`Project already contains conflicting metadata for LUT ${definition.id}`);
