@@ -17,6 +17,7 @@ import {
 } from '../core/timeline';
 import {readValidatedSourceManifest} from '../media/source-integrity';
 import {parseCaptionContent} from '../remotion/captions';
+import {captionFrameRange} from '../remotion/model';
 
 const parseFps = (value: unknown): number | null => {
   if (typeof value === 'number') {
@@ -52,6 +53,18 @@ export const validateEdit = async (
   const brief = ReelBriefSchema.parse(await readJson(path.join(projectPath, 'brief.json')));
   const failures = validateTransitionDurations(edit);
   const warnings: string[] = [];
+  const durationFrames = timelineDurationFrames(edit);
+  if (!brief.options.music && edit.music) {
+    failures.push('Music is disabled by the project brief');
+  }
+  if (!brief.options.captions && edit.captions) {
+    failures.push('Captions are disabled by the project brief');
+  }
+  if (!brief.options.cameraAudio) {
+    for (const clip of edit.clips.filter((entry) => !entry.audio.muted)) {
+      failures.push(`${clip.id}: camera audio is disabled by the project brief`);
+    }
+  }
   let manifest: SourceManifest | null = null;
   try {
     manifest = await readValidatedSourceManifest(projectPath);
@@ -75,12 +88,19 @@ export const validateEdit = async (
       } catch {
         failures.push(`${clip.id}: media file is missing (${source.relativePath})`);
       }
-      const duration = Number(source.ffprobe.format?.duration);
-      if (!Number.isFinite(duration) || clip.outSeconds > duration + 0.001) {
-        failures.push(`${clip.id}: selected out point exceeds source duration`);
-      }
       const video = source.ffprobe.streams.find((stream) => stream.codec_type === 'video');
       const audio = source.ffprobe.streams.find((stream) => stream.codec_type === 'audio');
+      const videoDuration = Number(video?.duration);
+      const formatDuration = Number(source.ffprobe.format?.duration);
+      const duration =
+        Number.isFinite(videoDuration) && videoDuration > 0
+          ? videoDuration
+          : Number.isFinite(formatDuration) && formatDuration > 0
+            ? formatDuration
+            : null;
+      if (duration === null || clip.outSeconds > duration + 0.001) {
+        failures.push(`${clip.id}: selected out point exceeds source duration`);
+      }
       if (!clip.audio.muted && !audio) {
         failures.push(`${clip.id}: camera audio is enabled but the source has no audio stream`);
       }
@@ -157,7 +177,17 @@ export const validateEdit = async (
           failures.push('Caption source checksum changed after ingest');
         }
         try {
-          parseCaptionContent(await readFile(captionPath, 'utf8'), edit.captions.format);
+          const captions = parseCaptionContent(
+            await readFile(captionPath, 'utf8'),
+            edit.captions.format,
+          );
+          const overlapsTimeline = captions.some((item) => {
+            const range = captionFrameRange(item, edit.output.fps);
+            return range.from < durationFrames && range.from + range.durationInFrames > 0;
+          });
+          if (!overlapsTimeline) {
+            failures.push('Caption file has no captions that overlap the rendered timeline');
+          }
         } catch (error) {
           failures.push(`Caption file is invalid: ${(error as Error).message}`);
         }
@@ -165,7 +195,6 @@ export const validateEdit = async (
     }
   }
 
-  const durationFrames = timelineDurationFrames(edit);
   for (const [index, title] of edit.titles.entries()) {
     const startFrame = secondsToFrames(title.startSeconds, edit.output.fps);
     if (startFrame >= durationFrames) {

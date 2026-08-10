@@ -10,6 +10,7 @@ export type BeatAnalysis = {
   relativePath: string;
   checksumSha256: string;
   analyzer: 'librosa-0.11.0';
+  analyzerImplementationSha256: string;
   durationSeconds: number;
   sampleRate: number;
   tempoBpm: number;
@@ -35,12 +36,15 @@ export const analyzeMusic = async (
   const relativePath = `input/music/${musicFiles[0]}`;
   const audioPath = path.join(projectPath, relativePath);
   const checksumSha256 = await hashFile(audioPath);
+  const script = path.join(engineRoot, 'python/analyze_beats.py');
+  const analyzerImplementationSha256 = await hashFile(script);
   const outputPath = path.join(projectPath, 'analysis/beats.json');
   try {
     const existing = await readJson<BeatAnalysis>(outputPath);
     if (
       existing.checksumSha256 === checksumSha256 &&
-      existing.analyzer === 'librosa-0.11.0'
+      existing.analyzer === 'librosa-0.11.0' &&
+      existing.analyzerImplementationSha256 === analyzerImplementationSha256
     ) {
       return existing;
     }
@@ -49,7 +53,6 @@ export const analyzeMusic = async (
   }
 
   const python = path.join(engineRoot, '.venv/bin/python');
-  const script = path.join(engineRoot, 'python/analyze_beats.py');
   const cacheRoot = path.join(engineRoot, '.cache');
   const numbaCache = path.join(cacheRoot, 'numba');
   await mkdir(numbaCache, {recursive: true});
@@ -63,7 +66,12 @@ export const analyzeMusic = async (
   });
   const parsed = JSON.parse(processResult.stdout) as Omit<
     BeatAnalysis,
-    'schemaVersion' | 'generatedAt' | 'relativePath' | 'checksumSha256' | 'analyzer'
+    | 'schemaVersion'
+    | 'generatedAt'
+    | 'relativePath'
+    | 'checksumSha256'
+    | 'analyzer'
+    | 'analyzerImplementationSha256'
   >;
   const result: BeatAnalysis = {
     schemaVersion: '1.0.0',
@@ -71,6 +79,7 @@ export const analyzeMusic = async (
     relativePath,
     checksumSha256,
     analyzer: 'librosa-0.11.0',
+    analyzerImplementationSha256,
     ...parsed,
   };
   await writeJson(outputPath, result);
