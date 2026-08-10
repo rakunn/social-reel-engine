@@ -27,6 +27,22 @@ const kindDirectory: Record<InputKind, string> = {
   brand: 'input/brand',
 };
 
+const ignoredInputNames = new Set([
+  '.gitkeep',
+  'README.md',
+  '.DS_Store',
+  '.localized',
+  'Thumbs.db',
+  'desktop.ini',
+]);
+
+const ignoredInputDirectories = new Set([
+  '__MACOSX',
+  '.Spotlight-V100',
+  '.Trashes',
+  '.fseventsd',
+]);
+
 export type IngestManifest = {
   schemaVersion: '1.0.0';
   generatedAt: string;
@@ -42,11 +58,18 @@ const walkFiles = async (directory: string): Promise<string[]> => {
   const entries = await readdir(directory, {withFileTypes: true});
   const paths = await Promise.all(
     entries.map(async (entry) => {
+      if (
+        ignoredInputNames.has(entry.name) ||
+        entry.name.startsWith('._') ||
+        (entry.isDirectory() && ignoredInputDirectories.has(entry.name))
+      ) {
+        return [];
+      }
       const entryPath = path.join(directory, entry.name);
       if (entry.isDirectory()) {
         return await walkFiles(entryPath);
       }
-      return entry.name === '.gitkeep' || entry.name === 'README.md' ? [] : [entryPath];
+      return [entryPath];
     }),
   );
   return paths.flat();

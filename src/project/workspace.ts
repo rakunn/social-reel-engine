@@ -73,6 +73,7 @@ export type ProjectStatus = {
     | 'awaiting-inputs'
     | 'awaiting-analysis'
     | 'awaiting-edit'
+    | 'awaiting-preview'
     | 'awaiting-edit-approval'
     | 'awaiting-color-approval'
     | 'ready-to-render'
@@ -126,6 +127,23 @@ export const getProjectStatus = async (projectPath: string): Promise<ProjectStat
       nextAction: 'Fix and validate edits/edit.json before rendering a rough cut.',
     };
   }
+  const {readRenderArtifactFreshness} = await import('../render/artifacts');
+  try {
+    const preview = await readRenderArtifactFreshness(projectPath, 'preview');
+    if (!preview.fresh) {
+      return {
+        ...base,
+        stage: 'awaiting-preview',
+        nextAction: 'Run preview to render the current rough cut, then review it.',
+      };
+    }
+  } catch {
+    return {
+      ...base,
+      stage: 'awaiting-preview',
+      nextAction: 'Run preview to render the current rough cut, then review it.',
+    };
+  }
   ApprovalStateSchema.parse(await readJson(path.join(projectPath, 'analysis/approvals.json')));
   const {readApprovalStatus} = await import('../edit/approve');
   const {editApproved, colorApproved} = await readApprovalStatus(projectPath);
@@ -140,7 +158,6 @@ export const getProjectStatus = async (projectPath: string): Promise<ProjectStat
       nextAction: 'Review graded reference frames, then run approve-color.',
     };
   }
-  const {readRenderArtifactFreshness} = await import('../render/artifacts');
   const [master, delivery] = await Promise.all([
     readRenderArtifactFreshness(projectPath, 'master'),
     readRenderArtifactFreshness(projectPath, 'delivery'),

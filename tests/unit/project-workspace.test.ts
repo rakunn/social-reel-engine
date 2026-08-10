@@ -180,6 +180,28 @@ describe('immutable ingest', () => {
     await expect(ingestFiles(projectPath, [right], 'clips')).rejects.toThrow(/refusing to overwrite/i);
   });
 
+  it('ignores macOS filesystem metadata during recursive input scans', async () => {
+    const projectsRoot = await makeProjectsRoot();
+    const projectPath = await createReelProject({
+      engineRoot: repositoryRoot,
+      projectsRoot,
+      reelName: 'metadata-scan',
+    });
+    const clipsDirectory = path.join(projectPath, 'input/clips');
+    const archiveMetadata = path.join(clipsDirectory, '__MACOSX');
+    await mkdir(archiveMetadata, {recursive: true});
+    await writeFile(path.join(clipsDirectory, 'clip.mp4'), 'synthetic clip');
+    await writeFile(path.join(clipsDirectory, '.DS_Store'), 'finder metadata');
+    await writeFile(path.join(clipsDirectory, '._clip.mp4'), 'appledouble metadata');
+    await writeFile(path.join(archiveMetadata, '._clip.mp4'), 'archive metadata');
+
+    const manifest = await scanInputs(projectPath);
+
+    expect(manifest.files.map((file) => file.relativePath)).toEqual([
+      'input/clips/clip.mp4',
+    ]);
+  });
+
   it('gives byte-identical files at different paths distinct source IDs', async () => {
     const projectsRoot = await makeProjectsRoot();
     const projectPath = await createReelProject({

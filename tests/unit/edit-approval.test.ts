@@ -373,6 +373,79 @@ describe('hash-bound approvals', () => {
     expect(await expectedRenderFingerprint(projectPath, 'delivery')).toBe(before.delivery);
   });
 
+  it('binds final fingerprints to the reviewed stabilization outcome', async () => {
+    const {projectPath, edit} = await makeFixture();
+    const stabilizedEdit = {
+      ...edit,
+      clips: [
+        {
+          ...edit.clips[0],
+          stabilization: {enabled: true, strength: 0.2, fallbackToUnstabilized: true},
+        },
+      ],
+    };
+    await writeJson(path.join(projectPath, 'edits/edit.json'), stabilizedEdit);
+    const sourceChecksum = await hashFile(path.join(projectPath, 'input/clips/clip.mp4'));
+    const reportPath = path.join(projectPath, 'analysis/preview-stabilization.json');
+    const previewPath = path.join(projectPath, 'previews/preview.mp4');
+    await writeJson(reportPath, {
+      schemaVersion: '1.0.0',
+      generatedAt: '2026-08-10T00:00:00.000Z',
+      items: [
+        {
+          clipId: 'shot-1',
+          fingerprint: 'fallback-review',
+          path: null,
+          checksumSha256: null,
+          detectionSourceChecksumSha256: sourceChecksum,
+          transformPath: null,
+          transformChecksumSha256: null,
+          stabilization: 'fallback',
+          cached: false,
+        },
+      ],
+    });
+    await writeFile(previewPath, 'reviewed-fallback-preview');
+    const previewFingerprint = await expectedRenderFingerprint(projectPath, 'preview');
+    await recordRenderArtifact(projectPath, 'preview', previewPath, previewFingerprint);
+    const fallback = {
+      master: await expectedRenderFingerprint(projectPath, 'master'),
+      delivery: await expectedRenderFingerprint(projectPath, 'delivery'),
+    };
+
+    const stabilizedPath = path.join(projectPath, 'work/preview-stabilized/shot-1.mp4');
+    const transformPath = path.join(projectPath, 'work/stabilization/shot-1.trf');
+    await mkdir(path.dirname(stabilizedPath), {recursive: true});
+    await mkdir(path.dirname(transformPath), {recursive: true});
+    await writeFile(stabilizedPath, 'stabilized-review-media');
+    await writeFile(transformPath, 'reviewed-transform');
+    await writeJson(reportPath, {
+      schemaVersion: '1.0.0',
+      generatedAt: '2026-08-10T00:01:00.000Z',
+      items: [
+        {
+          clipId: 'shot-1',
+          fingerprint: 'applied-review',
+          path: 'work/preview-stabilized/shot-1.mp4',
+          checksumSha256: await hashFile(stabilizedPath),
+          detectionSourceChecksumSha256: sourceChecksum,
+          transformPath: 'work/stabilization/shot-1.trf',
+          transformChecksumSha256: await hashFile(transformPath),
+          stabilization: 'applied',
+          cached: false,
+        },
+      ],
+    });
+    await writeFile(previewPath, 'reviewed-applied-preview');
+    expect(await expectedRenderFingerprint(projectPath, 'preview')).toBe(previewFingerprint);
+    await recordRenderArtifact(projectPath, 'preview', previewPath, previewFingerprint);
+
+    expect(await expectedRenderFingerprint(projectPath, 'master')).not.toBe(fallback.master);
+    expect(await expectedRenderFingerprint(projectPath, 'delivery')).not.toBe(
+      fallback.delivery,
+    );
+  });
+
   it('marks final artifacts stale when rights confirmation is withdrawn', async () => {
     const {projectPath} = await makeFixture();
     const outputDirectory = path.join(projectPath, 'output');
@@ -404,6 +477,18 @@ describe('hash-bound approvals', () => {
       expect.objectContaining({
         stage: 'awaiting-analysis',
         nextAction: expect.stringMatching(/analy/i),
+      }),
+    );
+  });
+
+  it('directs status to render a missing rough cut before approval', async () => {
+    const {projectPath} = await makeFixture();
+    await unlink(path.join(projectPath, 'previews/preview.mp4'));
+
+    await expect(getProjectStatus(projectPath)).resolves.toEqual(
+      expect.objectContaining({
+        stage: 'awaiting-preview',
+        nextAction: expect.stringMatching(/run preview|render.*rough cut/i),
       }),
     );
   });

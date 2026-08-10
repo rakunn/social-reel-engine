@@ -1,4 +1,4 @@
-import {mkdtemp, readFile, writeFile} from 'node:fs/promises';
+import {access, mkdtemp, readFile, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -151,6 +151,50 @@ describe('source analysis and viewing proxies', () => {
     const afterConfigurationChange = await generateProxies(projectPath);
     expect(afterConfigurationChange.items[0].cached).toBe(false);
   });
+
+  it('samples proxy review images within the video stream when another stream is longer', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'reel-proxy-duration-'));
+    const durationProject = await createReelProject({
+      engineRoot: repositoryRoot,
+      projectsRoot: path.join(root, 'projects'),
+      reelName: 'proxy-duration',
+    });
+    const sourcePath = path.join(root, 'short-video-long-audio.mp4');
+    await runFfmpeg([
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=size=160x90:rate=30:duration=1',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=440:sample_rate=48000:duration=4',
+      '-map',
+      '0:v:0',
+      '-map',
+      '1:a:0',
+      '-c:v',
+      'libx264',
+      '-preset',
+      'ultrafast',
+      '-pix_fmt',
+      'yuv420p',
+      '-c:a',
+      'aac',
+      sourcePath,
+    ]);
+    await ingestFiles(durationProject, [sourcePath], 'clips');
+    const manifest = await analyzeSources(durationProject);
+    const source = manifest.sources.find((entry) => entry.mediaType === 'video')!;
+    const video = source.ffprobe.streams.find((stream) => stream.codec_type === 'video')!;
+    expect(Number(source.ffprobe.format?.duration)).toBeGreaterThan(Number(video.duration) + 2);
+
+    const report = await generateProxies(durationProject);
+
+    await expect(
+      access(path.join(durationProject, report.items[0].representativeFrame)),
+    ).resolves.toBeUndefined();
+  }, 30_000);
 });
 
 describe('strict color gating', () => {

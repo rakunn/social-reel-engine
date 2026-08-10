@@ -36,6 +36,17 @@ const parseFps = (value: unknown): number | null => {
   return fps !== null && fps > 0 ? fps : null;
 };
 
+const streamDurationSeconds = (stream: Record<string, unknown>): number | null => {
+  const duration = Number(stream.duration);
+  if (Number.isFinite(duration) && duration > 0) {
+    return duration;
+  }
+  const durationTs = Number(stream.duration_ts);
+  const timeBase = parseFps(stream.time_base);
+  const derived = durationTs * (timeBase ?? Number.NaN);
+  return Number.isFinite(derived) && derived > 0 ? derived : null;
+};
+
 export type EditValidation = {
   valid: boolean;
   durationSeconds: number;
@@ -103,6 +114,18 @@ export const validateEdit = async (
       }
       if (!clip.audio.muted && !audio) {
         failures.push(`${clip.id}: camera audio is enabled but the source has no audio stream`);
+      } else if (!clip.audio.muted && audio) {
+        const audioDuration = streamDurationSeconds(audio);
+        const declaredStart = Number(audio.start_time);
+        const audioStart = Number.isFinite(declaredStart) ? declaredStart : 0;
+        if (audioDuration === null) {
+          failures.push(`${clip.id}: camera audio duration is unavailable`);
+        } else if (
+          clip.inSeconds < audioStart - 0.001 ||
+          clip.outSeconds > audioStart + audioDuration + 0.001
+        ) {
+          failures.push(`${clip.id}: camera audio does not cover the selected range`);
+        }
       }
       const sourceFps = parseFps(video?.avg_frame_rate) ?? parseFps(video?.r_frame_rate);
       if (!sourceFps) {
