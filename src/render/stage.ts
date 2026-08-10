@@ -1,5 +1,5 @@
 import type {Caption} from '@remotion/captions';
-import {access, copyFile, mkdir, readdir, readFile} from 'node:fs/promises';
+import {access, copyFile, mkdir, readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {
   EditManifestSchema,
@@ -56,14 +56,6 @@ const loadCaptions = async (
   }
   const content = await readFile(resolveInside(projectPath, edit.captions.relativePath), 'utf8');
   return parseCaptionContent(content, edit.captions.format);
-};
-
-const firstFont = async (projectPath: string): Promise<string | null> => {
-  const directory = path.join(projectPath, 'input/fonts');
-  const fonts = (await readdir(directory))
-    .filter((file) => /\.(woff2?|ttf|otf)$/i.test(file))
-    .sort();
-  return fonts.length ? path.join(directory, fonts[0]) : null;
 };
 
 export const prepareRenderProps = async (
@@ -162,8 +154,14 @@ export const prepareRenderProps = async (
   }
 
   let fontUrl: string | null = null;
-  const font = await firstFont(projectPath);
-  if (font) {
+  const fontSource = sources.sources
+    .filter(
+      (source) =>
+        source.mediaType === 'font' && /\.(woff2?|ttf|otf)$/i.test(source.relativePath),
+    )
+    .sort((left, right) => left.relativePath.localeCompare(right.relativePath))[0];
+  if (fontSource) {
+    const font = resolveInside(projectPath, fontSource.relativePath);
     const staged = await stageFile(font, stageRoot, `fonts/${path.basename(font)}`);
     fontUrl = `${publicRelativeRoot}/${staged}`;
   }
