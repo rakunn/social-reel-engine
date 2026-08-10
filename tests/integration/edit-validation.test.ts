@@ -15,6 +15,7 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 
 let projectPath: string;
 let videoSourceId: string;
+let musicSourceId: string;
 
 const edit = (options: {
   muted: boolean;
@@ -79,9 +80,11 @@ beforeAll(async () => {
     '1\n00:00:00,000 --> 00:00:00,800\nValid caption\n\n2\nBroken caption\n',
   );
   await ingestFiles(projectPath, [video], 'clips');
+  await ingestFiles(projectPath, [video], 'music');
   await ingestFiles(projectPath, [captions, srt], 'captions');
   const manifest = await analyzeSources(projectPath);
   videoSourceId = manifest.sources.find((source) => source.mediaType === 'video')!.id;
+  musicSourceId = manifest.sources.find((source) => source.mediaType === 'audio')!.id;
 }, 30_000);
 
 describe('edit media validation', () => {
@@ -90,6 +93,17 @@ describe('edit media validation', () => {
     expect(result.valid).toBe(false);
     expect(result.failures).toEqual(
       expect.arrayContaining([expect.stringMatching(/shot-1.*audio stream/i)]),
+    );
+  });
+
+  it('rejects selected music when the source has no audio stream', async () => {
+    const result = await validateEdit(projectPath, {
+      ...edit({muted: true, captions: 'none'}),
+      music: {sourceId: musicSourceId, startSeconds: 0, gainDb: -8},
+    });
+    expect(result.valid).toBe(false);
+    expect(result.failures).toEqual(
+      expect.arrayContaining([expect.stringMatching(/music.*audio stream/i)]),
     );
   });
 

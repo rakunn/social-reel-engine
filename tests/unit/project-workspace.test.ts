@@ -1,4 +1,4 @@
-import {mkdtemp, readFile, writeFile} from 'node:fs/promises';
+import {access, mkdtemp, readFile, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -89,6 +89,30 @@ describe('reel project workspace', () => {
     const status: ProjectStatus = await getProjectStatus(projectPath);
     expect(status.stage).toBe('awaiting-inputs');
     expect(status.nextAction).toMatch(/input\/clips/i);
+  });
+
+  it('does not leave a project directory when the title is invalid', async () => {
+    const projectsRoot = await makeProjectsRoot();
+    const projectPath = path.join(projectsRoot, 'invalid-title');
+
+    await expect(
+      createReelProject({
+        engineRoot: repositoryRoot,
+        projectsRoot,
+        reelName: 'invalid-title',
+        title: 'x'.repeat(161),
+      }),
+    ).rejects.toThrow(/160|too_big|title/i);
+    await expect(access(projectPath)).rejects.toThrow();
+
+    await expect(
+      createReelProject({
+        engineRoot: repositoryRoot,
+        projectsRoot,
+        reelName: 'invalid-title',
+        title: 'Corrected title',
+      }),
+    ).resolves.toBe(projectPath);
   });
 });
 

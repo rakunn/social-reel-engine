@@ -1,4 +1,4 @@
-import {mkdtemp, writeFile} from 'node:fs/promises';
+import {mkdir, mkdtemp, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {describe, expect, it} from 'vitest';
@@ -28,6 +28,7 @@ import {
   expectedRenderFingerprint,
   recordRenderArtifact,
 } from '../../src/render/artifacts';
+import {getProjectStatus} from '../../src/project/workspace';
 
 const makeFixture = async () => {
   const projectPath = await mkdtemp(path.join(tmpdir(), 'reel-approval-'));
@@ -267,6 +268,27 @@ describe('edit validation', () => {
 });
 
 describe('hash-bound approvals', () => {
+  it('does not report a same-size corrupted delivery as rendered', async () => {
+    const {projectPath} = await makeFixture();
+    await approveEdit(projectPath);
+    await approveColor(projectPath);
+    const outputDirectory = path.join(projectPath, 'output');
+    await mkdir(outputDirectory, {recursive: true});
+    const deliveryPath = path.join(outputDirectory, 'delivery.mp4');
+    await writeFile(deliveryPath, 'current-delivery');
+    await recordRenderArtifact(
+      projectPath,
+      'delivery',
+      deliveryPath,
+      await expectedRenderFingerprint(projectPath, 'delivery'),
+    );
+    expect((await getProjectStatus(projectPath)).stage).toBe('rendered');
+
+    await writeFile(deliveryPath, 'changed-delivery');
+
+    expect((await getProjectStatus(projectPath)).stage).toBe('ready-to-render');
+  });
+
   it('requires the exact current rough-cut preview before edit approval', async () => {
     const {projectPath, edit} = await makeFixture();
     await writeJson(path.join(projectPath, 'edits/edit.json'), {
