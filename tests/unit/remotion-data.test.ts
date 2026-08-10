@@ -1,4 +1,5 @@
-import {describe, expect, it} from 'vitest';
+import {loadFont} from '@remotion/fonts';
+import {describe, expect, it, vi} from 'vitest';
 import {EditManifestSchema} from '../../src/contracts/schemas';
 import {
   buildShotTimings,
@@ -9,6 +10,11 @@ import {
   type ReelRenderProps,
 } from '../../src/remotion/model';
 import * as remotionModel from '../../src/remotion/model';
+import * as remotionReel from '../../src/remotion/Reel';
+
+vi.mock('@remotion/fonts', () => ({
+  loadFont: vi.fn(async () => undefined),
+}));
 
 const edit = EditManifestSchema.parse({
   schemaVersion: '1.0.0',
@@ -117,6 +123,23 @@ describe('data-driven Remotion model', () => {
     expect(fontFaceRule?.("/fonts/Director's Cut.ttf")).toBe(
       `@font-face{font-family:ReelCustom;src:url("/fonts/Director's Cut.ttf");font-display:block;}`,
     );
+  });
+
+  it('blocks Remotion rendering until a staged custom font has loaded', () => {
+    const mockedLoadFont = vi.mocked(loadFont);
+    mockedLoadFont.mockClear();
+
+    remotionReel.SocialReel({
+      ...props,
+      fontUrl: "jobs/remotion-test/fonts/Director's Cut.ttf",
+    });
+
+    expect(mockedLoadFont).toHaveBeenCalledTimes(1);
+    expect(mockedLoadFont).toHaveBeenCalledWith({
+      family: 'ReelCustom',
+      url: "/jobs/remotion-test/fonts/Director%27s%20Cut.ttf",
+      display: 'block',
+    });
   });
 
   it('fades a title to zero on its final rendered frame', () => {

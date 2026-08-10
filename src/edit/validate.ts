@@ -16,6 +16,7 @@ import {
   validateTransitionDurations,
 } from '../core/timeline';
 import {readValidatedSourceManifest} from '../media/source-integrity';
+import {streamDurationSeconds} from '../media/duration';
 import {parseCaptionContent} from '../remotion/captions';
 import {captionFrameRange} from '../remotion/model';
 
@@ -34,17 +35,6 @@ const parseFps = (value: unknown): number | null => {
       ? numerator / denominator
       : null;
   return fps !== null && fps > 0 ? fps : null;
-};
-
-const streamDurationSeconds = (stream: Record<string, unknown>): number | null => {
-  const duration = Number(stream.duration);
-  if (Number.isFinite(duration) && duration > 0) {
-    return duration;
-  }
-  const durationTs = Number(stream.duration_ts);
-  const timeBase = parseFps(stream.time_base);
-  const derived = durationTs * (timeBase ?? Number.NaN);
-  return Number.isFinite(derived) && derived > 0 ? derived : null;
 };
 
 export type EditValidation = {
@@ -152,10 +142,10 @@ export const validateEdit = async (
       if (!audioStream) {
         failures.push(`Music source ${edit.music.sourceId} has no audio stream`);
       } else {
-        const streamDuration = Number(audioStream.duration);
+        const streamDuration = streamDurationSeconds(audioStream);
         const formatDuration = Number(music.ffprobe.format?.duration);
         const musicDuration =
-          Number.isFinite(streamDuration) && streamDuration > 0
+          streamDuration !== null
             ? streamDuration
             : Number.isFinite(formatDuration) && formatDuration > 0
               ? formatDuration

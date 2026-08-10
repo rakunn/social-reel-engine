@@ -153,6 +153,24 @@ describe('source analysis and viewing proxies', () => {
     expect(afterConfigurationChange.items[0].cached).toBe(false);
   });
 
+  it('applies proxy defaults when legacy settings omit proxy fields', async () => {
+    const settingsPath = path.join(projectPath, 'config/settings.json');
+    const original = JSON.parse(await readFile(settingsPath, 'utf8'));
+    await writeJson(settingsPath, {
+      schemaVersion: '1.0.0',
+      proxy: {width: 720},
+    });
+
+    try {
+      const report = await generateProxies(projectPath);
+      expect(report.items[0]).toEqual(
+        expect.objectContaining({maximumDimension: 960, cached: false}),
+      );
+    } finally {
+      await writeJson(settingsPath, original);
+    }
+  });
+
   it('samples proxy review images within the video stream when another stream is longer', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'reel-proxy-duration-'));
     const durationProject = await createReelProject({

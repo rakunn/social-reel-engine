@@ -189,6 +189,56 @@ describe('edit media validation', () => {
     );
   });
 
+  it('derives music duration from duration_ts before using container duration', async () => {
+    const manifestPath = path.join(projectPath, 'analysis/sources.json');
+    const original = JSON.parse(await readFile(manifestPath, 'utf8'));
+    const changed = {
+      ...original,
+      sources: original.sources.map(
+        (source: {
+          id: string;
+          ffprobe: {
+            format: Record<string, unknown>;
+            streams: Array<Record<string, unknown>>;
+          };
+        }) =>
+          source.id === validMusicSourceId
+            ? {
+                ...source,
+                ffprobe: {
+                  ...source.ffprobe,
+                  format: {...source.ffprobe.format, duration: '2.0'},
+                  streams: source.ffprobe.streams.map((stream) =>
+                    stream.codec_type === 'audio'
+                      ? {
+                          ...stream,
+                          duration: undefined,
+                          duration_ts: '24000',
+                          time_base: '1/48000',
+                        }
+                      : stream,
+                  ),
+                },
+              }
+            : source,
+      ),
+    };
+    await writeJson(manifestPath, changed);
+
+    try {
+      const result = await validateEdit(projectPath, {
+        ...edit({muted: true, captions: 'none'}),
+        music: {sourceId: validMusicSourceId, startSeconds: 0.75, gainDb: -8},
+      });
+      expect(result.valid).toBe(false);
+      expect(result.failures).toContainEqual(
+        expect.stringMatching(/music.*offset|start.*duration/i),
+      );
+    } finally {
+      await writeJson(manifestPath, original);
+    }
+  });
+
   it('falls back to the real frame rate when the average rate is unusable', async () => {
     const manifestPath = path.join(projectPath, 'analysis/sources.json');
     const original = JSON.parse(await readFile(manifestPath, 'utf8'));
