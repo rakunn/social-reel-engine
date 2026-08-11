@@ -91,6 +91,14 @@ describe('reel project workspace', () => {
     expect(status.nextAction).toMatch(/input\/clips/i);
   });
 
+  it('does not create a project directory when status targets an unknown reel', async () => {
+    const projectsRoot = await makeProjectsRoot();
+    const projectPath = path.join(projectsRoot, 'misspelled-reel');
+
+    await expect(getProjectStatus(projectPath)).rejects.toThrow(/does not exist or is incomplete/i);
+    await expect(access(projectPath)).rejects.toThrow();
+  });
+
   it('counts clips recursively when reporting status', async () => {
     const projectsRoot = await makeProjectsRoot();
     const projectPath = await createReelProject({

@@ -24,8 +24,17 @@ import {
   readRenderArtifactFreshness,
   readRenderArtifactRecord,
 } from '../render/artifacts';
-import {readValidatedSourceManifest} from '../media/source-integrity';
+import {
+  assertVerifiedInputSnapshotUnchanged,
+  createSourceIntegrityContext,
+  readValidatedSourceManifest,
+  type SourceIntegrityContext,
+} from '../media/source-integrity';
 import {assertRightsConfirmation} from './rights';
+
+export type ApprovalIntegrityOptions = {
+  integrity?: SourceIntegrityContext;
+};
 
 const loadState = async (projectPath: string) => {
   const edit = EditManifestSchema.parse(
@@ -120,11 +129,14 @@ const readCurrentGradedStillReview = async (
 const currentReviewHashes = async (
   projectPath: string,
   state?: Awaited<ReturnType<typeof loadState>>,
+  options: ApprovalIntegrityOptions = {},
 ) => {
   const loaded = state ?? (await loadState(projectPath));
   let previewFingerprint: string;
   try {
-    previewFingerprint = await expectedRenderFingerprint(projectPath, 'preview');
+    previewFingerprint = await expectedRenderFingerprint(projectPath, 'preview', {
+      integrity: options.integrity,
+    });
   } catch (error) {
     return {
       ...loaded,
@@ -136,6 +148,7 @@ const currentReviewHashes = async (
   }
   const freshness = await readRenderArtifactFreshness(projectPath, 'preview', {
     expectedFingerprint: previewFingerprint,
+    integrity: options.integrity,
   });
   if (!freshness.fresh) {
     return {
@@ -185,12 +198,14 @@ const currentReviewHashes = async (
 export const approveEdit = async (
   projectPath: string,
   now = new Date(),
+  options: ApprovalIntegrityOptions = {},
 ): Promise<ApprovalState> => {
-  const validation = await validateEdit(projectPath);
+  const integrity = options.integrity ?? createSourceIntegrityContext();
+  const validation = await validateEdit(projectPath, undefined, {integrity});
   if (!validation.valid) {
     throw new Error(`Edit is not valid:\n- ${validation.failures.join('\n- ')}`);
   }
-  const state = await currentReviewHashes(projectPath);
+  const state = await currentReviewHashes(projectPath, undefined, {integrity});
   if (!state.editReviewHash) {
     throw new Error(
       `The exact current rough-cut preview is missing or stale: ${state.previewReason ?? 'render it first'}`,
@@ -203,6 +218,7 @@ export const approveEdit = async (
     edit: {hash, approvedAt: now.toISOString(), approvedBy: 'user'},
     color: approvals.color?.editHash === hash ? approvals.color : null,
   });
+  await assertVerifiedInputSnapshotUnchanged(projectPath, integrity);
   await writeJson(path.join(projectPath, 'analysis/approvals.json'), next);
   return next;
 };
@@ -210,14 +226,16 @@ export const approveEdit = async (
 export const approveColor = async (
   projectPath: string,
   now = new Date(),
+  options: ApprovalIntegrityOptions = {},
 ): Promise<ApprovalState> => {
-  const state = await currentReviewHashes(projectPath);
+  const integrity = options.integrity ?? createSourceIntegrityContext();
+  const state = await currentReviewHashes(projectPath, undefined, {integrity});
   const {edit, approvals} = state;
   const editHash = state.editReviewHash;
   if (!editHash || approvals.edit?.hash !== editHash) {
     throw new Error('Edit approval is missing or stale; approve the current rough cut first');
   }
-  const manifest = await readValidatedSourceManifest(projectPath);
+  const manifest = await readValidatedSourceManifest(projectPath, integrity);
   for (const clip of edit.clips) {
     const source = manifest.sources.find((entry) => entry.id === clip.sourceId);
     if (!source) {
@@ -241,12 +259,16 @@ export const approveColor = async (
       approvedBy: 'user',
     },
   });
+  await assertVerifiedInputSnapshotUnchanged(projectPath, integrity);
   await writeJson(path.join(projectPath, 'analysis/approvals.json'), next);
   return next;
 };
 
-export const readApprovalReadiness = async (projectPath: string) => {
-  const state = await currentReviewHashes(projectPath);
+export const readApprovalReadiness = async (
+  projectPath: string,
+  options: ApprovalIntegrityOptions = {},
+) => {
+  const state = await currentReviewHashes(projectPath, undefined, options);
   return {
     ...approvalStatus(state.approvals, state.editReviewHash, state.colorReviewHash),
     colorReviewReady: state.colorReviewHash !== null,
@@ -254,31 +276,44 @@ export const readApprovalReadiness = async (projectPath: string) => {
   };
 };
 
-export const readApprovalStatus = async (projectPath: string) => {
-  const {editApproved, colorApproved} = await readApprovalReadiness(projectPath);
+export const readApprovalStatus = async (
+  projectPath: string,
+  options: ApprovalIntegrityOptions = {},
+) => {
+  const {editApproved, colorApproved} = await readApprovalReadiness(projectPath, options);
   return {editApproved, colorApproved};
 };
 
-export const assertEditApproval = async (projectPath: string): Promise<string> => {
-  const state = await currentReviewHashes(projectPath);
+export const assertEditApproval = async (
+  projectPath: string,
+  options: ApprovalIntegrityOptions = {},
+): Promise<string> => {
+  const state = await currentReviewHashes(projectPath, undefined, options);
   if (!state.editReviewHash || state.approvals.edit?.hash !== state.editReviewHash) {
     throw new Error('Edit approval is missing or stale for the exact current rough-cut preview');
   }
   return state.editReviewHash;
 };
 
-export const assertRenderApprovals = async (projectPath: string): Promise<void> => {
-  const status = await readApprovalStatus(projectPath);
+export const assertRenderApprovals = async (
+  projectPath: string,
+  options: ApprovalIntegrityOptions = {},
+): Promise<void> => {
+  const status = await readApprovalStatus(projectPath, options);
   if (!status.editApproved || !status.colorApproved) {
     throw new Error('Rendering is blocked because edit or color approval is missing or stale');
   }
 };
 
-export const assertFinalReadiness = async (projectPath: string): Promise<void> => {
-  const validation = await validateEdit(projectPath);
+export const assertFinalReadiness = async (
+  projectPath: string,
+  options: ApprovalIntegrityOptions = {},
+): Promise<void> => {
+  const integrity = options.integrity ?? createSourceIntegrityContext();
+  const validation = await validateEdit(projectPath, undefined, {integrity});
   if (!validation.valid) {
     throw new Error(`Final export is blocked by invalid or changed inputs:\n- ${validation.failures.join('\n- ')}`);
   }
-  await assertRenderApprovals(projectPath);
-  await assertRightsConfirmation(projectPath);
+  await assertRenderApprovals(projectPath, {integrity});
+  await assertRightsConfirmation(projectPath, {integrity});
 };

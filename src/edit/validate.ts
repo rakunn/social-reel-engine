@@ -6,7 +6,6 @@ import {
   type SourceManifest,
   type EditManifest,
 } from '../contracts/schemas';
-import {hashFile} from '../core/hash';
 import {readJson} from '../core/json';
 import {
   secondsToFrames,
@@ -15,7 +14,10 @@ import {
   validatePlaybackRate,
   validateTransitionDurations,
 } from '../core/timeline';
-import {readValidatedSourceManifest} from '../media/source-integrity';
+import {
+  readValidatedSourceManifest,
+  type SourceIntegrityContext,
+} from '../media/source-integrity';
 import {streamDurationSeconds} from '../media/duration';
 import {parseCaptionContent} from '../remotion/captions';
 import {captionFrameRange} from '../remotion/model';
@@ -44,9 +46,14 @@ export type EditValidation = {
   warnings: string[];
 };
 
+export type ValidateEditOptions = {
+  integrity?: SourceIntegrityContext;
+};
+
 export const validateEdit = async (
   projectPath: string,
   input?: unknown,
+  options: ValidateEditOptions = {},
 ): Promise<EditValidation> => {
   const edit = EditManifestSchema.parse(
     input ?? (await readJson(path.join(projectPath, 'edits/edit.json'))),
@@ -68,7 +75,7 @@ export const validateEdit = async (
   }
   let manifest: SourceManifest | null = null;
   try {
-    manifest = await readValidatedSourceManifest(projectPath);
+    manifest = await readValidatedSourceManifest(projectPath, options.integrity);
   } catch (error) {
     failures.push((error as Error).message);
   }
@@ -83,9 +90,6 @@ export const validateEdit = async (
       const sourcePath = path.join(projectPath, source.relativePath);
       try {
         await access(sourcePath);
-        if ((await hashFile(sourcePath)) !== source.checksumSha256) {
-          failures.push(`${clip.id}: source checksum changed after ingest`);
-        }
       } catch {
         failures.push(`${clip.id}: media file is missing (${source.relativePath})`);
       }
@@ -161,9 +165,6 @@ export const validateEdit = async (
       try {
         const musicPath = path.join(projectPath, music.relativePath);
         await access(musicPath);
-        if ((await hashFile(musicPath)) !== music.checksumSha256) {
-          failures.push('Music source checksum changed after ingest');
-        }
       } catch {
         failures.push(`Music file is missing (${music.relativePath})`);
       }
@@ -186,9 +187,6 @@ export const validateEdit = async (
         failures.push(`Caption file is missing (${edit.captions.relativePath})`);
       }
       if (captionExists) {
-        if ((await hashFile(captionPath)) !== caption.checksumSha256) {
-          failures.push('Caption source checksum changed after ingest');
-        }
         try {
           const captions = parseCaptionContent(
             await readFile(captionPath, 'utf8'),

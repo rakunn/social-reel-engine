@@ -338,6 +338,32 @@ describe.runIf(process.platform !== 'win32')('Remotion process supervisor', () =
     expect(await readFile(receivedPath, 'utf8')).toBe('SIGTERM');
     await assertTemporaryProtocolFilesRemoved(request);
   });
+
+  it('passes the compositor environment to the Remotion worker without mutating the parent process', async () => {
+    const directory = await makeTemporaryDirectory();
+    const request = makeRequest(directory);
+    const workerEntryPoint = await writeWorker(
+      directory,
+      `
+        import {writeFileSync} from 'node:fs';
+        if (process.env.DYLD_LIBRARY_PATH !== '/fixture/compositor') {
+          throw new Error('worker did not receive compositor library path');
+        }
+        writeFileSync(process.argv[3], JSON.stringify({schemaVersion: '1.0.0', ok: true}));
+      `,
+    );
+
+    await expect(
+      superviseRemotionRender(request, {
+        workerEntryPoint,
+        environment: {...process.env, DYLD_LIBRARY_PATH: '/fixture/compositor'},
+      }, {
+        stopOwnedProcessGroup: async () => undefined,
+      }),
+    ).resolves.toBeUndefined();
+    expect(process.env.DYLD_LIBRARY_PATH).not.toBe('/fixture/compositor');
+    await assertTemporaryProtocolFilesRemoved(request);
+  });
 });
 
 describe('render artifact lifecycle boundary', () => {
@@ -355,20 +381,23 @@ describe('render artifact lifecycle boundary', () => {
         rawOutput,
         outputLocation,
         fingerprint: 'fingerprint',
-        workerRequest: {} as never,
+        workerRequest: {rawOutput} as never,
       },
       {
-        supervise: async () => {
+        supervise: async (request) => {
           calls.push('worker');
+          await writeFile(request.rawOutput, 'raw');
         },
-        runFfmpeg: async () => {
+        runFfmpeg: async (args) => {
           calls.push('post-process');
+          await writeFile(args.at(-1)!, 'post-processed');
           return {command: 'ffmpeg', args: [], stdout: '', stderr: '', exitCode: 0};
         },
         recordArtifact: async () => {
           calls.push('record');
           return {} as never;
         },
+        probeFile: async () => ({}) as never,
       },
     );
 
@@ -376,16 +405,17 @@ describe('render artifact lifecycle boundary', () => {
   });
 
   it('does not post-process or record after cleanup failure', async () => {
+    const root = await makeTemporaryDirectory();
     const postProcess = vi.fn();
     const recordArtifact = vi.fn();
 
     await expect(
       finalizeRawRender(
         {
-          projectPath: '/project',
+          projectPath: root,
           target: 'master',
-          rawOutput: '/project/work/render/master-remotion.mov',
-          outputLocation: '/project/output/master.mov',
+          rawOutput: path.join(root, 'work/render/master-remotion.mov'),
+          outputLocation: path.join(root, 'output/master.mov'),
           fingerprint: 'fingerprint',
           workerRequest: {} as never,
         },
@@ -399,6 +429,42 @@ describe('render artifact lifecycle boundary', () => {
       ),
     ).rejects.toThrow(/4102/);
     expect(postProcess).not.toHaveBeenCalled();
+    expect(recordArtifact).not.toHaveBeenCalled();
+  });
+
+  it('keeps an existing final output when post-processing fails', async () => {
+    const root = await makeTemporaryDirectory();
+    const rawOutput = path.join(root, 'raw.mp4');
+    const outputLocation = path.join(root, 'preview.mp4');
+    await writeFile(outputLocation, 'known-good-preview');
+    const recordArtifact = vi.fn();
+
+    await expect(
+      finalizeRawRender(
+        {
+          projectPath: root,
+          target: 'preview',
+          rawOutput,
+          outputLocation,
+          fingerprint: 'fingerprint',
+          workerRequest: {rawOutput} as never,
+        },
+        {
+          supervise: async (request: RemotionWorkerRequest) => {
+            await writeFile(request.rawOutput, 'raw-render');
+          },
+          runFfmpeg: async (args: readonly string[]) => {
+            await writeFile(args.at(-1)!, 'partial-preview');
+            throw new Error('post-processing failed');
+          },
+          recordArtifact,
+          probeFile: async () => ({}) as never,
+        } as never,
+      ),
+    ).rejects.toThrow('post-processing failed');
+
+    await expect(readFile(outputLocation, 'utf8')).resolves.toBe('known-good-preview');
+    await expect(readdir(root)).resolves.toEqual(['preview.mp4', 'raw.mp4']);
     expect(recordArtifact).not.toHaveBeenCalled();
   });
 

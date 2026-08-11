@@ -5,12 +5,19 @@ import {hashFile, hashValue} from '../core/hash';
 import {readJson} from '../core/json';
 import {resolveInside} from '../core/paths';
 import type {PreviewStabilizationReport} from './preview-stabilize';
-import {readValidatedSourceManifest} from './source-integrity';
+import {
+  readValidatedSourceManifest,
+  type SourceIntegrityContext,
+} from './source-integrity';
 
 export type PreviewStabilizationContext = {
   fresh: boolean;
   reason: string | null;
   reviewContextHash: string | null;
+};
+
+export type PreviewStabilizationContextOptions = {
+  integrity?: SourceIntegrityContext;
 };
 
 const verifiedChecksum = async (
@@ -30,6 +37,7 @@ const verifiedChecksum = async (
 
 export const readPreviewStabilizationContext = async (
   projectPath: string,
+  options: PreviewStabilizationContextOptions = {},
 ): Promise<PreviewStabilizationContext> => {
   const edit = EditManifestSchema.parse(
     await readJson(path.join(projectPath, 'edits/edit.json')),
@@ -55,7 +63,7 @@ export const readPreviewStabilizationContext = async (
     };
   }
 
-  const manifest = await readValidatedSourceManifest(projectPath);
+  const manifest = await readValidatedSourceManifest(projectPath, options.integrity);
   const reviewItems: Array<Record<string, unknown>> = [];
   for (const clip of stabilizedClips) {
     const matches = report.items.filter((item) => item.clipId === clip.id);

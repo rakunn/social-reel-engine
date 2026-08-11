@@ -13,7 +13,12 @@ import {confirmRights} from './edit/rights';
 import {validateEdit} from './edit/validate';
 import {ingestFiles, INPUT_KINDS, type InputKind} from './project/ingest';
 import {installCatalogLut, readLutCatalog} from './project/library';
-import {createReelProject, getProjectStatus} from './project/workspace';
+import {assertProjectScaffold, createReelProject, getProjectStatus} from './project/workspace';
+import {
+  runMediaOperation,
+  type MediaOperationCommand,
+  type MediaOperationContext,
+} from './project/operation';
 import {renderMasterAndDelivery, renderPreview} from './render/remotion';
 import {exitCodeForRenderError} from './render/remotion-supervisor';
 
@@ -24,6 +29,20 @@ const print = (value: unknown): void => {
 };
 
 const project = (reelName: string): string => resolveProjectPath(ENGINE_ROOT, reelName);
+
+const runTrackedMediaCommand = async <T>(
+  reelName: string,
+  command: MediaOperationCommand,
+  phase: string,
+  operation: (context: MediaOperationContext) => Promise<T>,
+): Promise<T> => {
+  const projectPath = project(reelName);
+  await assertProjectScaffold(projectPath);
+  return await runMediaOperation(projectPath, command, async ({update, assertOwnership}) => {
+    await update({phase});
+    return await operation({update, assertOwnership});
+  });
+};
 
 export const createCli = (): Command => {
   const program = new Command();
@@ -92,19 +111,41 @@ export const createCli = (): Command => {
     .command('analyze')
     .argument('<reel-name>')
     .description('Checksum and ffprobe every supplied input')
-    .action(async (reelName: string) => print(await analyzeSources(project(reelName))));
+    .action(async (reelName: string) =>
+      print(
+        await runTrackedMediaCommand(reelName, 'analyze', 'checking-inputs', async () =>
+          await analyzeSources(project(reelName)),
+        ),
+      ),
+    );
 
   program
     .command('proxy')
     .argument('<reel-name>')
     .description('Create normalized or visibly watermarked viewing proxies and contact sheets')
-    .action(async (reelName: string) => print(await generateProxies(project(reelName))));
+    .action(async (reelName: string) =>
+      print(
+        await runTrackedMediaCommand(reelName, 'proxy', 'preparing-proxies', async ({update}) =>
+          await generateProxies(project(reelName), new Date(), {
+            onProgress: async (progress) => {
+              await update({phase: 'transcoding-proxies', progress});
+            },
+          }),
+        ),
+      ),
+    );
 
   program
     .command('beats')
     .argument('<reel-name>')
     .description('Analyze supplied music beats and onsets with librosa')
-    .action(async (reelName: string) => print(await analyzeMusic(project(reelName), ENGINE_ROOT)));
+    .action(async (reelName: string) =>
+      print(
+        await runTrackedMediaCommand(reelName, 'beats', 'analyzing-beats', async () =>
+          await analyzeMusic(project(reelName), ENGINE_ROOT),
+        ),
+      ),
+    );
 
   program
     .command('validate-edit')
@@ -120,7 +161,17 @@ export const createCli = (): Command => {
     .command('preview')
     .argument('<reel-name>')
     .description('Render a 540×960 H.264 rough-cut preview')
-    .action(async (reelName: string) => print({preview: await renderPreview(project(reelName), ENGINE_ROOT)}));
+    .action(async (reelName: string) =>
+      print({
+        preview: await runTrackedMediaCommand(reelName, 'preview', 'rendering-preview', async ({update}) =>
+          await renderPreview(project(reelName), ENGINE_ROOT, {
+            onActivity: async ({phase, progress = null}) => {
+              await update({phase, progress});
+            },
+          }),
+        ),
+      }),
+    );
 
   program
     .command('approve-edit')
@@ -132,7 +183,17 @@ export const createCli = (): Command => {
     .command('grade-stills')
     .argument('<reel-name>')
     .description('Generate hash-bound graded reference PNGs for color review')
-    .action(async (reelName: string) => print(await generateGradedStills(project(reelName))));
+    .action(async (reelName: string) =>
+      print(
+        await runTrackedMediaCommand(reelName, 'grade-stills', 'generating-reference-stills', async ({update}) =>
+          await generateGradedStills(project(reelName), new Date(), {
+            onProgress: async (progress) => {
+              await update({phase: 'generating-reference-stills', progress});
+            },
+          }),
+        ),
+      ),
+    );
 
   program
     .command('approve-color')
@@ -150,14 +211,32 @@ export const createCli = (): Command => {
     .command('grade')
     .argument('<reel-name>')
     .description('Create approved 10-bit ProRes shot intermediates with optional stabilization')
-    .action(async (reelName: string) => print(await gradeSelectedClips(project(reelName))));
+    .action(async (reelName: string) =>
+      print(
+        await runTrackedMediaCommand(reelName, 'grade', 'grading-selected-clips', async ({update}) =>
+          await gradeSelectedClips(project(reelName), new Date(), {
+            onProgress: async (progress) => {
+              await update({phase: 'grading-selected-clips', progress});
+            },
+          }),
+        ),
+      ),
+    );
 
   program
     .command('render')
     .argument('<reel-name>')
     .description('Render the approved ProRes master and normalized H.264 delivery')
     .action(async (reelName: string) =>
-      print(await renderMasterAndDelivery(project(reelName), ENGINE_ROOT)),
+      print(
+        await runTrackedMediaCommand(reelName, 'render', 'rendering-master', async ({update}) =>
+          await renderMasterAndDelivery(project(reelName), ENGINE_ROOT, {
+            onActivity: async ({phase, progress = null}) => {
+              await update({phase, progress});
+            },
+          }),
+        ),
+      ),
     );
 
   program
@@ -170,7 +249,12 @@ export const createCli = (): Command => {
     )
     .description('Write machine-readable and human-readable output QC')
     .action(async (reelName: string, options: {target: 'preview' | 'master' | 'delivery'}) => {
-      const report = await runQc(project(reelName), options.target);
+      const report = await runTrackedMediaCommand(
+        reelName,
+        'qc',
+        `checking-${options.target}`,
+        async () => await runQc(project(reelName), options.target),
+      );
       print(report);
       if (report.failures.length) process.exitCode = 1;
     });

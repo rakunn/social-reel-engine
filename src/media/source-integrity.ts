@@ -6,7 +6,7 @@ import {
 } from '../contracts/schemas';
 import {canonicalJson} from '../core/hash';
 import {readJson} from '../core/json';
-import {scanInputs} from '../project/ingest';
+import {scanInputs, type IngestManifest} from '../project/ingest';
 import {
   cameraFromConfirmation,
   mediaTypeForKind,
@@ -18,6 +18,29 @@ type SourceIdentity = Pick<
   SourceEntry,
   'id' | 'relativePath' | 'checksumSha256' | 'sizeBytes' | 'mediaType' | 'camera'
 >;
+
+export type VerifiedInputSnapshot = {
+  ingest: IngestManifest;
+  sourceManifest: SourceManifest;
+};
+
+export type SourceIntegrityContext = {
+  snapshot: VerifiedInputSnapshot | null;
+  pending: Promise<VerifiedInputSnapshot> | null;
+};
+
+export const createSourceIntegrityContext = (): SourceIntegrityContext => ({
+  snapshot: null,
+  pending: null,
+});
+
+export const setVerifiedInputSnapshot = (
+  context: SourceIntegrityContext,
+  snapshot: VerifiedInputSnapshot,
+): void => {
+  context.snapshot = snapshot;
+  context.pending = null;
+};
 
 const PIPELINE_MEDIA_TYPES = new Set<SourceEntry['mediaType']>([
   'video',
@@ -46,9 +69,7 @@ export const sourceManifestFingerprintProjection = (manifest: SourceManifest) =>
     .sort((left, right) => left.relativePath.localeCompare(right.relativePath)),
 });
 
-export const readValidatedSourceManifest = async (
-  projectPath: string,
-): Promise<SourceManifest> => {
+const verifyInputSnapshot = async (projectPath: string): Promise<VerifiedInputSnapshot> => {
   const manifest = SourceManifestSchema.parse(
     await readJson(path.join(projectPath, 'analysis/sources.json')),
   );
@@ -105,5 +126,49 @@ export const readValidatedSourceManifest = async (
       `Source manifest is stale or inconsistent; run analyze again:\n- ${failures.join('\n- ')}`,
     );
   }
-  return manifest;
+  return {ingest, sourceManifest: manifest};
+};
+
+export const readVerifiedInputSnapshot = async (
+  projectPath: string,
+  context?: SourceIntegrityContext,
+): Promise<VerifiedInputSnapshot> => {
+  if (!context) return await verifyInputSnapshot(projectPath);
+  if (context.snapshot) return context.snapshot;
+  context.pending ??= verifyInputSnapshot(projectPath);
+  try {
+    context.snapshot = await context.pending;
+    return context.snapshot;
+  } finally {
+    context.pending = null;
+  }
+};
+
+export const assertVerifiedInputSnapshotUnchanged = async (
+  projectPath: string,
+  context?: SourceIntegrityContext,
+): Promise<VerifiedInputSnapshot> => {
+  if (!context?.snapshot) {
+    return await verifyInputSnapshot(projectPath);
+  }
+  const observed = await verifyInputSnapshot(projectPath);
+  const expected = context.snapshot;
+  if (
+    canonicalJson(expected.ingest.files) !== canonicalJson(observed.ingest.files) ||
+    canonicalJson(sourceManifestFingerprintProjection(expected.sourceManifest)) !==
+      canonicalJson(sourceManifestFingerprintProjection(observed.sourceManifest))
+  ) {
+    throw new Error(
+      'Verified inputs changed during the media operation; retry the command before publishing artifacts',
+    );
+  }
+  return observed;
+};
+
+export const readValidatedSourceManifest = async (
+  projectPath: string,
+  context?: SourceIntegrityContext,
+): Promise<SourceManifest> => {
+  const snapshot = await readVerifiedInputSnapshot(projectPath, context);
+  return snapshot.sourceManifest;
 };

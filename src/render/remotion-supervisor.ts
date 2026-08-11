@@ -63,6 +63,7 @@ export type RemotionSupervisorOptions = {
   workerEntryPoint?: string;
   gracefulCancelMs?: number;
   cleanupTimeouts?: Partial<CleanupTimeouts>;
+  environment?: NodeJS.ProcessEnv;
   signalTarget?: SupervisorSignalTarget;
   onWorkerSpawn?: (pid: number) => void;
 };
@@ -282,7 +283,7 @@ export const superviseRemotionRender = async (
       command: process.execPath,
       args: ['--import', 'tsx', workerEntryPoint, requestPath, resultPath],
       cwd: request.engineRoot,
-      env: process.env,
+      env: options.environment ?? process.env,
     });
     owned.child.stdin.end();
     output = captureWorkerOutput(owned);

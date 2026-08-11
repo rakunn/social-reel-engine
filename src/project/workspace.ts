@@ -9,6 +9,13 @@ import {readJson, writeJson} from '../core/json';
 import {assertSafeReelName} from '../core/paths';
 import {validateEdit} from '../edit/validate';
 import {scanInputs} from './ingest';
+import {
+  isMediaOperationLockActive,
+  isMediaOperationAlive,
+  readMediaOperation,
+  runWithStatusScanLock,
+  type MediaOperationRecord,
+} from './operation';
 
 type CreateReelProjectOptions = {
   engineRoot: string;
@@ -24,6 +31,23 @@ const exists = async (filePath: string): Promise<boolean> => {
     return true;
   } catch {
     return false;
+  }
+};
+
+export const assertProjectScaffold = async (projectPath: string): Promise<void> => {
+  const required = [
+    projectPath,
+    path.join(projectPath, 'brief.json'),
+    path.join(projectPath, 'analysis'),
+    path.join(projectPath, 'config'),
+    path.join(projectPath, 'edits/edit.json'),
+  ];
+  try {
+    await Promise.all(required.map(async (requiredPath) => await access(requiredPath)));
+  } catch {
+    throw new Error(
+      `Reel project "${path.basename(projectPath)}" does not exist or is incomplete. Run reel new ${path.basename(projectPath)} first.`,
+    );
   }
 };
 
@@ -78,14 +102,69 @@ export type ProjectStatus = {
     | 'awaiting-color-approval'
     | 'awaiting-rights-confirmation'
     | 'ready-to-render'
-    | 'rendered';
+    | 'rendered'
+    | 'media-in-progress'
+    | 'interrupted-media-job';
   nextAction: string;
   inputs: number;
   editApproved: boolean;
   colorApproved: boolean;
+  activity?: Pick<
+    MediaOperationRecord,
+    'command' | 'phase' | 'progress' | 'startedAt' | 'updatedAt' | 'finishedAt' | 'error'
+  >;
 };
 
-export const getProjectStatus = async (projectPath: string): Promise<ProjectStatus> => {
+const statusActivity = (record: MediaOperationRecord) => ({
+  command: record.command,
+  phase: record.phase,
+  progress: record.progress,
+  startedAt: record.startedAt,
+  updatedAt: record.updatedAt,
+  finishedAt: record.finishedAt,
+  error: record.error,
+});
+
+const statusFromOperation = (operation: MediaOperationRecord): ProjectStatus => {
+  const base = {inputs: 0, editApproved: false, colorApproved: false, activity: statusActivity(operation)};
+  if (isMediaOperationAlive(operation)) {
+    return {
+      ...base,
+      stage: 'media-in-progress',
+      nextAction: `${operation.command} is running (${operation.phase}). Wait for completion before starting another media command.`,
+    };
+  }
+  if (operation.state === 'failed' && operation.error) {
+    return {
+      ...base,
+      stage: 'interrupted-media-job',
+      nextAction: `${operation.command} failed during ${operation.phase}: ${operation.error}. Resolve the failure, then run ${operation.command} again.`,
+    };
+  }
+  return {
+    ...base,
+    stage: 'interrupted-media-job',
+    nextAction: `Run ${operation.command} again to replace interrupted work safely.`,
+  };
+};
+
+const mediaOperationStartingStatus = (): ProjectStatus => ({
+  inputs: 0,
+  editApproved: false,
+  colorApproved: false,
+  stage: 'media-in-progress',
+  nextAction: 'A media operation is starting. Wait for it to publish activity before requesting status again.',
+});
+
+const statusScanInProgressStatus = (): ProjectStatus => ({
+  inputs: 0,
+  editApproved: false,
+  colorApproved: false,
+  stage: 'media-in-progress',
+  nextAction: 'Project status is checking inputs. Wait for it to finish, then request status again.',
+});
+
+const getProjectStatusWithoutOperation = async (projectPath: string): Promise<ProjectStatus> => {
   const inputs = (await scanInputs(projectPath)).files.filter(
     (file) => file.kind === 'clips',
   ).length;
@@ -193,4 +272,27 @@ export const getProjectStatus = async (projectPath: string): Promise<ProjectStat
     stage: 'ready-to-render',
     nextAction: 'Run grade, render, and qc.',
   };
+};
+
+export const getProjectStatus = async (projectPath: string): Promise<ProjectStatus> => {
+  const operation = await readMediaOperation(projectPath);
+  if (operation) {
+    if (isMediaOperationAlive(operation)) return statusFromOperation(operation);
+    if (await isMediaOperationLockActive(projectPath)) return mediaOperationStartingStatus();
+    return statusFromOperation(operation);
+  }
+
+  await assertProjectScaffold(projectPath);
+
+  const locked = await runWithStatusScanLock(projectPath, async () => {
+    const operationAfterLock = await readMediaOperation(projectPath);
+    if (operationAfterLock) return statusFromOperation(operationAfterLock);
+    return await getProjectStatusWithoutOperation(projectPath);
+  });
+  if (locked.acquired) return locked.value;
+
+  const operationAfterBusyLock = await readMediaOperation(projectPath);
+  if (operationAfterBusyLock) return statusFromOperation(operationAfterBusyLock);
+  if (await isMediaOperationLockActive(projectPath)) return mediaOperationStartingStatus();
+  return statusScanInProgressStatus();
 };

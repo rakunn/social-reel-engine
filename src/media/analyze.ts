@@ -7,7 +7,14 @@ import {
 import {readJson, writeJson} from '../core/json';
 import {hashValue} from '../core/hash';
 import {probeFile} from './ffmpeg';
-import {scanInputs, type InputKind} from '../project/ingest';
+import {scanInputs, type IngestManifest, type InputKind} from '../project/ingest';
+
+export type AnalyzeSourcesOptions = {
+  onVerifiedInputSnapshot?: (snapshot: {
+    ingest: IngestManifest;
+    sourceManifest: SourceManifest;
+  }) => void;
+};
 
 export type SourceConfirmation = {
   manufacturer?: string | null;
@@ -67,6 +74,7 @@ const probeForManifest = async (filePath: string) => {
 export const analyzeSources = async (
   projectPath: string,
   now = new Date(),
+  options: AnalyzeSourcesOptions = {},
 ): Promise<SourceManifest> => {
   const ingest = await scanInputs(projectPath, now);
   await writeJson(path.join(projectPath, 'analysis/ingest.json'), ingest);
@@ -97,5 +105,6 @@ export const analyzeSources = async (
     sources,
   });
   await writeJson(path.join(projectPath, 'analysis/sources.json'), manifest);
+  options.onVerifiedInputSnapshot?.({ingest, sourceManifest: manifest});
   return manifest;
 };

@@ -25,12 +25,16 @@ import {
 import {validateEdit} from '../../src/edit/validate';
 import {confirmRights, readRightsConfirmationStatus} from '../../src/edit/rights';
 import {sourceIdFor} from '../../src/media/analyze';
+import {runQc} from '../../src/media/qc-report';
+import {createSourceIntegrityContext} from '../../src/media/source-integrity';
 import {
   expectedRenderFingerprint,
   readRenderArtifactFreshness,
+  readRenderArtifactRecord,
   recordRenderArtifact,
 } from '../../src/render/artifacts';
 import {getProjectStatus} from '../../src/project/workspace';
+import {renderPreview} from '../../src/render/remotion';
 
 const makeFixture = async () => {
   const projectPath = await mkdtemp(path.join(tmpdir(), 'reel-approval-'));
@@ -358,6 +362,18 @@ describe('edit validation', () => {
       expect.stringMatching(/12.*13/),
     ]);
   });
+
+  it('reuses a supplied verified-input context across validation calls', async () => {
+    const {projectPath, edit} = await makeFixture();
+    const integrity = createSourceIntegrityContext();
+
+    await expect(validateEdit(projectPath, edit, {integrity})).resolves.toMatchObject({valid: true});
+    const firstSnapshot = integrity.snapshot;
+    await expect(validateEdit(projectPath, edit, {integrity})).resolves.toMatchObject({valid: true});
+
+    expect(firstSnapshot).not.toBeNull();
+    expect(integrity.snapshot).toBe(firstSnapshot);
+  });
 });
 
 describe('hash-bound approvals', () => {
@@ -591,6 +607,118 @@ describe('hash-bound approvals', () => {
         confirmed: false,
         reason: expect.stringMatching(/not bound.*asset set/i),
       }),
+    );
+  });
+
+  it('reuses a supplied verified-input context while calculating render fingerprints', async () => {
+    const {projectPath} = await makeFixture();
+    const integrity = createSourceIntegrityContext();
+
+    const first = await expectedRenderFingerprint(projectPath, 'preview', {integrity});
+    const firstSnapshot = integrity.snapshot;
+    const second = await expectedRenderFingerprint(projectPath, 'preview', {integrity});
+
+    expect(second).toBe(first);
+    expect(firstSnapshot).not.toBeNull();
+    expect(integrity.snapshot).toBe(firstSnapshot);
+  });
+
+  it('reuses one verified-input snapshot across preview and final fingerprint paths', async () => {
+    const {projectPath} = await makeFixture();
+    const integrity = createSourceIntegrityContext();
+
+    await expectedRenderFingerprint(projectPath, 'preview', {integrity});
+    const snapshot = integrity.snapshot;
+    await expectedRenderFingerprint(projectPath, 'master', {integrity});
+    await expectedRenderFingerprint(projectPath, 'delivery', {integrity});
+
+    expect(snapshot).not.toBeNull();
+    expect(integrity.snapshot).toBe(snapshot);
+  });
+
+  it('returns a fresh preview without requiring a Remotion runtime', async () => {
+    const {projectPath} = await makeFixture();
+
+    await expect(
+      renderPreview(projectPath, path.join(projectPath, 'missing-remotion-runtime')),
+    ).resolves.toBe(path.join(projectPath, 'previews/preview.mp4'));
+  });
+
+  it('does not publish a render artifact after a verified input changes mid-operation', async () => {
+    const {projectPath} = await makeFixture();
+    const integrity = createSourceIntegrityContext();
+    const fingerprint = await expectedRenderFingerprint(projectPath, 'master', {integrity});
+    const masterPath = path.join(projectPath, 'output/master.mov');
+    await mkdir(path.dirname(masterPath), {recursive: true});
+    await writeFile(masterPath, 'new-master-output');
+    await writeFile(path.join(projectPath, 'input/clips/clip.mp4'), 'changed-input-bytes');
+
+    await expect(
+      recordRenderArtifact(projectPath, 'master', masterPath, fingerprint, new Date(), {integrity}),
+    ).rejects.toThrow(/changed during media operation|stale or inconsistent/i);
+    await expect(readRenderArtifactRecord(projectPath, 'master')).resolves.toBeNull();
+  });
+
+  it('does not replace rights confirmation after a verified input changes', async () => {
+    const {projectPath} = await makeFixture();
+    const integrity = createSourceIntegrityContext();
+    await expect(validateEdit(projectPath, undefined, {integrity})).resolves.toMatchObject({
+      valid: true,
+    });
+    const briefPath = path.join(projectPath, 'brief.json');
+    const before = await readFile(briefPath, 'utf8');
+    await writeFile(path.join(projectPath, 'input/clips/clip.mp4'), 'changed-input-bytes');
+
+    await expect(
+      confirmRights(projectPath, new Date('2026-08-11T13:05:00.000Z'), {integrity}),
+    ).rejects.toThrow(/changed during media operation|stale or inconsistent/i);
+    await expect(readFile(briefPath, 'utf8')).resolves.toBe(before);
+  });
+
+  it('does not replace edit approval after a verified input changes', async () => {
+    const {projectPath} = await makeFixture();
+    const integrity = createSourceIntegrityContext();
+    await expect(validateEdit(projectPath, undefined, {integrity})).resolves.toMatchObject({
+      valid: true,
+    });
+    const approvalsPath = path.join(projectPath, 'analysis/approvals.json');
+    const before = await readFile(approvalsPath, 'utf8');
+    await writeFile(path.join(projectPath, 'input/clips/clip.mp4'), 'changed-input-bytes');
+
+    await expect(
+      approveEdit(projectPath, new Date('2026-08-11T13:05:00.000Z'), {integrity}),
+    ).rejects.toThrow(/changed during media operation|stale or inconsistent/i);
+    await expect(readFile(approvalsPath, 'utf8')).resolves.toBe(before);
+  });
+
+  it('does not replace color approval after a verified input changes', async () => {
+    const {projectPath} = await makeFixture();
+    await approveEdit(projectPath, new Date('2026-08-11T13:00:00.000Z'));
+    const integrity = createSourceIntegrityContext();
+    await expect(validateEdit(projectPath, undefined, {integrity})).resolves.toMatchObject({
+      valid: true,
+    });
+    const approvalsPath = path.join(projectPath, 'analysis/approvals.json');
+    const before = await readFile(approvalsPath, 'utf8');
+    await writeFile(path.join(projectPath, 'input/clips/clip.mp4'), 'changed-input-bytes');
+
+    await expect(
+      approveColor(projectPath, new Date('2026-08-11T13:05:00.000Z'), {integrity}),
+    ).rejects.toThrow(/changed during media operation|stale or inconsistent/i);
+    await expect(readFile(approvalsPath, 'utf8')).resolves.toBe(before);
+  });
+
+  it('does not publish a QC report after a verified input changes', async () => {
+    const {projectPath} = await makeFixture();
+    const integrity = createSourceIntegrityContext();
+    await expectedRenderFingerprint(projectPath, 'preview', {integrity});
+    await writeFile(path.join(projectPath, 'input/clips/clip.mp4'), 'changed-input-bytes');
+
+    await expect(
+      runQc(projectPath, 'preview', new Date('2026-08-11T13:05:00.000Z'), {integrity}),
+    ).rejects.toThrow(/changed during media operation|stale or inconsistent/i);
+    await expect(readFile(path.join(projectPath, 'analysis/qc-preview.json'), 'utf8')).rejects.toThrow(
+      /ENOENT/,
     );
   });
 

@@ -5,7 +5,7 @@ import {artifactFingerprint, type ArtifactIndex} from '../project/artifacts';
 import {readJson, writeJson} from '../core/json';
 import {resolveInside} from '../core/paths';
 import {analyzeSources} from './analyze';
-import {runFfmpeg} from './ffmpeg';
+import {probeFile, runFfmpeg} from './ffmpeg';
 import {hashFile} from '../core/hash';
 import {lutCompatibilityFailures} from '../core/lut-compatibility';
 import {pipelineBuildFingerprint} from '../render/artifacts';
@@ -13,6 +13,14 @@ import {escapeFfmpegFilterValue} from './filter-escape';
 import {REC709_OUTPUT_METADATA_ARGS} from './color-ffmpeg';
 import {streamDurationSeconds} from './duration';
 import {readRenderSettings} from '../render/policy';
+import {
+  assertVerifiedInputSnapshotUnchanged,
+  createSourceIntegrityContext,
+  readValidatedSourceManifest,
+  setVerifiedInputSnapshot,
+  type SourceIntegrityContext,
+} from './source-integrity';
+import {writeAtomically} from './atomic-output';
 
 export type ProxyItem = {
   sourceId: string;
@@ -29,6 +37,11 @@ export type ProxyReport = {
   schemaVersion: '1.0.0';
   generatedAt: string;
   items: ProxyItem[];
+};
+
+export type GenerateProxiesOptions = {
+  integrity?: SourceIntegrityContext;
+  onProgress?: (progress: {completed: number; total: number; label: string}) => Promise<void> | void;
 };
 
 const fileExists = async (filePath: string): Promise<boolean> => {
@@ -106,8 +119,14 @@ export const buildProxyVideoFilter = (
 export const generateProxies = async (
   projectPath: string,
   now = new Date(),
+  options: GenerateProxiesOptions = {},
 ): Promise<ProxyReport> => {
-  const manifest = await analyzeSources(projectPath, now);
+  const integrity = options.integrity ?? createSourceIntegrityContext();
+  const manifest = integrity.snapshot
+    ? await readValidatedSourceManifest(projectPath, integrity)
+    : await analyzeSources(projectPath, now, {
+        onVerifiedInputSnapshot: (snapshot) => setVerifiedInputSnapshot(integrity, snapshot),
+      });
   const luts = await loadLuts(projectPath);
   const settings = await readRenderSettings(projectPath);
   const maximumDimension = Math.max(settings.proxy.width, settings.proxy.height);
@@ -129,7 +148,13 @@ export const generateProxies = async (
     ),
   );
 
-  for (const source of manifest.sources.filter((entry) => entry.mediaType === 'video')) {
+  const videoSources = manifest.sources.filter((entry) => entry.mediaType === 'video');
+  for (const [index, source] of videoSources.entries()) {
+    await options.onProgress?.({
+      completed: index,
+      total: videoSources.length,
+      label: source.relativePath,
+    });
     const matching = source.camera.confirmed
       ? luts.filter(
           (lut) =>
@@ -176,52 +201,73 @@ export const generateProxies = async (
         normalizer?.file ?? null,
         maximumDimension,
       );
-      await runFfmpeg([
-        '-i',
-        inputPath,
-        '-vf',
-        videoFilter,
-        '-c:v',
-        'libx264',
-        '-preset',
-        'fast',
-        '-crf',
-        String(settings.proxy.crf),
-        '-pix_fmt',
-        'yuv420p',
-        '-c:a',
-        'aac',
-        '-b:a',
-        '128k',
-        ...(normalizer ? REC709_OUTPUT_METADATA_ARGS : []),
-        '-movflags',
-        '+faststart',
+      await writeAtomically(
         proxyPath,
-      ]);
+        async (temporaryOutput) =>
+          await runFfmpeg([
+            '-i',
+            inputPath,
+            '-vf',
+            videoFilter,
+            '-c:v',
+            'libx264',
+            '-preset',
+            'fast',
+            '-crf',
+            String(settings.proxy.crf),
+            '-pix_fmt',
+            'yuv420p',
+            '-c:a',
+            'aac',
+            '-b:a',
+            '128k',
+            ...(normalizer ? REC709_OUTPUT_METADATA_ARGS : []),
+            '-movflags',
+            '+faststart',
+            temporaryOutput,
+          ]),
+        async (temporaryOutput) => {
+          await probeFile(temporaryOutput);
+        },
+      );
       const stillTimestamp = Math.max(0, sourceVideoDurationSeconds(source) * 0.45);
-      await runFfmpeg([
-        '-ss',
-        stillTimestamp.toFixed(3),
-        '-i',
-        proxyPath,
-        '-frames:v',
-        '1',
-        '-q:v',
-        '2',
+      await writeAtomically(
         resolveInside(projectPath, representativeFrame),
-      ]);
-      await runFfmpeg([
-        '-i',
-        proxyPath,
-        '-vf',
-        `fps=${Math.min(8, Math.max(0.01, 8 / sourceVideoDurationSeconds(source))).toFixed(6)},` +
-          'scale=320:-2,tile=4x2:padding=4:margin=4:color=black',
-        '-frames:v',
-        '1',
-        '-q:v',
-        '3',
+        async (temporaryOutput) =>
+          await runFfmpeg([
+            '-ss',
+            stillTimestamp.toFixed(3),
+            '-i',
+            proxyPath,
+            '-frames:v',
+            '1',
+            '-q:v',
+            '2',
+            temporaryOutput,
+          ]),
+        async (temporaryOutput) => {
+          await probeFile(temporaryOutput);
+        },
+      );
+      await writeAtomically(
         resolveInside(projectPath, contactSheet),
-      ]);
+        async (temporaryOutput) =>
+          await runFfmpeg([
+            '-i',
+            proxyPath,
+            '-vf',
+            `fps=${Math.min(8, Math.max(0.01, 8 / sourceVideoDurationSeconds(source))).toFixed(6)},` +
+              'scale=320:-2,tile=4x2:padding=4:margin=4:color=black',
+            '-frames:v',
+            '1',
+            '-q:v',
+            '3',
+            temporaryOutput,
+          ]),
+        async (temporaryOutput) => {
+          await probeFile(temporaryOutput);
+        },
+      );
       artifacts.artifacts[key] = {
         fingerprint,
         generatedAt: now.toISOString(),
@@ -246,8 +292,14 @@ export const generateProxies = async (
       maximumDimension,
       cached,
     });
+    await options.onProgress?.({
+      completed: index + 1,
+      total: videoSources.length,
+      label: source.relativePath,
+    });
   }
 
+  await assertVerifiedInputSnapshotUnchanged(projectPath, integrity);
   await writeJson(path.join(projectPath, 'analysis/artifacts.json'), artifacts);
   const report: ProxyReport = {schemaVersion: '1.0.0', generatedAt: now.toISOString(), items};
   await writeJson(path.join(projectPath, 'analysis/proxies.json'), report);

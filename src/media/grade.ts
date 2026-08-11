@@ -19,14 +19,25 @@ import {hashFile} from '../core/hash';
 import {readJson, writeJson} from '../core/json';
 import {resolveInside} from '../core/paths';
 import {buildFfmpegColorGraph} from './color-ffmpeg';
-import {runFfmpeg} from './ffmpeg';
-import {readValidatedSourceManifest} from './source-integrity';
+import {probeFile, runFfmpeg} from './ffmpeg';
+import {
+  assertVerifiedInputSnapshotUnchanged,
+  createSourceIntegrityContext,
+  readValidatedSourceManifest,
+  type SourceIntegrityContext,
+} from './source-integrity';
 import {pipelineBuildFingerprint} from '../render/artifacts';
 import {escapeFfmpegFilterValue} from './filter-escape';
 import type {
   PreviewStabilizationItem,
   PreviewStabilizationReport,
 } from './preview-stabilize';
+import {writeAtomically} from './atomic-output';
+
+export type GradeOperationOptions = {
+  integrity?: SourceIntegrityContext;
+  onProgress?: (progress: {completed: number; total: number; label: string}) => Promise<void> | void;
+};
 
 type GradeSelection = {
   exposureStops?: number;
@@ -108,6 +119,7 @@ export const resolveClipColor = (
 export const generateGradedStills = async (
   projectPath: string,
   now = new Date(),
+  options: GradeOperationOptions = {},
 ): Promise<{
   schemaVersion: '1.0.0';
   generatedAt: string;
@@ -123,13 +135,19 @@ export const generateGradedStills = async (
   } catch (error) {
     throw new Error(`Cannot generate graded stills without a valid edit: ${(error as Error).message}`);
   }
+  const integrity = options.integrity ?? createSourceIntegrityContext();
   const {assertEditApproval} = await import('../edit/approve');
-  const editReviewHash = await assertEditApproval(projectPath);
-  const manifest = await readValidatedSourceManifest(projectPath);
+  const editReviewHash = await assertEditApproval(projectPath, {integrity});
+  const manifest = await readValidatedSourceManifest(projectPath, integrity);
   await mkdir(path.join(projectPath, 'previews/graded-stills'), {recursive: true});
   const stills: string[] = [];
   const checksums: Record<string, string> = {};
-  for (const clip of edit.clips) {
+  for (const [index, clip] of edit.clips.entries()) {
+    await options.onProgress?.({
+      completed: index,
+      total: edit.clips.length,
+      label: clip.id,
+    });
     const source = manifest.sources.find((entry) => entry.id === clip.sourceId);
     if (!source) {
       throw new Error(`Edit references missing source ${clip.sourceId}`);
@@ -137,23 +155,35 @@ export const generateGradedStills = async (
     const chain = resolveClipColor(projectPath, source, clip.grade);
     const graph = buildFfmpegColorGraph(chain, projectPath);
     const relativeOutput = `previews/graded-stills/${clip.id}.png`;
-    await runFfmpeg([
-      '-ss',
-      ((clip.inSeconds + clip.outSeconds) / 2).toFixed(3),
-      '-i',
-      resolveInside(projectPath, source.relativePath),
-      '-filter_complex',
-      graph.filterComplex,
-      '-map',
-      `[${graph.outputLabel}]`,
-      '-frames:v',
-      '1',
-      '-c:v',
-      'png',
+    await writeAtomically(
       resolveInside(projectPath, relativeOutput),
-    ]);
+      async (temporaryOutput) =>
+        await runFfmpeg([
+          '-ss',
+          ((clip.inSeconds + clip.outSeconds) / 2).toFixed(3),
+          '-i',
+          resolveInside(projectPath, source.relativePath),
+          '-filter_complex',
+          graph.filterComplex,
+          '-map',
+          `[${graph.outputLabel}]`,
+          '-frames:v',
+          '1',
+          '-c:v',
+          'png',
+          temporaryOutput,
+        ]),
+      async (temporaryOutput) => {
+        await probeFile(temporaryOutput);
+      },
+    );
     stills.push(relativeOutput);
     checksums[relativeOutput] = await hashFile(resolveInside(projectPath, relativeOutput));
+    await options.onProgress?.({
+      completed: index + 1,
+      total: edit.clips.length,
+      label: clip.id,
+    });
   }
   const lutsConfig = await readJson<{luts?: unknown[]}>(path.join(projectPath, 'config/luts.json'));
   const luts = LutDefinitionsSchema.parse(lutsConfig.luts ?? []);
@@ -166,6 +196,7 @@ export const generateGradedStills = async (
     stills,
     checksums,
   };
+  await assertVerifiedInputSnapshotUnchanged(projectPath, integrity);
   await writeJson(path.join(projectPath, 'analysis/graded-stills.json'), result);
   return result;
 };
@@ -198,13 +229,15 @@ const fileExists = async (filePath: string): Promise<boolean> => {
 export const gradeSelectedClips = async (
   projectPath: string,
   now = new Date(),
+  options: GradeOperationOptions = {},
 ): Promise<GradedClipReport> => {
+  const integrity = options.integrity ?? createSourceIntegrityContext();
   const {assertRenderApprovals} = await import('../edit/approve');
-  await assertRenderApprovals(projectPath);
+  await assertRenderApprovals(projectPath, {integrity});
   const edit = EditManifestSchema.parse(
     await readJson(path.join(projectPath, 'edits/edit.json')),
   );
-  const manifest = await readValidatedSourceManifest(projectPath);
+  const manifest = await readValidatedSourceManifest(projectPath, integrity);
   const lutsConfig = await readJson<{luts?: unknown[]}>(path.join(projectPath, 'config/luts.json'));
   const luts = LutDefinitionsSchema.parse(lutsConfig.luts ?? []);
   const reportPath = path.join(projectPath, 'analysis/graded-clips.json');
@@ -237,7 +270,12 @@ export const gradeSelectedClips = async (
   const items: GradedClipReport['items'] = [];
   const pipelineBuild = await pipelineBuildFingerprint();
 
-  for (const clip of edit.clips) {
+  for (const [index, clip] of edit.clips.entries()) {
+    await options.onProgress?.({
+      completed: index,
+      total: edit.clips.length,
+      label: clip.id,
+    });
     const source = manifest.sources.find((entry) => entry.id === clip.sourceId);
     if (!source) {
       throw new Error(`Edit references missing source ${clip.sourceId}`);
@@ -329,6 +367,11 @@ export const gradeSelectedClips = async (
       (await hashFile(outputPath)) === prior.checksumSha256
     ) {
       items.push({...prior, cached: true});
+      await options.onProgress?.({
+        completed: index + 1,
+        total: edit.clips.length,
+        label: clip.id,
+      });
       continue;
     }
 
@@ -350,37 +393,44 @@ export const gradeSelectedClips = async (
       }
     }
     const colorGraph = buildFfmpegColorGraph(chain, projectPath, graphInput);
-    await runFfmpeg([
-      '-ss',
-      clip.inSeconds.toFixed(3),
-      '-t',
-      duration.toFixed(3),
-      '-i',
-      inputPath,
-      '-filter_complex',
-      `${stabilizationPrefix}${colorGraph.filterComplex}`,
-      '-map',
-      `[${colorGraph.outputLabel}]`,
-      '-map',
-      '0:a?',
-      '-c:v',
-      'prores_ks',
-      '-profile:v',
-      '3',
-      '-pix_fmt',
-      'yuv422p10le',
-      '-c:a',
-      'pcm_s16le',
-      '-ar',
-      '48000',
-      '-color_primaries',
-      'bt709',
-      '-color_trc',
-      'bt709',
-      '-colorspace',
-      'bt709',
+    await writeAtomically(
       outputPath,
-    ]);
+      async (temporaryOutput) =>
+        await runFfmpeg([
+          '-ss',
+          clip.inSeconds.toFixed(3),
+          '-t',
+          duration.toFixed(3),
+          '-i',
+          inputPath,
+          '-filter_complex',
+          `${stabilizationPrefix}${colorGraph.filterComplex}`,
+          '-map',
+          `[${colorGraph.outputLabel}]`,
+          '-map',
+          '0:a?',
+          '-c:v',
+          'prores_ks',
+          '-profile:v',
+          '3',
+          '-pix_fmt',
+          'yuv422p10le',
+          '-c:a',
+          'pcm_s16le',
+          '-ar',
+          '48000',
+          '-color_primaries',
+          'bt709',
+          '-color_trc',
+          'bt709',
+          '-colorspace',
+          'bt709',
+          temporaryOutput,
+        ]),
+      async (temporaryOutput) => {
+        await probeFile(temporaryOutput);
+      },
+    );
     items.push({
       clipId: clip.id,
       sourceId: source.id,
@@ -389,6 +439,11 @@ export const gradeSelectedClips = async (
       fingerprint,
       cached: false,
       stabilization,
+    });
+    await options.onProgress?.({
+      completed: index + 1,
+      total: edit.clips.length,
+      label: clip.id,
     });
   }
 
@@ -399,6 +454,7 @@ export const gradeSelectedClips = async (
     colorHash: createColorHash(edit, luts),
     items,
   };
+  await assertVerifiedInputSnapshotUnchanged(projectPath, integrity);
   await writeJson(reportPath, report);
   return report;
 };
