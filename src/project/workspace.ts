@@ -28,6 +28,23 @@ const exists = async (filePath: string): Promise<boolean> => {
   }
 };
 
+export const assertProjectScaffold = async (projectPath: string): Promise<void> => {
+  const required = [
+    projectPath,
+    path.join(projectPath, 'brief.json'),
+    path.join(projectPath, 'analysis'),
+    path.join(projectPath, 'config'),
+    path.join(projectPath, 'edits/edit.json'),
+  ];
+  try {
+    await Promise.all(required.map(async (requiredPath) => await access(requiredPath)));
+  } catch {
+    throw new Error(
+      `Reel project "${path.basename(projectPath)}" does not exist or is incomplete. Run reel new ${path.basename(projectPath)} first.`,
+    );
+  }
+};
+
 export const createReelProject = async ({
   engineRoot,
   projectsRoot = path.join(engineRoot, 'projects'),

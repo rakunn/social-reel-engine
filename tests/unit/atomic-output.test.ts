@@ -51,4 +51,21 @@ describe('atomic media output', () => {
     expect(validated).toBe('complete-proxy');
     await expect(readFile(output, 'utf8')).resolves.toBe('complete-proxy');
   });
+
+  it('cleans matching orphaned partials before a retry writes a replacement', async () => {
+    const directory = await makeDirectory();
+    const output = path.join(directory, 'proxy.mp4');
+    await writeFile(path.join(directory, '.proxy.partial-interrupted.mp4'), 'orphaned proxy');
+    await writeFile(path.join(directory, '.other.partial-interrupted.mp4'), 'different output');
+
+    await writeAtomically(output, async (temporary) => {
+      await writeFile(temporary, 'replacement proxy');
+    });
+
+    await expect(readFile(output, 'utf8')).resolves.toBe('replacement proxy');
+    await expect(readdir(directory)).resolves.toEqual([
+      '.other.partial-interrupted.mp4',
+      'proxy.mp4',
+    ]);
+  });
 });

@@ -1,4 +1,4 @@
-import {mkdtemp, rm} from 'node:fs/promises';
+import {mkdtemp, readFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
@@ -7,6 +7,7 @@ import {
   MEDIA_OPERATION_COMMANDS,
   beginMediaOperation,
   completeMediaOperation,
+  failMediaOperation,
   isMediaOperationAlive,
   readMediaOperation,
   runMediaOperation,
@@ -30,13 +31,13 @@ describe('media operation records', () => {
   it('persists proxy progress and removes the record after a successful operation', async () => {
     const projectPath = await makeProject();
 
-    await beginMediaOperation(projectPath, 'proxy', {
+    const operation = await beginMediaOperation(projectPath, 'proxy', {
       now: new Date('2026-08-11T10:00:00.000Z'),
       pid: process.pid,
       phase: 'transcoding',
       progress: {completed: 0, total: 7, label: 'source-01'},
     });
-    await updateMediaOperation(projectPath, {
+    await updateMediaOperation(projectPath, operation.id!, {
       now: new Date('2026-08-11T10:01:00.000Z'),
       phase: 'transcoding',
       progress: {completed: 1, total: 7, label: 'source-02'},
@@ -49,7 +50,7 @@ describe('media operation records', () => {
       progress: {completed: 1, total: 7, label: 'source-02'},
     });
 
-    await completeMediaOperation(projectPath);
+    await completeMediaOperation(projectPath, operation.id!);
 
     await expect(readMediaOperation(projectPath)).resolves.toBeNull();
   });
@@ -168,10 +169,10 @@ describe('media operation records', () => {
     expect(isMediaOperationAlive(record)).toBe(false);
   });
 
-  it('renews the lease for a markerless operation when it reports progress', async () => {
+  it('renews the lease for a markerless operation before it expires', async () => {
     const projectPath = await makeProject();
     const now = new Date();
-    const startedAt = new Date(now.getTime() - 10 * 60_000);
+    const startedAt = new Date(now.getTime() - 2 * 60_000);
     const record = await beginMediaOperation(projectPath, 'proxy', {
       now: startedAt,
       pid: process.pid,
@@ -180,14 +181,69 @@ describe('media operation records', () => {
     });
 
     expect(record.processStartMarker).toBeNull();
-    expect(isMediaOperationAlive(record)).toBe(false);
+    expect(isMediaOperationAlive(record)).toBe(true);
 
-    const renewed = await updateMediaOperation(projectPath, {
+    const renewed = await updateMediaOperation(projectPath, record.id!, {
       now,
       progress: {completed: 1, total: 2, label: 'source-02'},
     });
 
     expect(isMediaOperationAlive(renewed)).toBe(true);
+  });
+
+  it('does not renew markerless ownership after its lease expires', async () => {
+    const projectPath = await makeProject();
+    const now = new Date();
+    const record = await beginMediaOperation(projectPath, 'proxy', {
+      now: new Date(now.getTime() - 10 * 60_000),
+      pid: process.pid,
+      processStartMarker: null,
+      phase: 'transcoding',
+    });
+
+    await expect(
+      updateMediaOperation(projectPath, record.id!, {
+        now,
+        progress: {completed: 1, total: 2, label: 'source-02'},
+      }),
+    ).rejects.toThrow(/ownership.*lost/i);
+  });
+
+  it('fences a resumed markerless operation after a retry replaces it', async () => {
+    const projectPath = await makeProject();
+    const interrupted = await beginMediaOperation(projectPath, 'proxy', {
+      now: new Date('2000-01-01T00:00:00.000Z'),
+      pid: process.pid,
+      processStartMarker: null,
+      phase: 'transcoding',
+    });
+    const replacement = await beginMediaOperation(projectPath, 'render', {
+      pid: process.pid,
+      processStartMarker: null,
+      phase: 'rendering-master',
+    });
+
+    await expect(
+      updateMediaOperation(projectPath, interrupted.id!, {phase: 'late-proxy-update'}),
+    ).rejects.toThrow(/ownership.*lost/i);
+    await expect(completeMediaOperation(projectPath, interrupted.id!)).rejects.toThrow(
+      /ownership.*lost/i,
+    );
+    await expect(
+      failMediaOperation(projectPath, interrupted.id!, new Error('late proxy failure')),
+    ).rejects.toThrow(/ownership.*lost/i);
+
+    await expect(readMediaOperation(projectPath)).resolves.toMatchObject({
+      id: replacement.id,
+      command: 'render',
+      state: 'running',
+      phase: 'rendering-master',
+    });
+    await expect(
+      readFile(path.join(projectPath, 'analysis/operation.lock/owner.json'), 'utf8'),
+    ).resolves.toContain(replacement.id!);
+
+    await completeMediaOperation(projectPath, replacement.id!);
   });
 
   it('tracks beat analysis as a mutually exclusive media operation', async () => {

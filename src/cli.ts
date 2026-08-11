@@ -13,7 +13,7 @@ import {confirmRights} from './edit/rights';
 import {validateEdit} from './edit/validate';
 import {ingestFiles, INPUT_KINDS, type InputKind} from './project/ingest';
 import {installCatalogLut, readLutCatalog} from './project/library';
-import {createReelProject, getProjectStatus} from './project/workspace';
+import {assertProjectScaffold, createReelProject, getProjectStatus} from './project/workspace';
 import {
   runMediaOperation,
   type MediaOperationCommand,
@@ -37,6 +37,7 @@ const runTrackedMediaCommand = async <T>(
   operation: (context: MediaOperationContext) => Promise<T>,
 ): Promise<T> => {
   const projectPath = project(reelName);
+  await assertProjectScaffold(projectPath);
   return await runMediaOperation(projectPath, command, async ({update}) => {
     await update({phase});
     return await operation({update});
