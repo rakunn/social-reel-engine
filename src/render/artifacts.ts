@@ -136,7 +136,7 @@ const renderSettingsFingerprintProjection = (
   };
 };
 
-const referencedRenderSources = (
+export const referencedRenderSources = (
   edit: EditManifest,
   sourceManifest: SourceManifest,
 ): SourceEntry[] => {
@@ -158,7 +158,7 @@ const referencedRenderSources = (
   return sourceManifest.sources.filter((source) => sourceIds.has(source.id));
 };
 
-const referencedRenderLuts = (
+export const referencedRenderLuts = (
   target: OutputTarget,
   edit: EditManifest,
   sources: readonly SourceEntry[],
@@ -210,7 +210,7 @@ export const expectedRenderFingerprint = async (
       readJson(path.join(projectPath, 'brief.json')),
     ]);
   const luts = LutDefinitionsSchema.parse(lutsConfig.luts);
-  const rightsConfirmed = ReelBriefSchema.parse(brief).rightsConfirmed;
+  const parsedBrief = ReelBriefSchema.parse(brief);
   const renderSources = referencedRenderSources(edit, sourceManifest);
   const renderLuts = referencedRenderLuts(target, edit, renderSources, luts);
   const renderInputPaths = new Set([
@@ -258,7 +258,14 @@ export const expectedRenderFingerprint = async (
       target === 'preview' ? 'not-required' : stabilizationReviewContext.reviewContextHash,
     luts: renderLuts,
     settings: renderSettingsFingerprintProjection(target, settings),
-    rightsConfirmed: target === 'preview' ? 'not-required' : rightsConfirmed,
+    rightsConfirmation:
+      target === 'preview'
+        ? 'not-required'
+        : {
+            confirmed: parsedBrief.rightsConfirmed,
+            assetSetFingerprintSha256:
+              parsedBrief.rightsConfirmation?.assetSetFingerprintSha256 ?? null,
+          },
     outputPolicy: targetExpectations(target, settings),
     renderer:
       target === 'delivery'

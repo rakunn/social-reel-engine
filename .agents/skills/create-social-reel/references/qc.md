@@ -2,7 +2,7 @@
 
 ## Final readiness
 
-Before final rendering, require current edit and color approvals, confirmed source profiles and LUT semantics, checksum-valid inputs and reviewed reference frames, and user-confirmed rights. Run `grade` first to surface LUT or stabilization failures before the long render.
+Before final rendering, require current edit and color approvals, confirmed source profiles and LUT semantics, checksum-valid inputs and reviewed reference frames, and user-confirmed rights bound to the current used-asset fingerprint. Run `grade` first to surface LUT or stabilization failures before the long render.
 
 Inspect `analysis/graded-clips.json`. Each stabilized shot reports `applied`, `fallback`, or `disabled`. A fallback is acceptable only when the exact per-shot fallback decision was already approved.
 

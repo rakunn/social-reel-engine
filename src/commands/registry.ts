@@ -10,6 +10,7 @@ export const COMMAND_NAMES = [
   'approve-edit',
   'grade-stills',
   'approve-color',
+  'confirm-rights',
   'grade',
   'render',
   'qc',

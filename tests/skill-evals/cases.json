@@ -58,6 +58,40 @@
         "final render is bound to current manifests",
         "master and delivery QC include freshness and technical properties"
       ]
+    },
+    {
+      "id": "explicit-rights-persistence",
+      "prompt": "Create a reel from my supplied footage and music. I explicitly confirm I own or have permission to use every supplied asset. Minimize interruptions and explain how that confirmation reaches final export.",
+      "mustCover": [
+        "never infer rights",
+        "run confirm-rights after the exact current used asset inventory is known",
+        "persist rightsConfirmed plus the used-asset checksum fingerprint in brief.json",
+        "do not ask again while the used asset set is unchanged",
+        "an unused newly ingested asset does not invalidate the used-asset confirmation",
+        "request only the missing confirmation for the expanded asset set"
+      ]
+    },
+    {
+      "id": "resumed-rights-binding",
+      "prompt": "Resume a reel whose brief says rightsConfirmed true. Explain how Codex proves that decision still covers the current used assets, what happens when a selected asset changed, and whether an unused newly ingested file forces another question.",
+      "mustCover": [
+        "status verifies the persisted used-asset checksum fingerprint",
+        "a legacy Boolean without a fingerprint cannot authorize final export",
+        "a changed referenced asset makes rights confirmation stale",
+        "only explicit user confirmation authorizes confirm-rights",
+        "unchanged or merely unreferenced assets do not trigger another rights question"
+      ]
+    },
+    {
+      "id": "proxy-only-incomplete-intake",
+      "prompt": "I do not know the footage gamma/gamut or what transform my LUT expects yet. Make a watermarked rough now and I will identify those facts after reviewing it. Explain every later interaction and invalidation through final export.",
+      "mustCover": [
+        "declare the intake proxy-only and name the first blocked command",
+        "allow only a visibly watermarked rough while facts are unresolved",
+        "revisit the disclosed facts with the rough review",
+        "do not run grade-stills until the facts are resolved",
+        "regenerate preview and repeat rough approval after source confirmation or normalization changes"
+      ]
     }
   ]
 }

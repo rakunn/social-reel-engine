@@ -16,6 +16,7 @@ describe('stable command interface', () => {
       'approve-edit',
       'grade-stills',
       'approve-color',
+      'confirm-rights',
       'grade',
       'render',
       'qc',

@@ -9,6 +9,7 @@ import {generateGradedStills, gradeSelectedClips} from './media/grade';
 import {generateProxies} from './media/proxy';
 import {runQc} from './media/qc-report';
 import {approveColor, approveEdit} from './edit/approve';
+import {confirmRights} from './edit/rights';
 import {validateEdit} from './edit/validate';
 import {ingestFiles, INPUT_KINDS, type InputKind} from './project/ingest';
 import {installCatalogLut, readLutCatalog} from './project/library';
@@ -138,6 +139,12 @@ export const createCli = (): Command => {
     .argument('<reel-name>')
     .description('Approve the exact current grade and LUT hash after reviewing reference frames')
     .action(async (reelName: string) => print(await approveColor(project(reelName))));
+
+  program
+    .command('confirm-rights')
+    .argument('<reel-name>')
+    .description('Record explicit user rights confirmation for the current used asset checksums')
+    .action(async (reelName: string) => print(await confirmRights(project(reelName))));
 
   program
     .command('grade')

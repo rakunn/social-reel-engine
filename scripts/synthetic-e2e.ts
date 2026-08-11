@@ -3,6 +3,7 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {approveColor, approveEdit} from '../src/edit/approve';
+import {confirmRights} from '../src/edit/rights';
 import {hashFile} from '../src/core/hash';
 import {writeJson} from '../src/core/json';
 import {analyzeSources} from '../src/media/analyze';
@@ -200,9 +201,7 @@ export const prepareSyntheticReel = async (
       : {sourceId: musicSource.id, startSeconds: 0.25, gainDb: -6},
     captions: null,
   });
-  const briefPath = path.join(projectPath, 'brief.json');
-  const brief = JSON.parse(await import('node:fs/promises').then(({readFile}) => readFile(briefPath, 'utf8')));
-  await writeJson(briefPath, {...brief, rightsConfirmed: true});
+  await confirmRights(projectPath);
 
   return {
     temporaryRoot,

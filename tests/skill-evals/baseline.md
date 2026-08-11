@@ -1,6 +1,6 @@
 # No-skill baseline
 
-Five fresh-context, read-only agents answered the cases in `cases.json` without opening a repository-scoped reel skill. They were allowed to inspect the engine so the comparison measures orchestration policy rather than command memorization.
+Five fresh-context, read-only agents answered the original cases in `cases.json` without opening a repository-scoped reel skill. They were allowed to inspect the engine so the comparison measures orchestration policy rather than command memorization. The later regression cases and three rights-binding variants were run against the pre-fix skill because they target contradictions introduced by its autonomous interaction contract.
 
 | Case | Baseline strengths | Baseline gaps or variance to remove with the skill |
 | --- | --- | --- |
@@ -9,5 +9,8 @@ Five fresh-context, read-only agents answered the cases in `cases.json` without 
 | Creative LUT selection | Correctly refused filename-only selection, used normalized comparison frames, and interpreted the PDF's intensity ranges cautiously. | Tentatively ranked looks from names despite having no visual evidence; no reproducible engine workflow for installing and comparing candidates. |
 | Music/captions/stabilization | Covered ingest, beat analysis, SRT timing, user-held approvals, and a stabilization review. | Invented an extra mandatory pause after grading, and exposed engine-policy weaknesses instead of following one stable documented policy. |
 | Stale approvals and QC | Correctly explained edit/color hash invalidation and the required rerender sequence. | Found that existing final files were not provably tied to current manifests and that status could call a stale delivery rendered. This became a required engine repair before forward testing. |
+| Explicit rights persistence | Recognized that the user's intake statement was explicit confirmation. | Had to override the literal “Do not mark `rightsConfirmed` true” rule to persist it; following the rule would leave final export permanently blocked because no rights CLI command exists. |
+| Resumed rights binding | Correctly left confirmation current for a newly ingested but unused file and blocked a known changed used clip. | A bare Boolean could not prove an ambiguous resumed set was unchanged, so the agent had to ask again; for a known change it could only edit the Boolean manually and explicitly found no checksum-persisting command. |
+| Proxy-only incomplete intake | Correctly kept the rough watermarked, deferred grading, and requested the missing technical facts with rough review. | The necessary fact request and normalized-preview reapproval contradicted the contract's unconditional claim that no post-intake stops existed beyond the two artifact gates. |
 
-The baseline demonstrates good safety instincts but inconsistent execution. The skill must make the two required pauses, exact command order, technical-transform refusal, LUT comparison policy, approval ownership, and output-freshness checks deterministic across all five wordings.
+The baseline demonstrates good safety instincts but inconsistent execution. The skill must make the normal ready path, the exceptional proxy-only path, explicit rights persistence, exact command order, technical-transform refusal, LUT comparison policy, approval ownership, and output-freshness checks deterministic across all eight wordings.

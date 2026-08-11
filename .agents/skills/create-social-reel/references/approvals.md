@@ -13,7 +13,7 @@ Only an explicit user decision after seeing the exact current artifact authorize
 5. Stop and wait.
 6. After the user explicitly approves that version, run `approve-edit`.
 
-Trim, order, crop, playback, transitions, title, music, camera audio, captions, or stabilization changes make editorial approval stale. Because color approval is bound to the edit hash, they make color approval stale too.
+Trim, order, crop, playback, transitions, title, music, camera audio, captions, stabilization, source-profile confirmation, or preview-normalization changes make editorial approval stale. Because color approval is bound to the edit hash, they make color approval stale too.
 
 ## Gate 2: color
 
@@ -27,7 +27,7 @@ Exposure, white balance, tint, technical/combined LUT, creative LUT, creative bl
 
 ## Revisions and resuming
 
-Approval records can remain on disk while becoming logically stale. Trust `status`, hash comparison, and QC rather than the mere presence of timestamps or output files.
+Approval and rights records can remain on disk while becoming logically stale. Trust `status`, hash comparison, and QC rather than the mere presence of timestamps, `rightsConfirmed: true`, or output files. A changed used-asset fingerprint requires explicit rights confirmation and a new `confirm-rights`; an unchanged fingerprint does not require another question.
 
 After an editorial change, repeat both gates. After a grade-only change, retain the current edit approval but regenerate and repeat the color gate. Never reuse a previously rendered preview or still merely because its filename is unchanged.
 
