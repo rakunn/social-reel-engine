@@ -56,10 +56,10 @@ const prependLibraryDirectory = (
   return {...environment, DYLD_LIBRARY_PATH: values.join(path.delimiter)};
 };
 
-export const resolveRemotionRuntime = async (
+const resolveRemotionRuntimes = async (
   engineRoot: string,
   options: ResolveRemotionRuntimeOptions = {},
-): Promise<ResolvedRemotionRuntime> => {
+): Promise<ResolvedRemotionRuntime[]> => {
   const platform = options.platform ?? process.platform;
   const arch = options.arch ?? process.arch;
   const candidates = compositorCandidates(platform, arch);
@@ -72,38 +72,43 @@ export const resolveRemotionRuntime = async (
     options.resolvePackage ??
     ((request: string): string =>
       createRequire(path.join(engineRoot, 'package.json')).resolve(request));
-  let packageName: string | null = null;
-  let packageJson: string | null = null;
   const failures: string[] = [];
+  const runtimes: ResolvedRemotionRuntime[] = [];
+  const environment = {...(options.environment ?? process.env)};
   for (const candidate of candidates) {
     try {
-      packageJson = resolvePackage(`${candidate}/package.json`);
-      packageName = candidate;
-      break;
+      const packageJson = resolvePackage(`${candidate}/package.json`);
+      const compositorDirectory = path.dirname(packageJson);
+      const ffprobePath = path.join(compositorDirectory, 'ffprobe');
+      await access(ffprobePath);
+      const workerEnvironment =
+        platform === 'darwin'
+          ? prependLibraryDirectory(environment, compositorDirectory)
+          : environment;
+      runtimes.push({
+        compositorPackage: candidate,
+        compositorDirectory,
+        ffprobePath,
+        workerEnvironment,
+      });
     } catch (error) {
-      failures.push(error instanceof Error ? error.message : String(error));
+      failures.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  if (!packageName || !packageJson) {
+  if (runtimes.length === 0) {
     throw new Error(
-      `Could not resolve the installed Remotion compositor (${candidates.join(' or ')}). Run npm install in ${engineRoot}. ${failures[0] ?? ''}`.trim(),
+      `Could not resolve the installed Remotion compositor (${candidates.join(' or ')}). Run npm install in ${engineRoot}. ${failures.join(' ')}`.trim(),
     );
   }
-  const compositorDirectory = path.dirname(packageJson);
-  const ffprobePath = path.join(compositorDirectory, 'ffprobe');
-  try {
-    await access(ffprobePath);
-  } catch (error) {
-    throw new Error(
-      `Remotion compositor ${packageName} is missing its bundled ffprobe at ${ffprobePath}: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  const environment = {...(options.environment ?? process.env)};
-  const workerEnvironment =
-    platform === 'darwin'
-      ? prependLibraryDirectory(environment, compositorDirectory)
-      : environment;
-  return {compositorPackage: packageName, compositorDirectory, ffprobePath, workerEnvironment};
+  return runtimes;
+};
+
+export const resolveRemotionRuntime = async (
+  engineRoot: string,
+  options: ResolveRemotionRuntimeOptions = {},
+): Promise<ResolvedRemotionRuntime> => {
+  const [runtime] = await resolveRemotionRuntimes(engineRoot, options);
+  return runtime;
 };
 
 export const checkRemotionRuntime = async (
@@ -111,26 +116,37 @@ export const checkRemotionRuntime = async (
   options: CheckRemotionRuntimeOptions = {},
 ): Promise<RemotionRuntimeCheck> => {
   try {
-    const runtime = await resolveRemotionRuntime(engineRoot, options.runtime);
+    const runtimes = await resolveRemotionRuntimes(engineRoot, options.runtime);
     const processRunner = options.runProcess ?? runProcess;
-    const result = await processRunner(
-      runtime.ffprobePath,
-      ['-hide_banner', '-version'],
-      {allowFailure: true, env: runtime.workerEnvironment},
-    );
-    const output = `${result.stdout}\n${result.stderr}`.trim();
-    if (result.exitCode !== 0 || !/ffprobe version/i.test(output)) {
-      return {
-        ok: false,
-        message:
-          `Remotion compositor ffprobe failed before render (${runtime.compositorPackage}, exit ${result.exitCode}). ` +
-          'The render worker will use a compositor-local DYLD_LIBRARY_PATH; reinstall the matching Remotion compositor if this persists.',
-      };
+    const failures: string[] = [];
+    for (const runtime of runtimes) {
+      try {
+        const result = await processRunner(
+          runtime.ffprobePath,
+          ['-hide_banner', '-version'],
+          {allowFailure: true, env: runtime.workerEnvironment},
+        );
+        const output = `${result.stdout}\n${result.stderr}`.trim();
+        if (result.exitCode !== 0 || !/ffprobe version/i.test(output)) {
+          failures.push(`${runtime.compositorPackage}, exit ${result.exitCode}`);
+          continue;
+        }
+        return {
+          ok: true,
+          message: `Remotion compositor runtime is ready (${runtime.compositorPackage})`,
+          runtime,
+        };
+      } catch (error) {
+        failures.push(
+          `${runtime.compositorPackage}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
     return {
-      ok: true,
-      message: `Remotion compositor runtime is ready (${runtime.compositorPackage})`,
-      runtime,
+      ok: false,
+      message:
+        `Remotion compositor ffprobe failed before render (${failures.join('; ')}). ` +
+        'The render worker will use a compositor-local DYLD_LIBRARY_PATH; reinstall the matching Remotion compositor if this persists.',
     };
   } catch (error) {
     return {

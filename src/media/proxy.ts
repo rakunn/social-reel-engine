@@ -14,6 +14,7 @@ import {REC709_OUTPUT_METADATA_ARGS} from './color-ffmpeg';
 import {streamDurationSeconds} from './duration';
 import {readRenderSettings} from '../render/policy';
 import {
+  assertVerifiedInputSnapshotUnchanged,
   createSourceIntegrityContext,
   readValidatedSourceManifest,
   setVerifiedInputSnapshot,
@@ -298,6 +299,7 @@ export const generateProxies = async (
     });
   }
 
+  await assertVerifiedInputSnapshotUnchanged(projectPath, integrity);
   await writeJson(path.join(projectPath, 'analysis/artifacts.json'), artifacts);
   const report: ProxyReport = {schemaVersion: '1.0.0', generatedAt: now.toISOString(), items};
   await writeJson(path.join(projectPath, 'analysis/proxies.json'), report);

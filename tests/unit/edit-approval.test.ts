@@ -29,9 +29,11 @@ import {createSourceIntegrityContext} from '../../src/media/source-integrity';
 import {
   expectedRenderFingerprint,
   readRenderArtifactFreshness,
+  readRenderArtifactRecord,
   recordRenderArtifact,
 } from '../../src/render/artifacts';
 import {getProjectStatus} from '../../src/project/workspace';
+import {renderPreview} from '../../src/render/remotion';
 
 const makeFixture = async () => {
   const projectPath = await mkdtemp(path.join(tmpdir(), 'reel-approval-'));
@@ -631,6 +633,29 @@ describe('hash-bound approvals', () => {
 
     expect(snapshot).not.toBeNull();
     expect(integrity.snapshot).toBe(snapshot);
+  });
+
+  it('returns a fresh preview without requiring a Remotion runtime', async () => {
+    const {projectPath} = await makeFixture();
+
+    await expect(
+      renderPreview(projectPath, path.join(projectPath, 'missing-remotion-runtime')),
+    ).resolves.toBe(path.join(projectPath, 'previews/preview.mp4'));
+  });
+
+  it('does not publish a render artifact after a verified input changes mid-operation', async () => {
+    const {projectPath} = await makeFixture();
+    const integrity = createSourceIntegrityContext();
+    const fingerprint = await expectedRenderFingerprint(projectPath, 'master', {integrity});
+    const masterPath = path.join(projectPath, 'output/master.mov');
+    await mkdir(path.dirname(masterPath), {recursive: true});
+    await writeFile(masterPath, 'new-master-output');
+    await writeFile(path.join(projectPath, 'input/clips/clip.mp4'), 'changed-input-bytes');
+
+    await expect(
+      recordRenderArtifact(projectPath, 'master', masterPath, fingerprint, new Date(), {integrity}),
+    ).rejects.toThrow(/changed during media operation|stale or inconsistent/i);
+    await expect(readRenderArtifactRecord(projectPath, 'master')).resolves.toBeNull();
   });
 
   it('keeps render fingerprints stable when unreferenced footage changes', async () => {

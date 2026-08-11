@@ -134,11 +134,6 @@ const renderTarget = async (
   if (target === 'master') {
     await assertFinalReadiness(projectPath, {integrity});
   }
-  await options.onActivity?.({phase: 'preflighting-remotion', progress: null});
-  const remotionRuntime = await checkRemotionRuntime(engineRoot);
-  if (!remotionRuntime.ok || !remotionRuntime.runtime) {
-    throw new Error(`Remotion runtime preflight failed: ${remotionRuntime.message}`);
-  }
   const outputLocation =
     target === 'preview'
       ? path.join(projectPath, 'previews/preview.mp4')
@@ -149,6 +144,12 @@ const renderTarget = async (
     integrity,
   });
   if (current.fresh) return outputLocation;
+
+  await options.onActivity?.({phase: 'preflighting-remotion', progress: null});
+  const remotionRuntime = await checkRemotionRuntime(engineRoot);
+  if (!remotionRuntime.ok || !remotionRuntime.runtime) {
+    throw new Error(`Remotion runtime preflight failed: ${remotionRuntime.message}`);
+  }
 
   await options.onActivity?.({
     phase: target === 'preview' ? 'preparing-proxies' : 'grading-selected-clips',

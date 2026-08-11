@@ -138,7 +138,13 @@ export const createCli = (): Command => {
     .command('beats')
     .argument('<reel-name>')
     .description('Analyze supplied music beats and onsets with librosa')
-    .action(async (reelName: string) => print(await analyzeMusic(project(reelName), ENGINE_ROOT)));
+    .action(async (reelName: string) =>
+      print(
+        await runTrackedMediaCommand(reelName, 'beats', 'analyzing-beats', async () =>
+          await analyzeMusic(project(reelName), ENGINE_ROOT),
+        ),
+      ),
+    );
 
   program
     .command('validate-edit')

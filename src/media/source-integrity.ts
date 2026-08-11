@@ -144,6 +144,27 @@ export const readVerifiedInputSnapshot = async (
   }
 };
 
+export const assertVerifiedInputSnapshotUnchanged = async (
+  projectPath: string,
+  context?: SourceIntegrityContext,
+): Promise<VerifiedInputSnapshot> => {
+  if (!context?.snapshot) {
+    return await verifyInputSnapshot(projectPath);
+  }
+  const observed = await verifyInputSnapshot(projectPath);
+  const expected = context.snapshot;
+  if (
+    canonicalJson(expected.ingest.files) !== canonicalJson(observed.ingest.files) ||
+    canonicalJson(sourceManifestFingerprintProjection(expected.sourceManifest)) !==
+      canonicalJson(sourceManifestFingerprintProjection(observed.sourceManifest))
+  ) {
+    throw new Error(
+      'Verified inputs changed during the media operation; retry the command before publishing artifacts',
+    );
+  }
+  return observed;
+};
+
 export const readValidatedSourceManifest = async (
   projectPath: string,
   context?: SourceIntegrityContext,

@@ -21,6 +21,7 @@ import {resolveInside} from '../core/paths';
 import {buildFfmpegColorGraph} from './color-ffmpeg';
 import {probeFile, runFfmpeg} from './ffmpeg';
 import {
+  assertVerifiedInputSnapshotUnchanged,
   createSourceIntegrityContext,
   readValidatedSourceManifest,
   type SourceIntegrityContext,
@@ -195,6 +196,7 @@ export const generateGradedStills = async (
     stills,
     checksums,
   };
+  await assertVerifiedInputSnapshotUnchanged(projectPath, integrity);
   await writeJson(path.join(projectPath, 'analysis/graded-stills.json'), result);
   return result;
 };
@@ -452,6 +454,7 @@ export const gradeSelectedClips = async (
     colorHash: createColorHash(edit, luts),
     items,
   };
+  await assertVerifiedInputSnapshotUnchanged(projectPath, integrity);
   await writeJson(reportPath, report);
   return report;
 };

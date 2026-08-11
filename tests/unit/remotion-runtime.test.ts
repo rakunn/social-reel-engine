@@ -90,4 +90,49 @@ describe('Remotion compositor runtime', () => {
       }),
     );
   });
+
+  it('falls back to the runnable Linux musl compositor when GNU ffprobe fails', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'reel-remotion-linux-runtime-'));
+    temporaryDirectories.push(root);
+    const gnuDirectory = path.join(root, 'node_modules/@remotion/compositor-linux-x64-gnu');
+    const muslDirectory = path.join(root, 'node_modules/@remotion/compositor-linux-x64-musl');
+    const gnuPackage = path.join(gnuDirectory, 'package.json');
+    const muslPackage = path.join(muslDirectory, 'package.json');
+    await Promise.all([
+      mkdir(gnuDirectory, {recursive: true}),
+      mkdir(muslDirectory, {recursive: true}),
+    ]);
+    await Promise.all([
+      writeFile(gnuPackage, '{"name":"@remotion/compositor-linux-x64-gnu"}\n'),
+      writeFile(muslPackage, '{"name":"@remotion/compositor-linux-x64-musl"}\n'),
+      writeFile(path.join(gnuDirectory, 'ffprobe'), 'gnu fixture\n'),
+      writeFile(path.join(muslDirectory, 'ffprobe'), 'musl fixture\n'),
+    ]);
+    const runProcess = vi.fn(async (command: string) => ({
+      command,
+      args: [],
+      stdout: command.includes('-musl/') ? 'ffprobe version musl fixture' : '',
+      stderr: command.includes('-musl/') ? '' : 'not runnable on musl',
+      exitCode: command.includes('-musl/') ? 0 : 1,
+    }));
+
+    const check = await checkRemotionRuntime(root, {
+      runtime: {
+        platform: 'linux',
+        arch: 'x64',
+        resolvePackage: (request) => {
+          if (request.includes('-gnu/package.json')) return gnuPackage;
+          if (request.includes('-musl/package.json')) return muslPackage;
+          throw new Error(`Unexpected package request: ${request}`);
+        },
+      },
+      runProcess,
+    });
+
+    expect(check).toMatchObject({
+      ok: true,
+      runtime: {compositorPackage: '@remotion/compositor-linux-x64-musl'},
+    });
+    expect(runProcess).toHaveBeenCalledTimes(2);
+  });
 });

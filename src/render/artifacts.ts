@@ -18,6 +18,7 @@ import {resolveInside} from '../core/paths';
 import type {SourcesConfig} from '../media/analyze';
 import {lutCompatibilityFailures} from '../core/lut-compatibility';
 import {
+  assertVerifiedInputSnapshotUnchanged,
   readVerifiedInputSnapshot,
   sourceManifestFingerprintProjection,
   type SourceIntegrityContext,
@@ -317,6 +318,7 @@ export const recordRenderArtifact = async (
     sizeBytes: outputStat.size,
     reviewContextHash: previewContext.reviewContextHash,
   };
+  await assertVerifiedInputSnapshotUnchanged(projectPath, options.integrity);
   const index = await readIndex(projectPath);
   index.artifacts[target] = record;
   await writeJson(indexPath(projectPath), index);
