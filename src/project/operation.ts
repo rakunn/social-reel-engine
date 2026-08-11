@@ -1,6 +1,6 @@
 import {execFileSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
-import {mkdir, rename, rmdir, stat, unlink} from 'node:fs/promises';
+import {mkdir, rename, stat, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {z} from 'zod';
 import {readJson, writeJson} from '../core/json';
@@ -82,6 +82,18 @@ const operationLockOwnerPath = (projectPath: string): string =>
 const operationLockTombstonePath = (projectPath: string, id: string): string =>
   path.join(projectPath, 'analysis', `operation.lock.reclaimed-${id}`);
 
+const releasedOperationLockPath = (projectPath: string, id: string): string =>
+  path.join(projectPath, 'analysis', `operation.lock.released-${id}`);
+
+const completedOperationRecordDirectoryPath = (projectPath: string, id: string): string =>
+  path.join(projectPath, 'analysis', `operation.completed-${id}`);
+
+const completedOperationRecordPath = (projectPath: string, id: string): string =>
+  path.join(completedOperationRecordDirectoryPath(projectPath, id), 'record.json');
+
+const ownerlessReclaimMarkerPath = (projectPath: string, identity: string): string =>
+  path.join(operationLockPath(projectPath), `.reclaim-${identity}`);
+
 const MediaOperationLockSchema = z
   .object({
     schemaVersion: z.literal('1.0.0'),
@@ -151,13 +163,16 @@ const isProcessIdentityAlive = (identity: {
   return readProcessStartMarker(identity.pid) === identity.processStartMarker;
 };
 
-const readMediaOperationLock = async (projectPath: string): Promise<MediaOperationLock | null> => {
+const readMediaOperationLockAt = async (lockPath: string): Promise<MediaOperationLock | null> => {
   try {
-    return await readJson(operationLockOwnerPath(projectPath), MediaOperationLockSchema);
+    return await readJson(path.join(lockPath, 'owner.json'), MediaOperationLockSchema);
   } catch {
     return null;
   }
 };
+
+const readMediaOperationLock = async (projectPath: string): Promise<MediaOperationLock | null> =>
+  await readMediaOperationLockAt(operationLockPath(projectPath));
 
 const mediaOperationOwnershipLost = (): Error =>
   new Error('Cannot mutate a media operation after its ownership was lost');
@@ -169,17 +184,24 @@ const releaseMediaOperationLock = async (
   projectPath: string,
   operationId: string,
 ): Promise<boolean> => {
+  const lockPath = operationLockPath(projectPath);
+  const releasedPath = releasedOperationLockPath(projectPath, operationId);
   const owner = await readMediaOperationLock(projectPath);
   if (!owner || owner.id !== operationId || !isProcessIdentityAlive(owner)) return false;
   try {
-    await unlink(operationLockOwnerPath(projectPath));
+    await rename(lockPath, releasedPath);
   } catch (error) {
-    if (!missingFile(error)) throw error;
+    if (missingFile(error) || directoryExists(error) || nonEmptyDirectory(error)) return false;
+    throw error;
   }
-  try {
-    await rmdir(operationLockPath(projectPath));
-  } catch (error) {
-    if (!missingFile(error)) throw error;
+  const claimed = await readMediaOperationLockAt(releasedPath);
+  if (!claimed || claimed.id !== operationId) {
+    try {
+      await rename(releasedPath, lockPath);
+    } catch {
+      // A competing operation may have acquired the global lock while this stale release rolled back.
+    }
+    return false;
   }
   return true;
 };
@@ -204,6 +226,18 @@ const reclaimStaleMediaOperationLock = async (
 ): Promise<boolean> => {
   const identity = await staleLockIdentity(projectPath, owner);
   if (!identity) return false;
+  if (!owner) {
+    const markerPath = ownerlessReclaimMarkerPath(projectPath, identity);
+    try {
+      await writeFile(markerPath, `${identity}\n`, {encoding: 'utf8', flag: 'wx'});
+    } catch (error) {
+      if (!directoryExists(error)) {
+        if (missingFile(error)) return false;
+        throw error;
+      }
+    }
+    if ((await staleLockIdentity(projectPath, null)) !== identity) return false;
+  }
   try {
     await rename(
       operationLockPath(projectPath),
@@ -410,13 +444,26 @@ export const completeMediaOperation = async (
   operationId: string,
 ): Promise<void> => {
   await assertMediaOperationOwnership(projectPath, operationId);
-  if (!(await releaseMediaOperationLock(projectPath, operationId))) {
+  const recordDirectoryPath = completedOperationRecordDirectoryPath(projectPath, operationId);
+  const recordPath = completedOperationRecordPath(projectPath, operationId);
+  try {
+    await mkdir(recordDirectoryPath);
+    await rename(operationPath(projectPath), recordPath);
+  } catch (error) {
+    if (missingFile(error) || directoryExists(error)) throw mediaOperationOwnershipLost();
+    throw error;
+  }
+  const claimedRecord = await readJson(recordPath, MediaOperationRecordSchema).catch(() => null);
+  if (!claimedRecord || claimedRecord.id !== operationId) {
+    try {
+      await rename(recordPath, operationPath(projectPath));
+    } catch {
+      // A successor record wins if ownership changed while the completion record was claimed.
+    }
     throw mediaOperationOwnershipLost();
   }
-  try {
-    await unlink(operationPath(projectPath));
-  } catch (error) {
-    if (!missingFile(error)) throw error;
+  if (!(await releaseMediaOperationLock(projectPath, operationId))) {
+    throw mediaOperationOwnershipLost();
   }
 };
 

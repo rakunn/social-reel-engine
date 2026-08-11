@@ -1,4 +1,4 @@
-import {mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {mkdir, mkdtemp, readFile, readdir, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {afterEach, describe, expect, it, vi} from 'vitest';
@@ -55,6 +55,36 @@ describe('media operation records', () => {
     await completeMediaOperation(projectPath, operation.id!);
 
     await expect(readMediaOperation(projectPath)).resolves.toBeNull();
+  });
+
+  it('retires completed operation state to ID-bound tombstones before a successor starts', async () => {
+    const projectPath = await makeProject();
+    const completed = await beginMediaOperation(projectPath, 'proxy', {
+      pid: process.pid,
+      phase: 'transcoding',
+    });
+
+    await completeMediaOperation(projectPath, completed.id!);
+
+    await expect(readMediaOperation(projectPath)).resolves.toBeNull();
+    await expect(
+      readFile(
+        path.join(projectPath, `analysis/operation.lock.released-${completed.id}/owner.json`),
+        'utf8',
+      ),
+    ).resolves.toContain(completed.id!);
+    await expect(
+      readFile(
+        path.join(projectPath, `analysis/operation.completed-${completed.id}/record.json`),
+        'utf8',
+      ),
+    ).resolves.toContain(completed.id!);
+
+    const successor = await beginMediaOperation(projectPath, 'render', {
+      pid: process.pid,
+      phase: 'rendering-master',
+    });
+    await completeMediaOperation(projectPath, successor.id!);
   });
 
   it('reports an active operation before it scans a project with no input directories', async () => {
@@ -159,6 +189,11 @@ describe('media operation records', () => {
       state: 'running',
       phase: 'recovering-ownerless-lock',
     });
+    const tombstone = (await readdir(path.join(projectPath, 'analysis'))).find((entry) =>
+      entry.startsWith('operation.lock.reclaimed-'),
+    );
+    expect(tombstone).toBeDefined();
+    expect(await readdir(path.join(projectPath, 'analysis', tombstone!))).not.toEqual([]);
     await completeMediaOperation(projectPath, recovered.id!);
   });
 
