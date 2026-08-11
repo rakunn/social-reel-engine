@@ -92,6 +92,19 @@
         "do not run grade-stills until the facts are resolved",
         "regenerate preview and repeat rough approval after source confirmation or normalization changes"
       ]
+    },
+    {
+      "id": "subject-preserving-composition",
+      "prompt": "I have landscape drone footage for a 12–15 second 9:16 reel. In the second selected shot, one boat must remain visible. In the third selected shot, a group of three huts should be centered when that is natural. Other shots already have good off-center compositions. Define the crop metadata, subject review, and rough-cut gate so the boat and all three huts stay readable without continuously chasing subjects toward the center.",
+      "mustCover": [
+        "subject contract names the primary subject and required count per shot",
+        "boat remains visible with a safe margin throughout its selected interval",
+        "all three huts remain visible and are centered when that composition is natural",
+        "establish-and-hold is the default crop behavior",
+        "centering is conditional and intentional off-center compositions are preserved",
+        "continuous subject-chasing or recentering is rejected as forced motion",
+        "the full 9:16 motion is reviewed at multiple points before rough-cut approval"
+      ]
     }
   ]
 }

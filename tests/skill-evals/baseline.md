@@ -14,3 +14,7 @@ Five fresh-context, read-only agents answered the original cases in `cases.json`
 | Proxy-only incomplete intake | Correctly kept the rough watermarked, deferred grading, and requested the missing technical facts with rough review. | The necessary fact request and normalized-preview reapproval contradicted the contract's unconditional claim that no post-intake stops existed beyond the two artifact gates. |
 
 The baseline demonstrates good safety instincts but inconsistent execution. The skill must make the normal ready path, the exceptional proxy-only path, explicit rights persistence, exact command order, technical-transform refusal, LUT comparison policy, approval ownership, and output-freshness checks deterministic across all eight wordings.
+
+## Subject-preservation regression baseline
+
+The first production run of the Coron/Ngey Ngey reel exposed a crop failure that the pre-update guidance did not prevent: the boat in the second selected shot drifted toward the edge of the 9:16 crop, and the third selected shot did not establish the visible group of three huts as the composition's subject. The existing wording to review the moving image and avoid blind center-crops was too soft to encode subject identity, required count, safe margin, or a default “establish-and-hold” policy. The regression case `subject-preserving-composition` makes those requirements explicit.
