@@ -1,10 +1,13 @@
 import {execFileSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
-import {mkdir, rename, rmdir, stat, unlink, writeFile} from 'node:fs/promises';
+import {mkdir, rename, stat, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {z} from 'zod';
 import {readJson, writeJson} from '../core/json';
-import {runWithPublicationGuard} from '../core/publication-guard';
+import {
+  runWithMediaOperationPublicationGuard,
+  runWithPublicationGuard,
+} from '../core/publication-guard';
 
 export const MEDIA_OPERATION_COMMANDS = [
   'analyze',
@@ -205,6 +208,24 @@ const readStatusScanLock = async (projectPath: string): Promise<MediaOperationLo
   }
 };
 
+const claimStatusScanLock = async (
+  projectPath: string,
+  owner: ActiveMediaOperationLock,
+): Promise<boolean> => {
+  try {
+    await writeFile(
+      statusScanLockOwnerPath(projectPath),
+      `${JSON.stringify(MediaOperationLockSchema.parse(owner), null, 2)}\n`,
+      {encoding: 'utf8', flag: 'wx'},
+    );
+  } catch (error) {
+    if (directoryExists(error)) return false;
+    throw error;
+  }
+  const claimed = await readStatusScanLock(projectPath);
+  return claimed?.id === owner.id && claimed.state === 'active';
+};
+
 const mediaOperationOwnershipLost = (): Error =>
   new Error('Cannot mutate a media operation after its ownership was lost');
 
@@ -346,17 +367,27 @@ const releaseStatusScanLock = async (projectPath: string, lockId: string): Promi
   ) {
     return false;
   }
-  try {
-    await unlink(statusScanLockOwnerPath(projectPath));
-  } catch (error) {
-    if (!missingFile(error)) throw error;
-  }
-  try {
-    await rmdir(statusScanLockPath(projectPath));
-  } catch (error) {
-    if (!missingFile(error)) throw error;
-  }
-  return true;
+  const released = MediaOperationLockSchema.parse({
+    ...owner,
+    state: 'released',
+    releasedAt: new Date().toISOString(),
+  });
+  await runWithPublicationGuard(
+    async () => {
+      const current = await readStatusScanLock(projectPath);
+      if (
+        !current ||
+        current.id !== lockId ||
+        current.state !== 'active' ||
+        !isProcessIdentityAlive(current)
+      ) {
+        throw mediaOperationOwnershipLost();
+      }
+    },
+    async () => await writeJson(statusScanLockOwnerPath(projectPath), released),
+  );
+  const current = await readStatusScanLock(projectPath);
+  return current?.id === lockId && current.state === 'released';
 };
 
 const statusScanIsActive = async (projectPath: string): Promise<boolean> => {
@@ -405,7 +436,7 @@ export const runWithStatusScanLock = async <T>(
         releasedAt: null,
       };
       try {
-        await writeJson(statusScanLockOwnerPath(projectPath), MediaOperationLockSchema.parse(candidate));
+        if (!(await claimStatusScanLock(projectPath, candidate))) continue;
         lock = candidate;
         break;
       } catch (error) {
@@ -792,8 +823,10 @@ export const runMediaOperation = async <T>(
     await updateQueue;
   };
   try {
-    const result = await runWithPublicationGuard(assertOwnership, async () =>
-      await operation({update, assertOwnership}),
+    const result = await runWithMediaOperationPublicationGuard(
+      operationId,
+      assertOwnership,
+      async () => await operation({update, assertOwnership}),
     );
     await stopHeartbeat();
     await completeMediaOperation(projectPath, operationId);

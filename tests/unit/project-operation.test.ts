@@ -132,6 +132,9 @@ describe('media operation records', () => {
 
     releaseScan();
     await expect(statusScan).resolves.toEqual({acquired: true, value: 'scanned'});
+    await expect(
+      readFile(path.join(projectPath, 'analysis/status-scan.lock/owner.json'), 'utf8'),
+    ).resolves.toContain('"state": "released"');
 
     const media = await beginMediaOperation(projectPath, 'proxy', {
       pid: process.pid,

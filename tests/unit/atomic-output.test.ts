@@ -2,6 +2,10 @@ import {mkdtemp, readdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
+import {
+  runWithMediaOperationPublicationGuard,
+  runWithPublicationGuard,
+} from '../../src/core/publication-guard';
 import {writeAtomically} from '../../src/media/atomic-output';
 
 const temporaryDirectories: string[] = [];
@@ -67,5 +71,73 @@ describe('atomic media output', () => {
       '.other.partial-interrupted.mp4',
       'proxy.mp4',
     ]);
+  });
+
+  it('tags a media partial with its operation ID', async () => {
+    const directory = await makeDirectory();
+    const output = path.join(directory, 'proxy.mp4');
+    let temporaryPath = '';
+
+    await runWithMediaOperationPublicationGuard(
+      'operation-123',
+      async () => undefined,
+      async () =>
+        await writeAtomically(output, async (temporary) => {
+          temporaryPath = temporary;
+          await writeFile(temporary, 'operation-owned proxy');
+        }),
+    );
+
+    expect(path.basename(temporaryPath)).toMatch(/^\.proxy\.partial-operation-123-/);
+    await expect(readFile(output, 'utf8')).resolves.toBe('operation-owned proxy');
+  });
+
+  it('leaves a different media operation partial inert during cleanup', async () => {
+    const directory = await makeDirectory();
+    const output = path.join(directory, 'proxy.mp4');
+    const successorPartial = path.join(
+      directory,
+      '.proxy.partial-successor-operation.mp4',
+    );
+    await writeFile(successorPartial, 'successor proxy');
+
+    await runWithMediaOperationPublicationGuard(
+      'operation-123',
+      async () => undefined,
+      async () =>
+        await writeAtomically(output, async (temporary) => {
+          await writeFile(temporary, 'replacement proxy');
+        }),
+    );
+
+    await expect(readFile(successorPartial, 'utf8')).resolves.toBe('successor proxy');
+    await expect(readFile(output, 'utf8')).resolves.toBe('replacement proxy');
+  });
+
+  it('does not delete a successor partial after ownership is lost during cleanup', async () => {
+    const directory = await makeDirectory();
+    const output = path.join(directory, 'proxy.mp4');
+    const successorPartial = path.join(
+      directory,
+      '.proxy.partial-successor-operation-123.mp4',
+    );
+    await writeFile(successorPartial, 'successor proxy');
+    let assertions = 0;
+
+    await expect(
+      runWithPublicationGuard(
+        async () => {
+          assertions += 1;
+          if (assertions >= 2) throw new Error('operation ownership lost');
+        },
+        async () =>
+          await writeAtomically(output, async (temporary) => {
+            await writeFile(temporary, 'replacement proxy');
+          }),
+      ),
+    ).rejects.toThrow(/ownership lost/i);
+
+    await expect(readFile(successorPartial, 'utf8')).resolves.toBe('successor proxy');
+    await expect(readFile(output, 'utf8')).rejects.toThrow(/ENOENT/);
   });
 });

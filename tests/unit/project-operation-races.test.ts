@@ -13,6 +13,7 @@ type Gate = {
 
 const gates = vi.hoisted(() => ({
   owner: {armed: false, blocked: false, started: null, resume: null, wait: null} as Gate,
+  statusOwner: {armed: false, blocked: false, started: null, resume: null, wait: null} as Gate,
   operationRecord: {armed: false, blocked: false, started: null, resume: null, wait: null} as Gate,
 }));
 
@@ -30,6 +31,15 @@ vi.mock('node:fs/promises', async (importOriginal) => {
         gates.owner.blocked = true;
         gates.owner.started?.();
         await gates.owner.wait;
+      }
+      if (
+        gates.statusOwner.armed &&
+        !gates.statusOwner.blocked &&
+        String(filePath).includes('/analysis/status-scan.lock/owner.json')
+      ) {
+        gates.statusOwner.blocked = true;
+        gates.statusOwner.started?.();
+        await gates.statusOwner.wait;
       }
       return await actual.writeFile(...args);
     },
@@ -61,6 +71,7 @@ import {
   completeMediaOperation,
   failMediaOperation,
   readMediaOperation,
+  runWithStatusScanLock,
 } from '../../src/project/operation';
 import {getProjectStatus} from '../../src/project/workspace';
 
@@ -99,6 +110,7 @@ const resetGate = (gate: Gate): void => {
 
 afterEach(async () => {
   resetGate(gates.owner);
+  resetGate(gates.statusOwner);
   resetGate(gates.operationRecord);
   await Promise.all(
     temporaryProjects.splice(0).map(async (projectPath) =>
@@ -108,6 +120,37 @@ afterEach(async () => {
 });
 
 describe('media-operation publication races', () => {
+  it('does not scan after delayed status-owner publication loses its claim', async () => {
+    const projectPath = await makeProject();
+    const statusOwnerGate = armGate(gates.statusOwner);
+    const first = runWithStatusScanLock(projectPath, async () => 'first');
+    void first.catch(() => undefined);
+
+    await statusOwnerGate.started;
+    let releaseSecond!: () => void;
+    let markSecondStarted!: () => void;
+    const secondStarted = new Promise<void>((resolve) => {
+      markSecondStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    const second = runWithStatusScanLock(projectPath, async () => {
+      markSecondStarted();
+      await release;
+      return 'second';
+    });
+
+    await secondStarted;
+    statusOwnerGate.resume();
+    try {
+      await expect(first).resolves.toEqual({acquired: false});
+    } finally {
+      releaseSecond();
+      await second.catch(() => undefined);
+    }
+  });
+
   it('returns media-in-progress without scanning during producer record publication', async () => {
     const projectPath = await makeProject();
     const recordGate = armGate(gates.operationRecord);
