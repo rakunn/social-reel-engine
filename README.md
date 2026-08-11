@@ -1,6 +1,6 @@
 # Social Reel Engine
 
-A local macOS workflow for turning supplied MP4/MOV footage into cinematic 9:16 social reels with Codex, FFmpeg, Remotion, and librosa. Originals remain unchanged. Every generated artifact is checksum-bound, color transforms are explicit, and final exports require current edit and color approvals.
+A local macOS workflow for turning supplied MP4/MOV footage into cinematic 9:16 social reels with Codex, FFmpeg, Remotion, and librosa. Originals remain unchanged. Every generated artifact is checksum-bound, color transforms are explicit, and final exports require current edit, color, and user-confirmed asset-rights records.
 
 ## Start a reel in a new Codex task
 
@@ -37,7 +37,7 @@ new → ingest → analyze → proxy → beats → rough edit → validate → p
                                                          ↓
                                   grade-stills → approve-color (pause 2)
                                                          ↓
-                                          grade → render → qc
+                              confirm-rights → grade → render → qc
 ```
 
 Typical commands:
@@ -55,6 +55,7 @@ npm run reel -- preview island-sunrise
 npm run reel -- approve-edit island-sunrise
 npm run reel -- grade-stills island-sunrise
 npm run reel -- approve-color island-sunrise
+npm run reel -- confirm-rights island-sunrise
 npm run reel -- grade island-sunrise
 npm run reel -- render island-sunrise
 npm run reel -- qc island-sunrise --target delivery
@@ -62,6 +63,8 @@ npm run reel -- status island-sunrise
 ```
 
 Use `npm run reel -- ingest <name> --list-library` to inspect the local LUT catalog. Catalog installation copies the LUT into the job, verifies its SHA-256 checksum, and writes its declared semantics into `config/luts.json`.
+
+Run `confirm-rights` only after the user explicitly confirms the exact current used asset set. The command records that decision and its asset-checksum fingerprint in `brief.json`; `status` blocks final export if a referenced asset later changes, without invalidating confirmation for unused inputs.
 
 ## Color safety
 

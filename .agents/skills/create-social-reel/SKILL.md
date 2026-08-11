@@ -29,7 +29,7 @@ Treat this skill as the complete orchestration workflow for routine reel product
    - after presenting the current rough-cut preview, before `approve-edit`;
    - after presenting the current graded reference frames, before `approve-color`.
 8. If a timeline, crop, playback, transition, title, audio, caption, stabilization, source-profile confirmation, normalization transform, grade, LUT, or blend changes, regenerate the affected review artifact and obtain the approval again.
-9. Never infer rights. When the user explicitly confirms rights for the exact current used footage, music, captions, LUTs, fonts, brand assets, and other material, persist their decision as `rightsConfirmed: true` in `projects/<reel-name>/brief.json`. Before using newly introduced material, set the aggregate gate to `false`, request only the missing confirmation, and set it true again only after the user explicitly confirms the expanded asset set.
+9. Never infer rights or edit the rights fields manually. Only after the user explicitly confirms the exact current used footage, music, captions, LUTs, fonts, brand assets, and other material, run `confirm-rights`; it writes `rightsConfirmed` and binds the decision to the used-asset checksum fingerprint in `brief.json`. Trust `status`: a changed referenced asset makes the decision stale, while an unused newly ingested asset does not. Request only the missing confirmation, then rerun `confirm-rights` for the expanded used set.
 10. Keep every runtime `projects/<reel-name>` job local-only. The entire `projects/**` tree is ignored except `projects/.gitkeep`; never stage or force-add a job's briefs, configuration, edit manifests, approvals, analysis, QC, media, or renders. Reusable engine defaults belong in `templates/reel/`.
 
 ## Load the focused guidance
@@ -48,7 +48,7 @@ Run `npm run reel -- doctor`. Resolve a safe kebab-case reel name, then create t
 
 Inventory every supplied file and the user's stated facts. Ingest each asset into its typed destination. Use the local LUT catalog only when its declared camera/profile and semantics match the user's confirmation. Record confirmations in `config/sources.json` and LUT declarations in `config/luts.json`; run `analyze` again after either changes.
 
-After the exact current used asset inventory is known, persist any explicit aggregate rights confirmation from the user in `brief.json`. Before long-running media work, ask once for all currently knowable missing profile, transform, rights, and material editorial facts. If footage profile or transform semantics remain ambiguous, declare the job proxy-only, name the exact missing facts and the first blocked command, and proceed only to a watermarked viewing proxy. Do not resolve ambiguity by selecting the LUT whose name seems closest.
+After the exact current used asset inventory is known, run `confirm-rights` if the user's explicit aggregate confirmation already covers it; otherwise keep rights in the consolidated intake request and run the command only after the user answers. Before long-running media work, ask once for all currently knowable missing profile, transform, rights, and material editorial facts. If footage profile or transform semantics remain ambiguous, declare the job proxy-only, name the exact missing facts and the first blocked command, and proceed only to a watermarked viewing proxy. Do not resolve ambiguity by selecting the LUT whose name seems closest.
 
 ### 2. Analyze and author the rough cut
 
@@ -70,7 +70,7 @@ Set exposure, white balance, and tint before the exact normalizer; set one optio
 
 ### 4. Grade, render, and verify
 
-Only after explicit approval of the displayed reference frames, run `approve-color`. Confirm `rightsConfirmed` remains current for every used asset. Do not ask again when the user's explicit confirmation was persisted for the unchanged asset set. If the aggregate gate is false because rights were never confirmed or new material was introduced later, stop and request only the missing confirmation.
+Only after explicit approval of the displayed reference frames, run `approve-color`, then `status`. Do not ask about rights again when status shows that the user's checksum-bound confirmation remains current. If status reports `awaiting-rights-confirmation`, run `confirm-rights` immediately when an explicit user statement already covers the exact current used set; otherwise stop and request only the missing confirmation, then run `confirm-rights` after the user answers.
 
 Run `grade` and inspect `analysis/graded-clips.json`. Any stabilization fallback must match the per-shot fallback decision approved with the rough cut; otherwise stop and return to editorial approval. Then run `render`, followed by QC for `master` and `delivery` and finally `status`.
 
@@ -78,4 +78,4 @@ Do not claim completion when QC has a failure, a render fingerprint is stale, an
 
 ## Resume an existing job
 
-Start with `status`, inspect the current manifests and approval hashes, and continue from the reported checkpoint. Existing files are not proof of freshness. After any change, use [approvals.md](references/approvals.md) to determine which review must be repeated.
+Start with `status`, inspect the current manifests and approval hashes, and continue from the reported checkpoint. Existing files and a bare `rightsConfirmed: true` are not proof of freshness; a legacy Boolean without its used-asset fingerprint cannot authorize final export. After any change, use [approvals.md](references/approvals.md) to determine which review must be repeated.

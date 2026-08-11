@@ -22,5 +22,6 @@
     "cameraAudio": false
   },
   "rightsConfirmed": false,
+  "rightsConfirmation": null,
   "notes": ""
 }

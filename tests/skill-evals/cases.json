@@ -64,10 +64,22 @@
       "prompt": "Create a reel from my supplied footage and music. I explicitly confirm I own or have permission to use every supplied asset. Minimize interruptions and explain how that confirmation reaches final export.",
       "mustCover": [
         "never infer rights",
-        "persist the explicit user decision as rightsConfirmed true in brief.json after inventory",
+        "run confirm-rights after the exact current used asset inventory is known",
+        "persist rightsConfirmed plus the used-asset checksum fingerprint in brief.json",
         "do not ask again while the used asset set is unchanged",
-        "set the aggregate gate false before using newly introduced material",
+        "an unused newly ingested asset does not invalidate the used-asset confirmation",
         "request only the missing confirmation for the expanded asset set"
+      ]
+    },
+    {
+      "id": "resumed-rights-binding",
+      "prompt": "Resume a reel whose brief says rightsConfirmed true. Explain how Codex proves that decision still covers the current used assets, what happens when a selected asset changed, and whether an unused newly ingested file forces another question.",
+      "mustCover": [
+        "status verifies the persisted used-asset checksum fingerprint",
+        "a legacy Boolean without a fingerprint cannot authorize final export",
+        "a changed referenced asset makes rights confirmation stale",
+        "only explicit user confirmation authorizes confirm-rights",
+        "unchanged or merely unreferenced assets do not trigger another rights question"
       ]
     },
     {

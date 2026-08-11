@@ -162,14 +162,15 @@ export const getProjectStatus = async (projectPath: string): Promise<ProjectStat
         : 'Run grade-stills, review the graded reference frames, then run approve-color.',
     };
   }
-  const brief = ReelBriefSchema.parse(await readJson(path.join(projectPath, 'brief.json')));
-  if (!brief.rightsConfirmed) {
+  const {readRightsConfirmationStatus} = await import('../edit/rights');
+  const rights = await readRightsConfirmationStatus(projectPath);
+  if (!rights.confirmed) {
     return {
       ...base,
       editApproved,
       colorApproved,
       stage: 'awaiting-rights-confirmation',
-      nextAction: 'Confirm usage rights in brief.json before rendering.',
+      nextAction: `${rights.reason}. After explicit user confirmation, run confirm-rights.`,
     };
   }
   const [master, delivery] = await Promise.all([

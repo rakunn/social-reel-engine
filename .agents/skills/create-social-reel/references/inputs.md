@@ -28,6 +28,7 @@ npm run reel -- ingest <name> <lut-paths...> --kind technical-lut
 npm run reel -- ingest <name> <lut-paths...> --kind creative-lut
 npm run reel -- ingest <name> <font-paths...> --kind fonts
 npm run reel -- ingest <name> <brand-paths...> --kind brand
+npm run reel -- confirm-rights <name>
 ```
 
 Use `--list-library` to inspect catalog declarations and `--library <id...>` to install verified catalog LUTs. Ingest performs immutable basename-preserving copies and checksum verification. A same-name file with different bytes is a conflict, not an overwrite opportunity.
@@ -42,4 +43,4 @@ Only one music file is accepted for deterministic beat analysis. Verify whether 
 
 ## Rights
 
-`brief.json` contains one aggregate `rightsConfirmed` gate. Explain that it covers all used footage, music, captions, LUTs, fonts, brand assets, and other supplied material. Never infer ownership. After the user explicitly confirms the exact current used asset set, persist their decision as `rightsConfirmed: true`; this records the user's statement rather than asserting rights on their behalf. Before using a newly introduced asset, set the gate to `false` and restore it only after the user explicitly confirms the expanded set.
+`brief.json` records the aggregate `rightsConfirmed` decision and the checksum fingerprint of the used asset set it covers. Explain that the decision covers all used footage, music, captions, LUTs, fonts, brand assets, and other supplied material. Never infer ownership or edit either rights field manually. After the user explicitly confirms the exact current used set, run `npm run reel -- confirm-rights <name>`; this records the user's statement rather than asserting rights on their behalf. `status` treats the decision as stale when a referenced asset changes. It stays current when only an unused asset is ingested or the used set is otherwise unchanged.

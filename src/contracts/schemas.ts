@@ -12,6 +12,14 @@ const RelativePath = z
     message: 'Path must be relative and must not contain traversal segments',
   });
 
+const RightsConfirmationSchema = z
+  .object({
+    assetSetFingerprintSha256: z.string().regex(/^[a-f0-9]{64}$/),
+    confirmedAt: IsoDateTime,
+    confirmedBy: z.string().min(1).optional().default('user'),
+  })
+  .strict();
+
 export const ReelBriefSchema = z
   .object({
     schemaVersion: SchemaVersion,
@@ -46,6 +54,7 @@ export const ReelBriefSchema = z
       cameraAudio: z.boolean(),
     }),
     rightsConfirmed: z.boolean(),
+    rightsConfirmation: RightsConfirmationSchema.nullable().optional().default(null),
     notes: z.string().max(10_000).optional().default(''),
   })
   .strict();

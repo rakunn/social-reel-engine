@@ -23,6 +23,7 @@ import {
   readApprovalStatus,
 } from '../../src/edit/approve';
 import {validateEdit} from '../../src/edit/validate';
+import {confirmRights, readRightsConfirmationStatus} from '../../src/edit/rights';
 import {sourceIdFor} from '../../src/media/analyze';
 import {
   expectedRenderFingerprint,
@@ -222,6 +223,7 @@ const makeFixture = async () => {
   });
   await writeJson(path.join(projectPath, 'config/luts.json'), luts);
   await writeJson(path.join(projectPath, 'edits/edit.json'), edit);
+  await confirmRights(projectPath, new Date('2026-08-10T00:00:00.000Z'));
   const previewPath = path.join(projectPath, 'previews/preview.mp4');
   await writeFile(previewPath, 'reviewed-rough-cut-preview');
   const previewRecord = await recordRenderArtifact(
@@ -249,6 +251,49 @@ const makeFixture = async () => {
     },
   });
   return {projectPath, edit, creativeLutPath, sourceId};
+};
+
+const addAnalyzedInput = async (
+  projectPath: string,
+  relativePath: string,
+  contents: string,
+  mediaType: 'audio' | 'caption' | 'font',
+) => {
+  const filePath = path.join(projectPath, relativePath);
+  await mkdir(path.dirname(filePath), {recursive: true});
+  await writeFile(filePath, contents);
+  const checksumSha256 = await hashFile(filePath);
+  const entry = {
+    id: sourceIdFor(mediaType, relativePath, checksumSha256),
+    relativePath,
+    checksumSha256,
+    sizeBytes: Buffer.byteLength(contents),
+    mediaType,
+    ffprobe:
+      mediaType === 'audio'
+        ? {
+            format: {duration: '30'},
+            streams: [{codec_type: 'audio', duration: '30'}],
+          }
+        : {format: {}, streams: []},
+    camera: {
+      manufacturer: null,
+      model: null,
+      gamma: null,
+      gamut: null,
+      profileId: null,
+      confirmed: false,
+    },
+  };
+  const manifestPath = path.join(projectPath, 'analysis/sources.json');
+  const manifest = SourceManifestSchema.parse(
+    JSON.parse(await readFile(manifestPath, 'utf8')),
+  );
+  await writeJson(
+    manifestPath,
+    SourceManifestSchema.parse({...manifest, sources: [...manifest.sources, entry]}),
+  );
+  return entry;
 };
 
 const recordFinalArtifacts = async (projectPath: string) => {
@@ -316,6 +361,239 @@ describe('edit validation', () => {
 });
 
 describe('hash-bound approvals', () => {
+  it('makes rights confirmation stale when the referenced asset set changes', async () => {
+    const {projectPath, edit} = await makeFixture();
+    const confirmation = await confirmRights(
+      projectPath,
+      new Date('2026-08-10T00:01:00.000Z'),
+    );
+    expect(JSON.parse(await readFile(path.join(projectPath, 'brief.json'), 'utf8'))).toEqual(
+      expect.objectContaining({rightsConfirmed: true, rightsConfirmation: confirmation}),
+    );
+    expect((await readRightsConfirmationStatus(projectPath)).confirmed).toBe(true);
+
+    const manifest = SourceManifestSchema.parse(
+      JSON.parse(await readFile(path.join(projectPath, 'analysis/sources.json'), 'utf8')),
+    );
+    const alternate = manifest.sources.find(
+      (source) => source.relativePath === 'input/clips/alternate.mp4',
+    );
+    if (!alternate) throw new Error('Fixture alternate source is missing');
+    await writeJson(path.join(projectPath, 'edits/edit.json'), {
+      ...edit,
+      clips: [{...edit.clips[0], sourceId: alternate.id}],
+    });
+
+    await expect(readRightsConfirmationStatus(projectPath)).resolves.toEqual(
+      expect.objectContaining({
+        confirmed: false,
+        reason: expect.stringMatching(/asset set.*changed|changed.*asset set/i),
+      }),
+    );
+  });
+
+  it('makes rights confirmation stale when selected music changes', async () => {
+    const {projectPath, edit} = await makeFixture();
+    const first = await addAnalyzedInput(
+      projectPath,
+      'input/music/first.wav',
+      'first-music-bytes',
+      'audio',
+    );
+    const second = await addAnalyzedInput(
+      projectPath,
+      'input/music/second.wav',
+      'second-music-bytes',
+      'audio',
+    );
+    const briefPath = path.join(projectPath, 'brief.json');
+    const brief = JSON.parse(await readFile(briefPath, 'utf8'));
+    await writeJson(briefPath, {
+      ...brief,
+      options: {...brief.options, music: true},
+    });
+    await writeJson(path.join(projectPath, 'edits/edit.json'), {
+      ...edit,
+      music: {sourceId: first.id, startSeconds: 0, gainDb: -8},
+    });
+    await confirmRights(projectPath);
+
+    await writeJson(path.join(projectPath, 'edits/edit.json'), {
+      ...edit,
+      music: {sourceId: second.id, startSeconds: 0, gainDb: -8},
+    });
+
+    await expect(readRightsConfirmationStatus(projectPath)).resolves.toEqual(
+      expect.objectContaining({confirmed: false, reason: expect.stringMatching(/asset set/i)}),
+    );
+  });
+
+  it('makes rights confirmation stale when selected captions change', async () => {
+    const {projectPath, edit} = await makeFixture();
+    await addAnalyzedInput(
+      projectPath,
+      'input/captions/first.srt',
+      '1\n00:00:00,000 --> 00:00:01,000\nFirst caption\n',
+      'caption',
+    );
+    await addAnalyzedInput(
+      projectPath,
+      'input/captions/second.srt',
+      '1\n00:00:00,000 --> 00:00:01,000\nSecond caption\n',
+      'caption',
+    );
+    const briefPath = path.join(projectPath, 'brief.json');
+    const brief = JSON.parse(await readFile(briefPath, 'utf8'));
+    await writeJson(briefPath, {
+      ...brief,
+      options: {...brief.options, captions: true},
+    });
+    await writeJson(path.join(projectPath, 'edits/edit.json'), {
+      ...edit,
+      captions: {relativePath: 'input/captions/first.srt', format: 'srt'},
+    });
+    await confirmRights(projectPath);
+
+    await writeJson(path.join(projectPath, 'edits/edit.json'), {
+      ...edit,
+      captions: {relativePath: 'input/captions/second.srt', format: 'srt'},
+    });
+
+    await expect(readRightsConfirmationStatus(projectPath)).resolves.toEqual(
+      expect.objectContaining({confirmed: false, reason: expect.stringMatching(/asset set/i)}),
+    );
+  });
+
+  it('makes rights confirmation stale when the active custom font changes', async () => {
+    const {projectPath} = await makeFixture();
+    await addAnalyzedInput(
+      projectPath,
+      'input/fonts/B-Director.ttf',
+      'first-font-bytes',
+      'font',
+    );
+    await confirmRights(projectPath);
+
+    await addAnalyzedInput(
+      projectPath,
+      'input/fonts/A-Director.ttf',
+      'replacement-font-bytes',
+      'font',
+    );
+
+    await expect(readRightsConfirmationStatus(projectPath)).resolves.toEqual(
+      expect.objectContaining({confirmed: false, reason: expect.stringMatching(/asset set/i)}),
+    );
+  });
+
+  it('makes rights confirmation stale when a selected LUT is removed', async () => {
+    const {projectPath, edit} = await makeFixture();
+    await writeJson(path.join(projectPath, 'edits/edit.json'), {
+      ...edit,
+      clips: [
+        {
+          ...edit.clips[0],
+          grade: {
+            ...edit.clips[0].grade,
+            creativeLutId: null,
+            creativeMix: 0,
+          },
+        },
+      ],
+    });
+
+    await expect(readRightsConfirmationStatus(projectPath)).resolves.toEqual(
+      expect.objectContaining({confirmed: false, reason: expect.stringMatching(/asset set/i)}),
+    );
+  });
+
+  it('keeps rights confirmation current when edit details change without changing assets', async () => {
+    const {projectPath, edit} = await makeFixture();
+    await writeJson(path.join(projectPath, 'edits/edit.json'), {
+      ...edit,
+      clips: [{...edit.clips[0], inSeconds: 3, outSeconds: 26}],
+    });
+
+    await expect(readRightsConfirmationStatus(projectPath)).resolves.toEqual(
+      expect.objectContaining({confirmed: true, reason: null}),
+    );
+  });
+
+  it('keeps rights confirmation current when only unreferenced footage changes', async () => {
+    const {projectPath} = await makeFixture();
+    const alternatePath = path.join(projectPath, 'input/clips/alternate.mp4');
+    const alternateBytes = 'changed-but-still-unreferenced-media';
+    await writeFile(alternatePath, alternateBytes);
+    const alternateChecksum = await hashFile(alternatePath);
+    const manifestPath = path.join(projectPath, 'analysis/sources.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+    const alternate = manifest.sources.find(
+      (source: {relativePath: string}) =>
+        source.relativePath === 'input/clips/alternate.mp4',
+    );
+    Object.assign(alternate, {
+      id: sourceIdFor('video', 'input/clips/alternate.mp4', alternateChecksum),
+      checksumSha256: alternateChecksum,
+      sizeBytes: Buffer.byteLength(alternateBytes),
+    });
+    await writeJson(manifestPath, manifest);
+
+    await expect(readRightsConfirmationStatus(projectPath)).resolves.toEqual(
+      expect.objectContaining({confirmed: true, reason: null}),
+    );
+  });
+
+  it('keeps rights confirmation current for unreferenced music, LUT, and brand inputs', async () => {
+    const {projectPath} = await makeFixture();
+    await addAnalyzedInput(
+      projectPath,
+      'input/music/unused.wav',
+      'unused-music-bytes',
+      'audio',
+    );
+    const unusedLutPath = path.join(projectPath, 'input/luts/creative/unused.cube');
+    await writeFile(unusedLutPath, 'unused-lut-bytes');
+    const lutsPath = path.join(projectPath, 'config/luts.json');
+    const luts = JSON.parse(await readFile(lutsPath, 'utf8'));
+    await writeJson(lutsPath, {
+      ...luts,
+      luts: [
+        ...luts.luts,
+        {
+          id: 'unused-creative',
+          kind: 'creative',
+          file: 'input/luts/creative/unused.cube',
+          checksumSha256: await hashFile(unusedLutPath),
+          cameraModel: null,
+          profileId: null,
+          inputColorSpace: 'Rec.709',
+          outputColorSpace: 'Rec.709',
+          transformSemantics: 'look',
+          defaultMix: 0.25,
+        },
+      ],
+    });
+    await writeFile(path.join(projectPath, 'input/brand/unused-logo.svg'), '<svg/>');
+
+    await expect(readRightsConfirmationStatus(projectPath)).resolves.toEqual(
+      expect.objectContaining({confirmed: true, reason: null}),
+    );
+  });
+
+  it('does not accept a legacy true Boolean without an asset fingerprint', async () => {
+    const {projectPath} = await makeFixture();
+    const briefPath = path.join(projectPath, 'brief.json');
+    const brief = JSON.parse(await readFile(briefPath, 'utf8'));
+    await writeJson(briefPath, {...brief, rightsConfirmed: true, rightsConfirmation: null});
+
+    await expect(readRightsConfirmationStatus(projectPath)).resolves.toEqual(
+      expect.objectContaining({
+        confirmed: false,
+        reason: expect.stringMatching(/not bound.*asset set/i),
+      }),
+    );
+  });
+
   it('keeps render fingerprints stable when unreferenced footage changes', async () => {
     const {projectPath} = await makeFixture();
     const before = {
@@ -509,6 +787,33 @@ describe('hash-bound approvals', () => {
     expect((await readRenderArtifactFreshness(projectPath, 'delivery')).fresh).toBe(false);
   });
 
+  it('marks final artifacts stale when the confirmed rights asset fingerprint changes', async () => {
+    const {projectPath} = await makeFixture();
+    const outputDirectory = path.join(projectPath, 'output');
+    await mkdir(outputDirectory, {recursive: true});
+    const deliveryPath = path.join(outputDirectory, 'delivery.mp4');
+    await writeFile(deliveryPath, 'asset-bound-rights-delivery');
+    await recordRenderArtifact(
+      projectPath,
+      'delivery',
+      deliveryPath,
+      await expectedRenderFingerprint(projectPath, 'delivery'),
+    );
+    expect((await readRenderArtifactFreshness(projectPath, 'delivery')).fresh).toBe(true);
+
+    const briefPath = path.join(projectPath, 'brief.json');
+    const brief = JSON.parse(await readFile(briefPath, 'utf8'));
+    await writeJson(briefPath, {
+      ...brief,
+      rightsConfirmation: {
+        ...brief.rightsConfirmation,
+        assetSetFingerprintSha256: '0'.repeat(64),
+      },
+    });
+
+    expect((await readRenderArtifactFreshness(projectPath, 'delivery')).fresh).toBe(false);
+  });
+
   it('returns awaiting-analysis instead of throwing for a stale source manifest', async () => {
     const {projectPath} = await makeFixture();
     await writeFile(path.join(projectPath, 'input/clips/clip.mp4'), 'changed-source-bytes');
@@ -561,7 +866,32 @@ describe('hash-bound approvals', () => {
         stage: 'awaiting-rights-confirmation',
         editApproved: true,
         colorApproved: true,
-        nextAction: expect.stringMatching(/rights.*brief\.json/i),
+        nextAction: expect.stringMatching(/rights.*confirm-rights/i),
+      }),
+    );
+  });
+
+  it('surfaces a stale rights asset fingerprint before reporting render readiness', async () => {
+    const {projectPath} = await makeFixture();
+    await approveEdit(projectPath);
+    await approveColor(projectPath);
+    await confirmRights(projectPath, new Date('2026-08-10T00:03:00.000Z'));
+    const briefPath = path.join(projectPath, 'brief.json');
+    const brief = JSON.parse(await readFile(briefPath, 'utf8'));
+    await writeJson(briefPath, {
+      ...brief,
+      rightsConfirmation: {
+        ...brief.rightsConfirmation,
+        assetSetFingerprintSha256: '0'.repeat(64),
+      },
+    });
+
+    await expect(getProjectStatus(projectPath)).resolves.toEqual(
+      expect.objectContaining({
+        stage: 'awaiting-rights-confirmation',
+        editApproved: true,
+        colorApproved: true,
+        nextAction: expect.stringMatching(/rights.*asset set|asset set.*rights/i),
       }),
     );
   });
@@ -800,5 +1130,42 @@ describe('hash-bound approvals', () => {
     );
     await writeJson(briefPath, {...brief, rightsConfirmed: false});
     await expect(assertFinalReadiness(projectPath)).rejects.toThrow(/rights/i);
+  });
+
+  it('blocks final export when rights cover a different asset set', async () => {
+    const {projectPath} = await makeFixture();
+    await approveEdit(projectPath);
+    await approveColor(projectPath);
+    await confirmRights(projectPath, new Date('2026-08-10T00:03:00.000Z'));
+    const briefPath = path.join(projectPath, 'brief.json');
+    const brief = JSON.parse(await readFile(briefPath, 'utf8'));
+    await writeJson(briefPath, {
+      ...brief,
+      rightsConfirmation: {
+        ...brief.rightsConfirmation,
+        assetSetFingerprintSha256: '0'.repeat(64),
+      },
+    });
+
+    await expect(assertFinalReadiness(projectPath)).rejects.toThrow(
+      /rights.*asset set|asset set.*rights/i,
+    );
+  });
+
+  it('blocks final export for a legacy rights Boolean without an asset fingerprint', async () => {
+    const {projectPath} = await makeFixture();
+    await approveEdit(projectPath);
+    await approveColor(projectPath);
+    const briefPath = path.join(projectPath, 'brief.json');
+    const brief = JSON.parse(await readFile(briefPath, 'utf8'));
+    await writeJson(briefPath, {
+      ...brief,
+      rightsConfirmed: true,
+      rightsConfirmation: null,
+    });
+
+    await expect(assertFinalReadiness(projectPath)).rejects.toThrow(
+      /rights.*not bound|not bound.*asset set/i,
+    );
   });
 });

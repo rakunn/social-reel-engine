@@ -3,7 +3,6 @@ import {
   ApprovalStateSchema,
   EditManifestSchema,
   LutDefinitionsSchema,
-  ReelBriefSchema,
   type ApprovalState,
 } from '../contracts/schemas';
 import {
@@ -26,6 +25,7 @@ import {
   readRenderArtifactRecord,
 } from '../render/artifacts';
 import {readValidatedSourceManifest} from '../media/source-integrity';
+import {assertRightsConfirmation} from './rights';
 
 const loadState = async (projectPath: string) => {
   const edit = EditManifestSchema.parse(
@@ -280,10 +280,5 @@ export const assertFinalReadiness = async (projectPath: string): Promise<void> =
     throw new Error(`Final export is blocked by invalid or changed inputs:\n- ${validation.failures.join('\n- ')}`);
   }
   await assertRenderApprovals(projectPath);
-  const brief = ReelBriefSchema.parse(await readJson(path.join(projectPath, 'brief.json')));
-  if (!brief.rightsConfirmed) {
-    throw new Error(
-      'Final export is blocked until footage, LUT, music, font, and branding usage rights are confirmed in brief.json',
-    );
-  }
+  await assertRightsConfirmation(projectPath);
 };
