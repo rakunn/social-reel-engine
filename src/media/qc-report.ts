@@ -17,6 +17,7 @@ import {
   type OutputTarget,
 } from '../render/policy';
 import {readRenderArtifactFreshness} from '../render/artifacts';
+import {createSourceIntegrityContext, type SourceIntegrityContext} from './source-integrity';
 import {probeFile, runFfmpeg} from './ffmpeg';
 import {
   parseBlackFrames,
@@ -298,7 +299,9 @@ export const runQc = async (
   projectPath: string,
   target: OutputTarget = 'delivery',
   now = new Date(),
+  options: {integrity?: SourceIntegrityContext} = {},
 ): Promise<QcReport> => {
+  const integrity = options.integrity ?? createSourceIntegrityContext();
   const outputPath = outputFor(projectPath, target);
   const renderSettings = await readRenderSettings(projectPath);
   const edit = EditManifestSchema.parse(
@@ -306,13 +309,13 @@ export const runQc = async (
   );
   let approvals: ApprovalStatus = {editApproved: false, colorApproved: false};
   try {
-    approvals = await readApprovalStatus(projectPath);
+    approvals = await readApprovalStatus(projectPath, {integrity});
   } catch {
     // The report will expose invalid approvals rather than hiding other diagnostics.
   }
   let missingMedia: string[] = [];
   try {
-    missingMedia = (await validateEdit(projectPath)).failures;
+    missingMedia = (await validateEdit(projectPath, undefined, {integrity})).failures;
   } catch (error) {
     missingMedia = [(error as Error).message];
   }
@@ -326,7 +329,9 @@ export const runQc = async (
   let observedSilent = false;
   let renderFresh = false;
   try {
-    renderFresh = (await readRenderArtifactFreshness(projectPath, target)).fresh;
+    renderFresh = (
+      await readRenderArtifactFreshness(projectPath, target, {integrity})
+    ).fresh;
   } catch {
     renderFresh = false;
   }

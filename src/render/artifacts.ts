@@ -17,10 +17,10 @@ import {readJson, writeJson} from '../core/json';
 import {resolveInside} from '../core/paths';
 import type {SourcesConfig} from '../media/analyze';
 import {lutCompatibilityFailures} from '../core/lut-compatibility';
-import {scanInputs} from '../project/ingest';
 import {
-  readValidatedSourceManifest,
+  readVerifiedInputSnapshot,
   sourceManifestFingerprintProjection,
+  type SourceIntegrityContext,
 } from '../media/source-integrity';
 import {
   readRenderSettings,
@@ -47,6 +47,14 @@ export type RenderArtifactIndex = {
 export type RenderArtifactFreshness = {
   fresh: boolean;
   reason: string | null;
+};
+
+export type ExpectedRenderFingerprintOptions = {
+  integrity?: SourceIntegrityContext;
+};
+
+export type RenderArtifactOptions = {
+  integrity?: SourceIntegrityContext;
 };
 
 const indexPath = (projectPath: string): string =>
@@ -193,15 +201,16 @@ export const referencedRenderLuts = (
 export const expectedRenderFingerprint = async (
   projectPath: string,
   target: OutputTarget,
+  options: ExpectedRenderFingerprintOptions = {},
 ): Promise<string> => {
   const edit = EditManifestSchema.parse(
     await readJson(path.join(projectPath, 'edits/edit.json')),
   );
-  const ingest = await scanInputs(projectPath);
-  const [sourceConfirmations, sourceManifest, lutsConfig, settings, pipelineBuild, brief] =
+  const integrity = await readVerifiedInputSnapshot(projectPath, options.integrity);
+  const {ingest, sourceManifest} = integrity;
+  const [sourceConfirmations, lutsConfig, settings, pipelineBuild, brief] =
     await Promise.all([
       readJson<SourcesConfig>(path.join(projectPath, 'config/sources.json')),
-      readValidatedSourceManifest(projectPath),
       readJson<{schemaVersion: '1.0.0'; luts: unknown[]}>(
         path.join(projectPath, 'config/luts.json'),
       ),
@@ -237,7 +246,7 @@ export const expectedRenderFingerprint = async (
   const stabilizationReviewContext =
     target === 'preview'
       ? {fresh: true, reason: null, reviewContextHash: null}
-      : await readPreviewStabilizationContext(projectPath);
+      : await readPreviewStabilizationContext(projectPath, {integrity: options.integrity});
   if (!stabilizationReviewContext.fresh) {
     throw new Error(
       `Final render fingerprint requires a fresh preview stabilization context: ${stabilizationReviewContext.reason ?? 'unknown mismatch'}`,
@@ -286,13 +295,14 @@ export const recordRenderArtifact = async (
   outputPath: string,
   fingerprint: string,
   now = new Date(),
+  options: RenderArtifactOptions = {},
 ): Promise<RenderArtifactRecord> => {
   const relativeFile = path.relative(projectPath, outputPath).split(path.sep).join('/');
   const resolved = resolveInside(projectPath, relativeFile);
   const outputStat = await stat(resolved);
   const previewContext =
     target === 'preview'
-      ? await readPreviewStabilizationContext(projectPath)
+      ? await readPreviewStabilizationContext(projectPath, {integrity: options.integrity})
       : {fresh: true, reason: null, reviewContextHash: null};
   if (!previewContext.fresh) {
     throw new Error(
@@ -316,10 +326,15 @@ export const recordRenderArtifact = async (
 export const readRenderArtifactFreshness = async (
   projectPath: string,
   target: OutputTarget,
-  options: {expectedFingerprint?: string; verifyChecksum?: boolean} = {},
+  options: {
+    expectedFingerprint?: string;
+    verifyChecksum?: boolean;
+    integrity?: SourceIntegrityContext;
+  } = {},
 ): Promise<RenderArtifactFreshness> => {
   const expectedFingerprint =
-    options.expectedFingerprint ?? (await expectedRenderFingerprint(projectPath, target));
+    options.expectedFingerprint ??
+    (await expectedRenderFingerprint(projectPath, target, {integrity: options.integrity}));
   const record = (await readIndex(projectPath)).artifacts[target];
   if (!record) return evaluateRenderArtifact(null, expectedFingerprint, null, null);
   const outputPath = resolveInside(projectPath, record.file);
@@ -337,7 +352,9 @@ export const readRenderArtifactFreshness = async (
     if (!freshness.fresh || target !== 'preview') {
       return freshness;
     }
-    const context = await readPreviewStabilizationContext(projectPath);
+    const context = await readPreviewStabilizationContext(projectPath, {
+      integrity: options.integrity,
+    });
     if (!context.fresh) {
       return {fresh: false, reason: context.reason};
     }

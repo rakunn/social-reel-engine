@@ -5,6 +5,7 @@ import {readJson} from '../core/json';
 import {FFMPEG, FFPROBE} from '../media/ffmpeg';
 import {runProcess} from '../media/process';
 import {LutDefinitionSchema} from '../contracts/schemas';
+import {checkRemotionRuntime} from '../render/remotion-runtime';
 
 export type DoctorCheck = {
   id: string;
@@ -153,6 +154,12 @@ export const runDoctor = async (engineRoot: string): Promise<DoctorReport> => {
   } catch (error) {
     checks.push({id: 'remotion-versions', status: 'fail', message: (error as Error).message});
   }
+  const remotionRuntime = await checkRemotionRuntime(engineRoot);
+  checks.push({
+    id: 'remotion-runtime',
+    status: remotionRuntime.ok ? 'pass' : 'fail',
+    message: remotionRuntime.message,
+  });
 
   checks.push(
     await checkCommand('ffmpeg', FFMPEG, ['-hide_banner', '-version'], (output) => /ffmpeg version/i.test(output), 'FFmpeg is available'),

@@ -1,15 +1,16 @@
 import {existsSync} from 'node:fs';
-import {mkdir} from 'node:fs/promises';
+import {access, mkdir} from 'node:fs/promises';
 import path from 'node:path';
 import type {EditClip} from '../contracts/schemas';
 import {hashFile} from '../core/hash';
 import {artifactFingerprint} from '../project/artifacts';
 import {resolveInside} from '../core/paths';
-import {runFfmpeg} from './ffmpeg';
+import {probeFile, runFfmpeg} from './ffmpeg';
 import {stabilizationOutcome, validateStabilizedCrop} from './stabilize';
 import {pipelineBuildFingerprint} from '../render/artifacts';
 import {escapeFfmpegFilterValue} from './filter-escape';
 import {REC709_OUTPUT_METADATA_ARGS} from './color-ffmpeg';
+import {writeAtomically} from './atomic-output';
 
 export type PreviewStabilizationItem = {
   clipId: string;
@@ -27,6 +28,10 @@ export type PreviewStabilizationReport = {
   schemaVersion: '1.0.0';
   generatedAt: string;
   items: PreviewStabilizationItem[];
+};
+
+export type PreviewStabilizationOptions = {
+  detectionSourceChecksumSha256?: string;
 };
 
 export const previewStabilizationFingerprint = (input: {
@@ -63,6 +68,7 @@ export const preparePreviewStabilizedClip = async (
   normalizationInputChecksumSha256: string | null,
   normalized: boolean,
   prior?: PreviewStabilizationItem,
+  options: PreviewStabilizationOptions = {},
 ): Promise<{item: PreviewStabilizationItem; sourcePath: string}> => {
   if (!clip.stabilization.enabled) {
     return {
@@ -86,7 +92,8 @@ export const preparePreviewStabilizedClip = async (
     if (!guard.valid) throw new Error(`${clip.id}: ${guard.reason}`);
   }
 
-  const detectionSourceChecksumSha256 = await hashFile(originalPath);
+  const detectionSourceChecksumSha256 =
+    options.detectionSourceChecksumSha256 ?? (await hashFile(originalPath));
   const pipelineBuild = await pipelineBuildFingerprint();
   const fingerprint = previewStabilizationFingerprint({
     pipelineBuild,
@@ -119,26 +126,33 @@ export const preparePreviewStabilizedClip = async (
   await mkdir(path.join(projectPath, 'work/preview-stabilized'), {recursive: true});
   await mkdir(path.join(projectPath, 'work/stabilization'), {recursive: true});
   const duration = clip.outSeconds - clip.inSeconds;
-  const detection = await runFfmpeg(
-    [
-      '-ss',
-      clip.inSeconds.toFixed(3),
-      '-t',
-      duration.toFixed(3),
-      '-i',
-      originalPath,
-      '-vf',
-      `vidstabdetect=shakiness=${Math.max(1, Math.round(clip.stabilization.strength * 10))}:accuracy=15:result=${escapeFfmpegFilterValue(transformsPath)}`,
-      '-f',
-      'null',
-      '-',
-    ],
-    {allowFailure: true},
-  );
-  const outcome = stabilizationOutcome(
-    detection.exitCode === 0 && existsSync(transformsPath),
-    clip.stabilization.fallbackToUnstabilized,
-  );
+  let detectionSucceeded = false;
+  try {
+    await writeAtomically(
+      transformsPath,
+      async (temporaryOutput) =>
+        await runFfmpeg([
+          '-ss',
+          clip.inSeconds.toFixed(3),
+          '-t',
+          duration.toFixed(3),
+          '-i',
+          originalPath,
+          '-vf',
+          `vidstabdetect=shakiness=${Math.max(1, Math.round(clip.stabilization.strength * 10))}:accuracy=15:result=${escapeFfmpegFilterValue(temporaryOutput)}`,
+          '-f',
+          'null',
+          '-',
+        ]),
+      async (temporaryOutput) => {
+        await access(temporaryOutput);
+      },
+    );
+    detectionSucceeded = true;
+  } catch {
+    detectionSucceeded = false;
+  }
+  const outcome = stabilizationOutcome(detectionSucceeded, clip.stabilization.fallbackToUnstabilized);
   if (outcome === 'fallback') {
     return {
       item: {
@@ -157,41 +171,51 @@ export const preparePreviewStabilizedClip = async (
   }
 
   const smoothing = Math.max(5, Math.round(5 + clip.stabilization.strength * 25));
-  const transformation = await runFfmpeg(
-    [
-      '-ss',
-      clip.inSeconds.toFixed(3),
-      '-t',
-      duration.toFixed(3),
-      '-i',
-      originalPath,
-      '-map',
-      '0:v:0',
-      '-map',
-      '0:a?',
-      '-vf',
-      `vidstabtransform=input=${escapeFfmpegFilterValue(transformsPath)}:smoothing=${smoothing}:zoom=5:optzoom=1:interpol=bicubic,${reviewVideoFilter}`,
-      '-c:v',
-      'libx264',
-      '-preset',
-      'fast',
-      '-crf',
-      '23',
-      '-pix_fmt',
-      'yuv420p',
-      '-c:a',
-      'aac',
-      '-b:a',
-      '128k',
-      ...(normalized ? REC709_OUTPUT_METADATA_ARGS : []),
-      '-movflags',
-      '+faststart',
+  let transformationSucceeded = false;
+  try {
+    await writeAtomically(
       outputPath,
-    ],
-    {allowFailure: true},
-  );
+      async (temporaryOutput) =>
+        await runFfmpeg([
+          '-ss',
+          clip.inSeconds.toFixed(3),
+          '-t',
+          duration.toFixed(3),
+          '-i',
+          originalPath,
+          '-map',
+          '0:v:0',
+          '-map',
+          '0:a?',
+          '-vf',
+          `vidstabtransform=input=${escapeFfmpegFilterValue(transformsPath)}:smoothing=${smoothing}:zoom=5:optzoom=1:interpol=bicubic,${reviewVideoFilter}`,
+          '-c:v',
+          'libx264',
+          '-preset',
+          'fast',
+          '-crf',
+          '23',
+          '-pix_fmt',
+          'yuv420p',
+          '-c:a',
+          'aac',
+          '-b:a',
+          '128k',
+          ...(normalized ? REC709_OUTPUT_METADATA_ARGS : []),
+          '-movflags',
+          '+faststart',
+          temporaryOutput,
+        ]),
+      async (temporaryOutput) => {
+        await probeFile(temporaryOutput);
+      },
+    );
+    transformationSucceeded = true;
+  } catch {
+    transformationSucceeded = false;
+  }
   const transformationOutcome = stabilizationOutcome(
-    transformation.exitCode === 0 && existsSync(outputPath),
+    transformationSucceeded,
     clip.stabilization.fallbackToUnstabilized,
   );
   if (transformationOutcome === 'fallback') {

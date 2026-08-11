@@ -25,6 +25,7 @@ import {
 import {validateEdit} from '../../src/edit/validate';
 import {confirmRights, readRightsConfirmationStatus} from '../../src/edit/rights';
 import {sourceIdFor} from '../../src/media/analyze';
+import {createSourceIntegrityContext} from '../../src/media/source-integrity';
 import {
   expectedRenderFingerprint,
   readRenderArtifactFreshness,
@@ -358,6 +359,18 @@ describe('edit validation', () => {
       expect.stringMatching(/12.*13/),
     ]);
   });
+
+  it('reuses a supplied verified-input context across validation calls', async () => {
+    const {projectPath, edit} = await makeFixture();
+    const integrity = createSourceIntegrityContext();
+
+    await expect(validateEdit(projectPath, edit, {integrity})).resolves.toMatchObject({valid: true});
+    const firstSnapshot = integrity.snapshot;
+    await expect(validateEdit(projectPath, edit, {integrity})).resolves.toMatchObject({valid: true});
+
+    expect(firstSnapshot).not.toBeNull();
+    expect(integrity.snapshot).toBe(firstSnapshot);
+  });
 });
 
 describe('hash-bound approvals', () => {
@@ -592,6 +605,32 @@ describe('hash-bound approvals', () => {
         reason: expect.stringMatching(/not bound.*asset set/i),
       }),
     );
+  });
+
+  it('reuses a supplied verified-input context while calculating render fingerprints', async () => {
+    const {projectPath} = await makeFixture();
+    const integrity = createSourceIntegrityContext();
+
+    const first = await expectedRenderFingerprint(projectPath, 'preview', {integrity});
+    const firstSnapshot = integrity.snapshot;
+    const second = await expectedRenderFingerprint(projectPath, 'preview', {integrity});
+
+    expect(second).toBe(first);
+    expect(firstSnapshot).not.toBeNull();
+    expect(integrity.snapshot).toBe(firstSnapshot);
+  });
+
+  it('reuses one verified-input snapshot across preview and final fingerprint paths', async () => {
+    const {projectPath} = await makeFixture();
+    const integrity = createSourceIntegrityContext();
+
+    await expectedRenderFingerprint(projectPath, 'preview', {integrity});
+    const snapshot = integrity.snapshot;
+    await expectedRenderFingerprint(projectPath, 'master', {integrity});
+    await expectedRenderFingerprint(projectPath, 'delivery', {integrity});
+
+    expect(snapshot).not.toBeNull();
+    expect(integrity.snapshot).toBe(snapshot);
   });
 
   it('keeps render fingerprints stable when unreferenced footage changes', async () => {

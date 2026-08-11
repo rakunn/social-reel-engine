@@ -45,7 +45,7 @@ Treat this skill as the complete orchestration workflow for routine reel product
 
 ### 1. Preflight and create the job
 
-Run `npm run reel -- doctor`. Resolve a safe kebab-case reel name, then create the job with `npm run reel -- new <reel-name> --title "<title>"`.
+Run `npm run reel -- doctor`. Its `remotion-runtime` check must pass before an expensive preview or final render; this is a technical preflight, not an additional user approval gate. Resolve a safe kebab-case reel name, then create the job with `npm run reel -- new <reel-name> --title "<title>"`.
 
 Inventory every supplied file and the user's stated facts. Ingest each asset into its typed destination. Use the local LUT catalog only when its declared camera/profile and semantics match the user's confirmation. Record confirmations in `config/sources.json` and LUT declarations in `config/luts.json`; run `analyze` again after either changes.
 
@@ -77,6 +77,12 @@ Run `grade` and inspect `analysis/graded-clips.json`. Any stabilization fallback
 
 Do not claim completion when QC has a failure, a render fingerprint is stale, an output is unreadable, or a warning has not been reviewed. Deliver absolute paths to the ProRes master, H.264 delivery, and both human-readable QC reports, plus a concise note about warnings and stabilization outcomes.
 
+## Active media work and recovery
+
+When `analysis/operation.json` records a live media command, `status` is safe to run: it returns the recorded command, phase, and progress before any input checksum scan. Use that snapshot and low-impact PID observation for ETA. Do not run `analyze`, `proxy`, or any other media producer concurrently with the recorded job.
+
+If `status` reports `interrupted-media-job`, do not manually trust, copy, delete, or register partial media/artifact files. Rerun the exact command named by `status`; durable outputs are atomically published only after validation, and a successful retry replaces the stale operation record. This recovery does not bypass any rights or approval gate.
+
 ## Resume an existing job
 
-Start with `status`, inspect the current manifests and approval hashes, and continue from the reported checkpoint. Existing files and a bare `rightsConfirmed: true` are not proof of freshness; a legacy Boolean without its used-asset fingerprint cannot authorize final export. After any change, use [approvals.md](references/approvals.md) to determine which review must be repeated.
+Start with `status`, inspect the current manifests and approval hashes, and continue from the reported checkpoint. If it reports `media-in-progress`, wait rather than starting another media command; if it reports `interrupted-media-job`, rerun its exact retry command. Existing files and a bare `rightsConfirmed: true` are not proof of freshness; a legacy Boolean without its used-asset fingerprint cannot authorize final export. After any change, use [approvals.md](references/approvals.md) to determine which review must be repeated.

@@ -9,6 +9,7 @@ import {readJson, writeJson} from '../core/json';
 import {assertSafeReelName} from '../core/paths';
 import {validateEdit} from '../edit/validate';
 import {scanInputs} from './ingest';
+import {isMediaOperationAlive, readMediaOperation, type MediaOperationRecord} from './operation';
 
 type CreateReelProjectOptions = {
   engineRoot: string;
@@ -78,14 +79,45 @@ export type ProjectStatus = {
     | 'awaiting-color-approval'
     | 'awaiting-rights-confirmation'
     | 'ready-to-render'
-    | 'rendered';
+    | 'rendered'
+    | 'media-in-progress'
+    | 'interrupted-media-job';
   nextAction: string;
   inputs: number;
   editApproved: boolean;
   colorApproved: boolean;
+  activity?: Pick<
+    MediaOperationRecord,
+    'command' | 'phase' | 'progress' | 'startedAt' | 'updatedAt' | 'finishedAt'
+  >;
 };
 
+const statusActivity = (record: MediaOperationRecord) => ({
+  command: record.command,
+  phase: record.phase,
+  progress: record.progress,
+  startedAt: record.startedAt,
+  updatedAt: record.updatedAt,
+  finishedAt: record.finishedAt,
+});
+
 export const getProjectStatus = async (projectPath: string): Promise<ProjectStatus> => {
+  const operation = await readMediaOperation(projectPath);
+  if (operation) {
+    const base = {inputs: 0, editApproved: false, colorApproved: false, activity: statusActivity(operation)};
+    if (isMediaOperationAlive(operation)) {
+      return {
+        ...base,
+        stage: 'media-in-progress',
+        nextAction: `${operation.command} is running (${operation.phase}). Wait for completion before starting another media command.`,
+      };
+    }
+    return {
+      ...base,
+      stage: 'interrupted-media-job',
+      nextAction: `Run ${operation.command} again to replace interrupted work safely.`,
+    };
+  }
   const inputs = (await scanInputs(projectPath)).files.filter(
     (file) => file.kind === 'clips',
   ).length;

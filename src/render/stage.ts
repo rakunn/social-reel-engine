@@ -20,8 +20,13 @@ import {
 } from '../media/preview-stabilize';
 import type {ReelRenderProps} from '../remotion/model';
 import {secondsToMediaFrames} from '../remotion/model';
-import {readValidatedSourceManifest} from '../media/source-integrity';
+import {
+  createSourceIntegrityContext,
+  readValidatedSourceManifest,
+  type SourceIntegrityContext,
+} from '../media/source-integrity';
 import {parseCaptionContent} from '../remotion/captions';
+import {writeAtomically} from '../media/atomic-output';
 
 export type StageTarget = 'preview' | 'master';
 
@@ -38,11 +43,23 @@ const stageFile = async (
   source: string,
   stageRoot: string,
   relativeTarget: string,
+  sourceChecksumSha256?: string,
 ): Promise<string> => {
   const target = resolveInside(stageRoot, relativeTarget);
   await mkdir(path.dirname(target), {recursive: true});
-  if (!(await exists(target)) || (await hashFile(target)) !== (await hashFile(source))) {
-    await copyFile(source, target);
+  const checksumSha256 = sourceChecksumSha256 ?? (await hashFile(source));
+  if (!(await exists(target)) || (await hashFile(target)) !== checksumSha256) {
+    await writeAtomically(
+      target,
+      async (temporaryOutput) => {
+        await copyFile(source, temporaryOutput);
+      },
+      async (temporaryOutput) => {
+        if ((await hashFile(temporaryOutput)) !== checksumSha256) {
+          throw new Error(`Staged file checksum does not match source: ${relativeTarget}`);
+        }
+      },
+    );
   }
   return relativeTarget.split(path.sep).join('/');
 };
@@ -62,18 +79,29 @@ export const prepareRenderProps = async (
   projectPath: string,
   engineRoot: string,
   target: StageTarget,
+  options: {
+    integrity?: SourceIntegrityContext;
+    onProgress?: (progress: {completed: number; total: number; label: string}) => Promise<void> | void;
+  } = {},
 ): Promise<{props: ReelRenderProps; stageRoot: string; fingerprint: string}> => {
+  const integrity = options.integrity ?? createSourceIntegrityContext();
   const edit = EditManifestSchema.parse(
     await readJson(path.join(projectPath, 'edits/edit.json')),
   );
   let proxies: ProxyReport | null = null;
   let graded: GradedClipReport | null = null;
   if (target === 'preview') {
-    proxies = await generateProxies(projectPath);
+    proxies = await generateProxies(projectPath, new Date(), {
+      integrity,
+      onProgress: options.onProgress,
+    });
   } else {
-    graded = await gradeSelectedClips(projectPath);
+    graded = await gradeSelectedClips(projectPath, new Date(), {
+      integrity,
+      onProgress: options.onProgress,
+    });
   }
-  const sources = await readValidatedSourceManifest(projectPath);
+  const sources = await readValidatedSourceManifest(projectPath, integrity);
   const fingerprint = artifactFingerprint({
     target,
     edit,
@@ -99,6 +127,7 @@ export const prepareRenderProps = async (
 
   for (const clip of edit.clips) {
     let sourcePath: string;
+    let sourceChecksumSha256: string | undefined;
     if (target === 'preview') {
       const proxy = proxies?.items.find((item) => item.sourceId === clip.sourceId);
       if (!proxy) {
@@ -124,8 +153,10 @@ export const prepareRenderProps = async (
           : null,
         proxy.normalization !== 'unconfirmed-watermarked',
         priorPreviewStabilization?.items.find((item) => item.clipId === clip.id),
+        {detectionSourceChecksumSha256: original.checksumSha256},
       );
       sourcePath = stabilized.sourcePath;
+      sourceChecksumSha256 = stabilized.item.checksumSha256 ?? undefined;
       previewStabilizationItems.push(stabilized.item);
       trimBeforeFramesByClip[clip.id] =
         stabilized.item.stabilization === 'applied'
@@ -138,10 +169,16 @@ export const prepareRenderProps = async (
         throw new Error(`No graded intermediate generated for clip ${clip.id}`);
       }
       sourcePath = resolveInside(projectPath, item.path);
+      sourceChecksumSha256 = item.checksumSha256;
       trimBeforeFramesByClip[clip.id] = 0;
     }
     const extension = path.extname(sourcePath).toLowerCase() || '.mov';
-    const staged = await stageFile(sourcePath, stageRoot, `media/${clip.id}${extension}`);
+    const staged = await stageFile(
+      sourcePath,
+      stageRoot,
+      `media/${clip.id}${extension}`,
+      sourceChecksumSha256,
+    );
     media[clip.id] = `${publicRelativeRoot}/${staged}`;
   }
 
@@ -152,7 +189,12 @@ export const prepareRenderProps = async (
       throw new Error(`Music source ${edit.music.sourceId} is missing`);
     }
     const input = resolveInside(projectPath, musicSource.relativePath);
-    const staged = await stageFile(input, stageRoot, `music/${path.basename(input)}`);
+    const staged = await stageFile(
+      input,
+      stageRoot,
+      `music/${path.basename(input)}`,
+      musicSource.checksumSha256,
+    );
     music = `${publicRelativeRoot}/${staged}`;
   }
 
@@ -165,7 +207,12 @@ export const prepareRenderProps = async (
     .sort((left, right) => left.relativePath.localeCompare(right.relativePath))[0];
   if (fontSource) {
     const font = resolveInside(projectPath, fontSource.relativePath);
-    const staged = await stageFile(font, stageRoot, `fonts/${path.basename(font)}`);
+    const staged = await stageFile(
+      font,
+      stageRoot,
+      `fonts/${path.basename(font)}`,
+      fontSource.checksumSha256,
+    );
     fontUrl = `${publicRelativeRoot}/${staged}`;
   }
 

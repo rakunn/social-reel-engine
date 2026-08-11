@@ -8,7 +8,11 @@ import {
 import {hashFile, hashValue} from '../core/hash';
 import {readJson, writeJson} from '../core/json';
 import {resolveInside} from '../core/paths';
-import {readValidatedSourceManifest} from '../media/source-integrity';
+import {
+  createSourceIntegrityContext,
+  readValidatedSourceManifest,
+  type SourceIntegrityContext,
+} from '../media/source-integrity';
 import {referencedRenderLuts, referencedRenderSources} from '../render/artifacts';
 import {validateEdit} from './validate';
 
@@ -25,10 +29,17 @@ export type RightsConfirmationStatus = {
   confirmedAssetSetFingerprintSha256: string | null;
 };
 
-const currentRightsAssets = async (projectPath: string): Promise<RightsAsset[]> => {
+export type RightsIntegrityOptions = {
+  integrity?: SourceIntegrityContext;
+};
+
+const currentRightsAssets = async (
+  projectPath: string,
+  options: RightsIntegrityOptions = {},
+): Promise<RightsAsset[]> => {
   const [edit, sourceManifest, lutsConfig] = await Promise.all([
     readJson(path.join(projectPath, 'edits/edit.json'), EditManifestSchema),
-    readValidatedSourceManifest(projectPath),
+    readValidatedSourceManifest(projectPath, options.integrity),
     readJson<{luts?: unknown[]}>(path.join(projectPath, 'config/luts.json')),
   ]);
   const luts = LutDefinitionsSchema.parse(lutsConfig.luts ?? []);
@@ -55,14 +66,20 @@ const currentRightsAssets = async (projectPath: string): Promise<RightsAsset[]> 
 
 export const currentRightsAssetSetFingerprint = async (
   projectPath: string,
+  options: RightsIntegrityOptions = {},
 ): Promise<string> =>
-  hashValue({contractVersion: '1.0.0', assets: await currentRightsAssets(projectPath)});
+  hashValue({
+    contractVersion: '1.0.0',
+    assets: await currentRightsAssets(projectPath, options),
+  });
 
 export const confirmRights = async (
   projectPath: string,
   now = new Date(),
+  options: RightsIntegrityOptions = {},
 ): Promise<NonNullable<ReelBrief['rightsConfirmation']>> => {
-  const validation = await validateEdit(projectPath);
+  const integrity = options.integrity ?? createSourceIntegrityContext();
+  const validation = await validateEdit(projectPath, undefined, {integrity});
   if (!validation.valid) {
     throw new Error(
       `Rights confirmation requires a valid current edit:\n- ${validation.failures.join('\n- ')}`,
@@ -71,7 +88,7 @@ export const confirmRights = async (
   const briefPath = path.join(projectPath, 'brief.json');
   const brief = ReelBriefSchema.parse(await readJson(briefPath));
   const rightsConfirmation = {
-    assetSetFingerprintSha256: await currentRightsAssetSetFingerprint(projectPath),
+    assetSetFingerprintSha256: await currentRightsAssetSetFingerprint(projectPath, {integrity}),
     confirmedAt: now.toISOString(),
     confirmedBy: 'user',
   };
@@ -86,6 +103,7 @@ export const confirmRights = async (
 
 export const readRightsConfirmationStatus = async (
   projectPath: string,
+  options: RightsIntegrityOptions = {},
 ): Promise<RightsConfirmationStatus> => {
   const brief = ReelBriefSchema.parse(
     await readJson(path.join(projectPath, 'brief.json')),
@@ -109,7 +127,7 @@ export const readRightsConfirmationStatus = async (
     };
   }
   const currentAssetSetFingerprintSha256 =
-    await currentRightsAssetSetFingerprint(projectPath);
+    await currentRightsAssetSetFingerprint(projectPath, options);
   if (confirmedAssetSetFingerprintSha256 !== currentAssetSetFingerprintSha256) {
     return {
       confirmed: false,
@@ -126,8 +144,11 @@ export const readRightsConfirmationStatus = async (
   };
 };
 
-export const assertRightsConfirmation = async (projectPath: string): Promise<void> => {
-  const status = await readRightsConfirmationStatus(projectPath);
+export const assertRightsConfirmation = async (
+  projectPath: string,
+  options: RightsIntegrityOptions = {},
+): Promise<void> => {
+  const status = await readRightsConfirmationStatus(projectPath, options);
   if (!status.confirmed) {
     throw new Error(
       `Final export is blocked by rights confirmation: ${status.reason ?? 'unknown mismatch'}`,

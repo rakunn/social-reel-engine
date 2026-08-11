@@ -105,6 +105,17 @@
         "continuous subject-chasing or recentering is rejected as forced motion",
         "the full 9:16 motion is reviewed at multiple points before rough-cut approval"
       ]
+    },
+    {
+      "id": "active-media-monitoring-and-recovery",
+      "prompt": "A proxy command has an active analysis/operation.json record (live PID, 2/7 clips completed). The user needs an ETA but says not to slow the transcode. A teammate proposes running status, analyze, and proxy in parallel because they are read-only or resumable. Later assume the recorded PID dies. Explain the exact safe monitoring and recovery actions.",
+      "mustCover": [
+        "status is safe only while a recorded media operation is active because it returns before input hashing",
+        "never run analyze, proxy, or another media producer concurrently with the active job",
+        "use recorded phase/progress and low-impact process observation for ETA",
+        "a stale or failed operation record means rerun the exact recorded command",
+        "do not manually trust or reuse interrupted partial media or artifact records"
+      ]
     }
   ]
 }

@@ -15,6 +15,12 @@ Five fresh-context, read-only agents answered the original cases in `cases.json`
 
 The baseline demonstrates good safety instincts but inconsistent execution. The skill must make the normal ready path, the exceptional proxy-only path, explicit rights persistence, exact command order, technical-transform refusal, LUT comparison policy, approval ownership, and output-freshness checks deterministic across all eight wordings.
 
+## Active-media monitoring and recovery baseline
+
+A fresh-context agent was given a live `analysis/operation.json` proxy record under an ETA deadline and explicitly told not to read the reel skill or repository source. It correctly rejected concurrent `analyze` and `proxy`, and it chose one `status` check. Its recovery advice nevertheless said to “inspect the recorded failure/log state and existing completed outputs” and to restart only through a “known resumable, non-destructive recovery path—not a concurrent or blind fresh proxy invocation.”
+
+That is too ambiguous for the engine contract introduced in Phase 1: a failed/stale operation record already names the exact safe retry command, and interrupted media must not be manually trusted as reusable cache inputs. The forward guidance must say that a recorded active job permits `status` because it returns before checksum scanning, but all other producers remain disallowed; after interruption, use `status` and rerun the exact recorded command so atomic output handling replaces incomplete work safely.
+
 ## Subject-preservation regression baseline
 
 The first production run of the Coron/Ngey Ngey reel exposed a crop failure that the pre-update guidance did not prevent: the boat in the second selected shot drifted toward the edge of the 9:16 crop, and the third selected shot did not establish the visible group of three huts as the composition's subject. The existing wording to review the moving image and avoid blind center-crops was too soft to encode subject identity, required count, safe margin, or a default “establish-and-hold” policy. The regression case `subject-preserving-composition` makes those requirements explicit.
