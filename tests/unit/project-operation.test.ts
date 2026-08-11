@@ -1,7 +1,7 @@
-import {mkdtemp, readFile, rm} from 'node:fs/promises';
+import {mkdir, mkdtemp, readFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {afterEach, describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {getProjectStatus} from '../../src/project/workspace';
 import {
   MEDIA_OPERATION_COMMANDS,
@@ -130,6 +130,34 @@ describe('media operation records', () => {
       expect(result.reason).toBeInstanceOf(Error);
       expect((result.reason as Error).message).toMatch(/already active/i);
     }
+  });
+
+  it('retries lock acquisition after reclaiming an ownerless stale lock', async () => {
+    const projectPath = await makeProject();
+    await mkdir(path.join(projectPath, 'analysis/operation.lock'), {recursive: true});
+
+    let nowCalls = 0;
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => {
+      nowCalls += 1;
+      if (nowCalls === 1) return 0;
+      return nowCalls <= 101 ? 999 : 1_000;
+    });
+    let recovered: MediaOperationRecord;
+    try {
+      recovered = await beginMediaOperation(projectPath, 'proxy', {
+        pid: process.pid,
+        phase: 'recovering-ownerless-lock',
+      });
+    } finally {
+      now.mockRestore();
+    }
+
+    expect(recovered).toMatchObject({
+      command: 'proxy',
+      state: 'running',
+      phase: 'recovering-ownerless-lock',
+    });
+    await completeMediaOperation(projectPath, recovered.id!);
   });
 
   it('treats a reused PID with a different process-start marker as interrupted', () => {

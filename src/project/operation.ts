@@ -219,7 +219,12 @@ const acquireMediaOperationLock = async (
   const lockPath = operationLockPath(projectPath);
   await mkdir(path.dirname(lockPath), {recursive: true});
   const acquisitionStartedAt = Date.now();
-  for (let attempt = 0; attempt <= LOCK_START_RETRY_LIMIT; attempt += 1) {
+  let reclaimedOnFinalAttempt = false;
+  for (
+    let attempt = 0;
+    attempt <= LOCK_START_RETRY_LIMIT + (reclaimedOnFinalAttempt ? 1 : 0);
+    attempt += 1
+  ) {
     try {
       await mkdir(lockPath);
       const owner: ActiveMediaOperationLock = {
@@ -254,7 +259,7 @@ const acquireMediaOperationLock = async (
       );
     }
     if (owner && isProcessIdentityAlive(owner)) {
-      if (attempt === LOCK_START_RETRY_LIMIT) {
+      if (attempt === LOCK_START_RETRY_LIMIT + (reclaimedOnFinalAttempt ? 1 : 0)) {
         throw new Error('Cannot start a media operation: another media operation is still starting');
       }
       await pause();
@@ -267,9 +272,11 @@ const acquireMediaOperationLock = async (
       await pause();
       continue;
     }
-    if (!(await reclaimStaleMediaOperationLock(projectPath, owner))) {
-      await pause();
+    if (await reclaimStaleMediaOperationLock(projectPath, owner)) {
+      reclaimedOnFinalAttempt ||= attempt === LOCK_START_RETRY_LIMIT;
+      continue;
     }
+    await pause();
   }
   throw new Error('Cannot start a media operation: lock acquisition timed out');
 };
