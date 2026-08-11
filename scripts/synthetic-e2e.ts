@@ -15,7 +15,7 @@ import {renderMasterAndDelivery, renderPreview} from '../src/render/remotion';
 
 const IDENTITY_CUBE = `TITLE "Synthetic Identity"\nLUT_3D_SIZE 2\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 1 1 1\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n`;
 
-export const runSyntheticE2e = async (
+export const prepareSyntheticReel = async (
   engineRoot: string,
   options: {silent?: boolean} = {},
 ) => {
@@ -204,6 +204,27 @@ export const runSyntheticE2e = async (
   const brief = JSON.parse(await import('node:fs/promises').then(({readFile}) => readFile(briefPath, 'utf8')));
   await writeJson(briefPath, {...brief, rightsConfirmed: true});
 
+  return {
+    temporaryRoot,
+    projectPath,
+    reelName,
+    originalFiles: [clipOne, clipTwo, music, lut],
+    originalHashes,
+    sourceIds: {
+      clipOne: sourceOne.id,
+      clipTwo: sourceTwo.id,
+      music: musicSource.id,
+    },
+  };
+};
+
+export const runSyntheticE2e = async (
+  engineRoot: string,
+  options: {silent?: boolean} = {},
+) => {
+  const prepared = await prepareSyntheticReel(engineRoot, options);
+  const {projectPath, originalFiles, originalHashes} = prepared;
+
   const preview = await renderPreview(projectPath, engineRoot);
   await approveEdit(projectPath);
   await generateGradedStills(projectPath);
@@ -221,7 +242,7 @@ export const runSyntheticE2e = async (
   const previewQc = await runQc(projectPath, 'preview');
   const masterQc = await runQc(projectPath, 'master');
   const deliveryQc = await runQc(projectPath, 'delivery');
-  const afterHashes = await Promise.all([clipOne, clipTwo, music, lut].map(hashFile));
+  const afterHashes = await Promise.all(originalFiles.map(hashFile));
   const originalsUnchanged = originalHashes.every((hash, index) => hash === afterHashes[index]);
   const result = {
     projectPath,
