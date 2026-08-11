@@ -1,11 +1,21 @@
 ---
 name: create-social-reel
-description: Orchestrate local social-reel creation, editing, grading, previewing, rendering, and QC with the repository's FFmpeg, Remotion, and librosa engine. Use for MP4/MOV footage, DJI D-Log M, Sony S-Log3, technical or creative LUTs, music, captions, stabilization, vertical crops, approval-gated renders, or social-video QC.
+description: Use when creating, editing, grading, previewing, rendering, or validating local social reels with the repository's FFmpeg, Remotion, and librosa engine, including MP4/MOV footage, DJI D-Log M, Sony S-Log3, log or HDR profiles, technical or creative LUTs, music, captions, stabilization, vertical crops, approval-gated renders, and social-video QC.
 ---
 
 # Create Social Reel
 
 Create one isolated `projects/<reel-name>` job and drive it through the engine's checksum-bound workflow. Keep the user in control of editorial and color choices, preserve every original, and never infer a technical color transform.
+
+## Autonomous interaction contract
+
+Treat this skill as the complete orchestration workflow for routine reel production.
+
+1. At intake, consolidate every currently knowable blocker into one request: missing source/profile or LUT facts, rights for the known asset set, and editorial requirements that materially change the result. State reasonable defaults for non-blocking creative choices and proceed when the user has delegated judgment.
+2. Do not ask the user to approve a design document or implementation plan, or to choose an agent strategy, execution mode, checkout, worktree, branch, or commit workflow. Make those internal decisions autonomously and safely.
+3. Do not split optional creative choices into serial questions. Choose a defensible treatment from the brief, explain it with the review artifact, and use artifact approval as the feedback point.
+4. After intake, stop only at the exact rough-cut and color approval gates below. A later user-requested change may invalidate an approval or introduce a genuinely new blocker; otherwise do not add confirmation stops.
+5. Do not invoke `superpowers:brainstorming`, `superpowers:writing-plans`, `superpowers:executing-plans`, `superpowers:using-git-worktrees`, `superpowers:subagent-driven-development`, or `superpowers:finishing-a-development-branch` for routine reel production. After a concrete technical failure, use `superpowers:systematic-debugging` internally when useful without adding approval gates. If the user requests changes to the reel engine or other repository source code, use the normal development workflow instead.
 
 ## Non-negotiable rules
 
@@ -19,7 +29,7 @@ Create one isolated `projects/<reel-name>` job and drive it through the engine's
    - after presenting the current rough-cut preview, before `approve-edit`;
    - after presenting the current graded reference frames, before `approve-color`.
 8. If a timeline, crop, playback, transition, title, audio, caption, stabilization, grade, LUT, or blend changes, regenerate the affected review artifact and obtain the approval again.
-9. Do not mark `rightsConfirmed` true. Only the user may confirm rights for footage, music, captions, LUTs, fonts, brand assets, and other supplied material.
+9. Do not mark `rightsConfirmed` true. Only the user may confirm rights for footage, music, captions, LUTs, fonts, brand assets, and other supplied material. Request that confirmation in the consolidated intake for the known asset set; request it later only for newly introduced material.
 10. Keep every runtime `projects/<reel-name>` job local-only. The entire `projects/**` tree is ignored except `projects/.gitkeep`; never stage or force-add a job's briefs, configuration, edit manifests, approvals, analysis, QC, media, or renders. Reusable engine defaults belong in `templates/reel/`.
 
 ## Load the focused guidance
@@ -38,7 +48,7 @@ Run `npm run reel -- doctor`. Resolve a safe kebab-case reel name, then create t
 
 Inventory every supplied file and the user's stated facts. Ingest each asset into its typed destination. Use the local LUT catalog only when its declared camera/profile and semantics match the user's confirmation. Record confirmations in `config/sources.json` and LUT declarations in `config/luts.json`; run `analyze` again after either changes.
 
-If footage profile or transform semantics remain ambiguous, proceed only to a watermarked viewing proxy and clearly name the missing fact. Do not resolve ambiguity by selecting the LUT whose name seems closest.
+Before long-running media work, ask once for all currently knowable missing profile, transform, rights, and material editorial facts. If footage profile or transform semantics remain ambiguous, proceed only to a watermarked viewing proxy and clearly name the missing fact. Do not resolve ambiguity by selecting the LUT whose name seems closest.
 
 ### 2. Analyze and author the rough cut
 
@@ -58,7 +68,7 @@ Set exposure, white balance, and tint before the exact normalizer; set one optio
 
 ### 4. Grade, render, and verify
 
-Only after explicit approval of the displayed reference frames, run `approve-color`. Confirm the user has set `rightsConfirmed` true; if not, stop and request that confirmation.
+Only after explicit approval of the displayed reference frames, run `approve-color`. Confirm `rightsConfirmed` remains current for every used asset. If it is false because rights were not confirmed at intake or new material was introduced later, stop and request only the missing confirmation.
 
 Run `grade` and inspect `analysis/graded-clips.json`. Any stabilization fallback must match the per-shot fallback decision approved with the rough cut; otherwise stop and return to editorial approval. Then run `render`, followed by QC for `master` and `delivery` and finally `status`.
 
