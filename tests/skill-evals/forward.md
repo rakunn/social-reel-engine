@@ -1,6 +1,6 @@
 # Skill forward-test results
 
-Five fresh-context, read-only agents were instructed to use `.agents/skills/create-social-reel/SKILL.md` and the references it routed for the corresponding cases in `cases.json`. None modified the repository.
+Seven fresh-context, read-only agents were instructed to use `.agents/skills/create-social-reel/SKILL.md` and the references it routed for the corresponding cases in `cases.json`. None modified the repository.
 
 | Case | Result | Evidence of improvement over no-skill control |
 | --- | --- | --- |
@@ -9,5 +9,7 @@ Five fresh-context, read-only agents were instructed to use `.agents/skills/crea
 | Creative LUT selection | Pass | Refused filename-based ranking, required actual normalized frame comparisons and a neutral option, treated the PDF ranges as guidance rather than presets, and left color approval with the user. |
 | Music/captions/stabilization | Pass | Covered immutable ingest, beat/onset analysis, SRT timing and safe-area review, per-shot stabilization with approved fallback, exactly two mandatory pauses, user-owned rights, and full delivery review. |
 | Stale approvals and QC | Pass | Correctly required a new preview and both approvals after trim/crop plus a new color review after blend changes; cited reference-frame checksums and target-specific render fingerprints; rejected same-name files as freshness evidence. |
+| Explicit rights persistence | Pass | Persisted the user's explicit decision as `rightsConfirmed: true` after inventory, did not ask again for the unchanged set, and reset the aggregate gate before using newly introduced material. |
+| Proxy-only incomplete intake | Pass | Declared the named blocker and first blocked command, kept the rough visibly watermarked, revisited only those facts with rough review, blocked graded stills, and required normalized-preview regeneration and reapproval after the facts changed its fingerprint. |
 
-All five cases covered their `mustCover` expectations. Compared with the controls, the skill removed speculative LUT naming, made the two pauses consistent, tied approval commands to explicit user decisions, and incorporated the engine repairs for per-shot fallback, reviewed-frame checksums, and current-render fingerprints.
+All seven cases covered their `mustCover` expectations. Compared with the controls, the skill removed speculative LUT naming, made the ready and proxy-only interaction paths explicit, persisted user-confirmed rights without a later repeat question, tied approval commands to exact user-reviewed artifacts, and incorporated the engine repairs for per-shot fallback, reviewed-frame checksums, and current-render fingerprints.

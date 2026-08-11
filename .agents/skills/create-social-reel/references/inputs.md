@@ -42,4 +42,4 @@ Only one music file is accepted for deterministic beat analysis. Verify whether 
 
 ## Rights
 
-`brief.json` contains one aggregate `rightsConfirmed` gate. Explain that it covers all used footage, music, captions, LUTs, fonts, brand assets, and other supplied material. Never infer ownership or set the value for the user.
+`brief.json` contains one aggregate `rightsConfirmed` gate. Explain that it covers all used footage, music, captions, LUTs, fonts, brand assets, and other supplied material. Never infer ownership. After the user explicitly confirms the exact current used asset set, persist their decision as `rightsConfirmed: true`; this records the user's statement rather than asserting rights on their behalf. Before using a newly introduced asset, set the gate to `false` and restore it only after the user explicitly confirms the expanded set.

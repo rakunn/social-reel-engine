@@ -13,7 +13,7 @@ Only an explicit user decision after seeing the exact current artifact authorize
 5. Stop and wait.
 6. After the user explicitly approves that version, run `approve-edit`.
 
-Trim, order, crop, playback, transitions, title, music, camera audio, captions, or stabilization changes make editorial approval stale. Because color approval is bound to the edit hash, they make color approval stale too.
+Trim, order, crop, playback, transitions, title, music, camera audio, captions, stabilization, source-profile confirmation, or preview-normalization changes make editorial approval stale. Because color approval is bound to the edit hash, they make color approval stale too.
 
 ## Gate 2: color
 

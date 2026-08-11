@@ -14,7 +14,7 @@ Treat this skill as the complete orchestration workflow for routine reel product
 1. At intake, consolidate every currently knowable blocker into one request: missing source/profile or LUT facts, rights for the known asset set, and editorial requirements that materially change the result. State reasonable defaults for non-blocking creative choices and proceed when the user has delegated judgment.
 2. Do not ask the user to approve a design document or implementation plan, or to choose an agent strategy, execution mode, checkout, worktree, branch, or commit workflow. Make those internal decisions autonomously and safely.
 3. Do not split optional creative choices into serial questions. Choose a defensible treatment from the brief, explain it with the review artifact, and use artifact approval as the feedback point.
-4. After intake, stop only at the exact rough-cut and color approval gates below. A later user-requested change may invalidate an approval or introduce a genuinely new blocker; otherwise do not add confirmation stops.
+4. Classify intake as `ready` when every mandatory fact is resolved or `proxy-only` when a disclosed source-profile or transform fact remains unresolved. The ready path stops only at the rough-cut and color gates below. The proxy-only path may revisit only its named facts with the rough review; if resolving them changes the source confirmation or normalization, regenerate the preview and obtain rough approval again before color work. A later user-requested change may likewise invalidate an approval or introduce a genuinely new blocker.
 5. Do not invoke `superpowers:brainstorming`, `superpowers:writing-plans`, `superpowers:executing-plans`, `superpowers:using-git-worktrees`, `superpowers:subagent-driven-development`, or `superpowers:finishing-a-development-branch` for routine reel production. After a concrete technical failure, use `superpowers:systematic-debugging` internally when useful without adding approval gates. If the user requests changes to the reel engine or other repository source code, use the normal development workflow instead.
 
 ## Non-negotiable rules
@@ -25,11 +25,11 @@ Treat this skill as the complete orchestration workflow for routine reel product
 4. Allow an unconfirmed source only in the visibly watermarked rough preview. Do not run `grade-stills`, `approve-color`, `grade`, or `render` until every selected source has an explicitly confirmed profile and exactly one matching technical or combined transform.
 5. A combined normalization-and-look LUT replaces both the technical and creative stages. Never double-normalize or stack creative LUTs.
 6. Never run either approval command on the user's behalf merely because an artifact looks plausible. Approval means the user reviewed the exact current artifact and explicitly accepted it.
-7. Always stop twice:
+7. Use these mandatory artifact gates:
    - after presenting the current rough-cut preview, before `approve-edit`;
    - after presenting the current graded reference frames, before `approve-color`.
-8. If a timeline, crop, playback, transition, title, audio, caption, stabilization, grade, LUT, or blend changes, regenerate the affected review artifact and obtain the approval again.
-9. Do not mark `rightsConfirmed` true. Only the user may confirm rights for footage, music, captions, LUTs, fonts, brand assets, and other supplied material. Request that confirmation in the consolidated intake for the known asset set; request it later only for newly introduced material.
+8. If a timeline, crop, playback, transition, title, audio, caption, stabilization, source-profile confirmation, normalization transform, grade, LUT, or blend changes, regenerate the affected review artifact and obtain the approval again.
+9. Never infer rights. When the user explicitly confirms rights for the exact current used footage, music, captions, LUTs, fonts, brand assets, and other material, persist their decision as `rightsConfirmed: true` in `projects/<reel-name>/brief.json`. Before using newly introduced material, set the aggregate gate to `false`, request only the missing confirmation, and set it true again only after the user explicitly confirms the expanded asset set.
 10. Keep every runtime `projects/<reel-name>` job local-only. The entire `projects/**` tree is ignored except `projects/.gitkeep`; never stage or force-add a job's briefs, configuration, edit manifests, approvals, analysis, QC, media, or renders. Reusable engine defaults belong in `templates/reel/`.
 
 ## Load the focused guidance
@@ -48,7 +48,7 @@ Run `npm run reel -- doctor`. Resolve a safe kebab-case reel name, then create t
 
 Inventory every supplied file and the user's stated facts. Ingest each asset into its typed destination. Use the local LUT catalog only when its declared camera/profile and semantics match the user's confirmation. Record confirmations in `config/sources.json` and LUT declarations in `config/luts.json`; run `analyze` again after either changes.
 
-Before long-running media work, ask once for all currently knowable missing profile, transform, rights, and material editorial facts. If footage profile or transform semantics remain ambiguous, proceed only to a watermarked viewing proxy and clearly name the missing fact. Do not resolve ambiguity by selecting the LUT whose name seems closest.
+After the exact current used asset inventory is known, persist any explicit aggregate rights confirmation from the user in `brief.json`. Before long-running media work, ask once for all currently knowable missing profile, transform, rights, and material editorial facts. If footage profile or transform semantics remain ambiguous, declare the job proxy-only, name the exact missing facts and the first blocked command, and proceed only to a watermarked viewing proxy. Do not resolve ambiguity by selecting the LUT whose name seems closest.
 
 ### 2. Analyze and author the rough cut
 
@@ -56,11 +56,13 @@ Run `analyze`, `proxy`, and, when one music file is supplied, `beats`. Inspect t
 
 Run `validate-edit`, then `preview` and `qc --target preview`. Inspect the rendered preview itself. Report the exact shot order, duration, crops, speed changes, transitions, titles, caption state, music/camera-audio choices, stabilization choices, warnings, and any unsafe unknowns.
 
-**STOP — rough-cut approval.** Present a clickable absolute path to `previews/preview.mp4` and ask the user to approve this exact rough cut or request changes. End the task without running `approve-edit`. If anything changes, rerender and stop here again.
+**STOP — rough-cut approval.** Present a clickable absolute path to `previews/preview.mp4` and ask the user to approve this exact rough cut or request changes. For a proxy-only job, include every previously disclosed unresolved source/profile or transform fact in this same response. End the task without running `approve-edit`.
+
+If the user supplies those facts, record them, update the LUT declarations and edit as needed, rerun `analyze`, regenerate proxies, run `validate-edit`, regenerate the preview, and rerun preview QC. Source confirmation or normalization changes make the previous preview and approval stale, so present the normalized preview and stop for rough approval again. If the facts remain unavailable, keep the watermarked rough as a review artifact and do not run `grade-stills`.
 
 ### 3. Build and present the grade
 
-Only after the user explicitly approves the displayed rough cut, run `approve-edit`. Confirm the color chain for every selected shot. When a creative look was not specified, compare actual technically normalized reference frames; do not rank looks from filenames. Keep the neutral/no-creative-LUT treatment available.
+Only after the user explicitly approves the displayed current rough cut and every fact required by `grade-stills` is resolved, run `approve-edit`. Confirm the color chain for every selected shot. When a creative look was not specified, compare actual technically normalized reference frames; do not rank looks from filenames. Keep the neutral/no-creative-LUT treatment available.
 
 Set exposure, white balance, and tint before the exact normalizer; set one optional creative LUT and its explicit per-shot blend after normalization. Run `grade-stills`. Inspect the generated PNGs for clipping, casts, skin/neutral balance where relevant, shot matching, and the intended restraint.
 
@@ -68,7 +70,7 @@ Set exposure, white balance, and tint before the exact normalizer; set one optio
 
 ### 4. Grade, render, and verify
 
-Only after explicit approval of the displayed reference frames, run `approve-color`. Confirm `rightsConfirmed` remains current for every used asset. If it is false because rights were not confirmed at intake or new material was introduced later, stop and request only the missing confirmation.
+Only after explicit approval of the displayed reference frames, run `approve-color`. Confirm `rightsConfirmed` remains current for every used asset. Do not ask again when the user's explicit confirmation was persisted for the unchanged asset set. If the aggregate gate is false because rights were never confirmed or new material was introduced later, stop and request only the missing confirmation.
 
 Run `grade` and inspect `analysis/graded-clips.json`. Any stabilization fallback must match the per-shot fallback decision approved with the rough cut; otherwise stop and return to editorial approval. Then run `render`, followed by QC for `master` and `delivery` and finally `status`.
 
