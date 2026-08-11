@@ -25,6 +25,7 @@ import {
   readRenderArtifactRecord,
 } from '../render/artifacts';
 import {
+  assertVerifiedInputSnapshotUnchanged,
   createSourceIntegrityContext,
   readValidatedSourceManifest,
   type SourceIntegrityContext,
@@ -217,6 +218,7 @@ export const approveEdit = async (
     edit: {hash, approvedAt: now.toISOString(), approvedBy: 'user'},
     color: approvals.color?.editHash === hash ? approvals.color : null,
   });
+  await assertVerifiedInputSnapshotUnchanged(projectPath, integrity);
   await writeJson(path.join(projectPath, 'analysis/approvals.json'), next);
   return next;
 };
@@ -257,6 +259,7 @@ export const approveColor = async (
       approvedBy: 'user',
     },
   });
+  await assertVerifiedInputSnapshotUnchanged(projectPath, integrity);
   await writeJson(path.join(projectPath, 'analysis/approvals.json'), next);
   return next;
 };

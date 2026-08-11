@@ -13,6 +13,7 @@ import {
   isMediaOperationAlive,
   readMediaOperation,
   runMediaOperation,
+  runWithStatusScanLock,
   updateMediaOperation,
   type MediaOperationRecord,
 } from '../../src/project/operation';
@@ -57,7 +58,7 @@ describe('media operation records', () => {
     await expect(readMediaOperation(projectPath)).resolves.toBeNull();
   });
 
-  it('retires completed operation state to ID-bound tombstones before a successor starts', async () => {
+  it('marks completed operation state released before a successor starts', async () => {
     const projectPath = await makeProject();
     const completed = await beginMediaOperation(projectPath, 'proxy', {
       pid: process.pid,
@@ -69,21 +70,24 @@ describe('media operation records', () => {
     await expect(readMediaOperation(projectPath)).resolves.toBeNull();
     await expect(
       readFile(
-        path.join(projectPath, `analysis/operation.lock.released-${completed.id}/owner.json`),
+        path.join(projectPath, 'analysis/operation.lock/owner.json'),
         'utf8',
       ),
-    ).resolves.toContain(completed.id!);
+    ).resolves.toContain('"state": "released"');
     await expect(
-      readFile(
-        path.join(projectPath, `analysis/operation.completed-${completed.id}/record.json`),
-        'utf8',
-      ),
-    ).resolves.toContain(completed.id!);
+      readFile(path.join(projectPath, 'analysis/operation.json'), 'utf8'),
+    ).resolves.toContain('"state": "completed"');
 
     const successor = await beginMediaOperation(projectPath, 'render', {
       pid: process.pid,
       phase: 'rendering-master',
     });
+    await expect(
+      readFile(
+        path.join(projectPath, `analysis/operation.lock.reclaimed-${completed.id}/owner.json`),
+        'utf8',
+      ),
+    ).resolves.toContain(completed.id!);
     await completeMediaOperation(projectPath, successor.id!);
   });
 
@@ -103,6 +107,37 @@ describe('media operation records', () => {
         progress: {completed: 2, total: 7, label: 'source-03'},
       },
     });
+  });
+
+  it('keeps a status scan from competing with producer startup', async () => {
+    const projectPath = await makeProject();
+    let releaseScan!: () => void;
+    let markScanStarted!: () => void;
+    const scanStarted = new Promise<void>((resolve) => {
+      markScanStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseScan = resolve;
+    });
+    const statusScan = runWithStatusScanLock(projectPath, async () => {
+      markScanStarted();
+      await release;
+      return 'scanned';
+    });
+
+    await scanStarted;
+    await expect(
+      beginMediaOperation(projectPath, 'proxy', {pid: process.pid, phase: 'transcoding'}),
+    ).rejects.toThrow(/status is checking inputs/i);
+
+    releaseScan();
+    await expect(statusScan).resolves.toEqual({acquired: true, value: 'scanned'});
+
+    const media = await beginMediaOperation(projectPath, 'proxy', {
+      pid: process.pid,
+      phase: 'transcoding',
+    });
+    await completeMediaOperation(projectPath, media.id!);
   });
 
   it('does not replace a live operation with a competing media command', async () => {

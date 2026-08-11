@@ -1,6 +1,6 @@
 import {execFileSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
-import {mkdir, rename, stat, writeFile} from 'node:fs/promises';
+import {mkdir, rename, rmdir, stat, unlink, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {z} from 'zod';
 import {readJson, writeJson} from '../core/json';
@@ -35,7 +35,7 @@ const MediaOperationRecordSchema = z
     schemaVersion: z.literal('1.0.0'),
     id: z.string().min(1).nullable().default(null),
     command: MediaOperationCommandSchema,
-    state: z.enum(['running', 'failed']),
+    state: z.enum(['running', 'failed', 'completed']),
     pid: z.number().int().positive(),
     processStartMarker: z.string().min(1).nullable().default(null),
     leaseExpiresAt: z.string().datetime({offset: true}).nullable().default(null),
@@ -79,34 +79,39 @@ const operationLockPath = (projectPath: string): string =>
 const operationLockOwnerPath = (projectPath: string): string =>
   path.join(operationLockPath(projectPath), 'owner.json');
 
+const statusScanLockPath = (projectPath: string): string =>
+  path.join(projectPath, 'analysis/status-scan.lock');
+
+const statusScanLockOwnerPath = (projectPath: string): string =>
+  path.join(statusScanLockPath(projectPath), 'owner.json');
+
 const operationLockTombstonePath = (projectPath: string, id: string): string =>
   path.join(projectPath, 'analysis', `operation.lock.reclaimed-${id}`);
 
-const releasedOperationLockPath = (projectPath: string, id: string): string =>
-  path.join(projectPath, 'analysis', `operation.lock.released-${id}`);
-
-const completedOperationRecordDirectoryPath = (projectPath: string, id: string): string =>
-  path.join(projectPath, 'analysis', `operation.completed-${id}`);
-
-const completedOperationRecordPath = (projectPath: string, id: string): string =>
-  path.join(completedOperationRecordDirectoryPath(projectPath, id), 'record.json');
-
 const ownerlessReclaimMarkerPath = (projectPath: string, identity: string): string =>
   path.join(operationLockPath(projectPath), `.reclaim-${identity}`);
+
+const statusScanLockTombstonePath = (projectPath: string, id: string): string =>
+  path.join(projectPath, 'analysis', `status-scan.lock.reclaimed-${id}`);
+
+const statusScanOwnerlessReclaimMarkerPath = (projectPath: string, identity: string): string =>
+  path.join(statusScanLockPath(projectPath), `.reclaim-${identity}`);
 
 const MediaOperationLockSchema = z
   .object({
     schemaVersion: z.literal('1.0.0'),
     id: z.string().min(1).nullable().default(null),
+    state: z.enum(['active', 'released']).default('active'),
     pid: z.number().int().positive(),
     processStartMarker: z.string().min(1).nullable(),
     leaseExpiresAt: z.string().datetime({offset: true}).nullable(),
     acquiredAt: z.string().datetime({offset: true}),
+    releasedAt: z.string().datetime({offset: true}).nullable().default(null),
   })
   .strict();
 
 type MediaOperationLock = z.infer<typeof MediaOperationLockSchema>;
-type ActiveMediaOperationLock = MediaOperationLock & {id: string};
+type ActiveMediaOperationLock = MediaOperationLock & {id: string; state: 'active'};
 
 const LOCK_RETRY_DELAY_MS = 10;
 const LOCK_START_RETRY_LIMIT = 100;
@@ -174,6 +179,32 @@ const readMediaOperationLockAt = async (lockPath: string): Promise<MediaOperatio
 const readMediaOperationLock = async (projectPath: string): Promise<MediaOperationLock | null> =>
   await readMediaOperationLockAt(operationLockPath(projectPath));
 
+const claimMediaOperationLock = async (
+  projectPath: string,
+  owner: ActiveMediaOperationLock,
+): Promise<boolean> => {
+  try {
+    await writeFile(
+      operationLockOwnerPath(projectPath),
+      `${JSON.stringify(MediaOperationLockSchema.parse(owner), null, 2)}\n`,
+      {encoding: 'utf8', flag: 'wx'},
+    );
+  } catch (error) {
+    if (directoryExists(error)) return false;
+    throw error;
+  }
+  const claimed = await readMediaOperationLock(projectPath);
+  return claimed?.id === owner.id && claimed.state === 'active';
+};
+
+const readStatusScanLock = async (projectPath: string): Promise<MediaOperationLock | null> => {
+  try {
+    return await readJson(statusScanLockOwnerPath(projectPath), MediaOperationLockSchema);
+  } catch {
+    return null;
+  }
+};
+
 const mediaOperationOwnershipLost = (): Error =>
   new Error('Cannot mutate a media operation after its ownership was lost');
 
@@ -184,26 +215,40 @@ const releaseMediaOperationLock = async (
   projectPath: string,
   operationId: string,
 ): Promise<boolean> => {
-  const lockPath = operationLockPath(projectPath);
-  const releasedPath = releasedOperationLockPath(projectPath, operationId);
   const owner = await readMediaOperationLock(projectPath);
-  if (!owner || owner.id !== operationId || !isProcessIdentityAlive(owner)) return false;
-  try {
-    await rename(lockPath, releasedPath);
-  } catch (error) {
-    if (missingFile(error) || directoryExists(error) || nonEmptyDirectory(error)) return false;
-    throw error;
-  }
-  const claimed = await readMediaOperationLockAt(releasedPath);
-  if (!claimed || claimed.id !== operationId) {
-    try {
-      await rename(releasedPath, lockPath);
-    } catch {
-      // A competing operation may have acquired the global lock while this stale release rolled back.
-    }
+  if (
+    !owner ||
+    owner.id !== operationId ||
+    owner.state !== 'active' ||
+    !isProcessIdentityAlive(owner)
+  ) {
     return false;
   }
-  return true;
+  const released = MediaOperationLockSchema.parse({
+    ...owner,
+    state: 'released',
+    releasedAt: new Date().toISOString(),
+  });
+  await runWithPublicationGuard(
+    async () => {
+      const current = await readMediaOperationLock(projectPath);
+      if (
+        !current ||
+        current.id !== operationId ||
+        current.state !== 'active' ||
+        !isProcessIdentityAlive(current)
+      ) {
+        throw mediaOperationOwnershipLost();
+      }
+    },
+    async () =>
+      await writeJson(
+        operationLockOwnerPath(projectPath),
+        released,
+      ),
+  );
+  const current = await readMediaOperationLock(projectPath);
+  return current?.id === operationId && current.state === 'released';
 };
 
 const staleLockIdentity = async (
@@ -250,6 +295,186 @@ const reclaimStaleMediaOperationLock = async (
   }
 };
 
+const statusScanLockIdentity = async (
+  projectPath: string,
+  owner: MediaOperationLock | null,
+): Promise<string | null> => {
+  if (owner?.id) return owner.id;
+  try {
+    const lockStat = await stat(statusScanLockPath(projectPath));
+    return `uninitialized-${lockStat.dev}-${lockStat.ino}`;
+  } catch (error) {
+    if (missingFile(error)) return null;
+    throw error;
+  }
+};
+
+const reclaimStaleStatusScanLock = async (
+  projectPath: string,
+  owner: MediaOperationLock | null,
+): Promise<boolean> => {
+  const identity = await statusScanLockIdentity(projectPath, owner);
+  if (!identity) return false;
+  if (!owner) {
+    const markerPath = statusScanOwnerlessReclaimMarkerPath(projectPath, identity);
+    try {
+      await writeFile(markerPath, `${identity}\n`, {encoding: 'utf8', flag: 'wx'});
+    } catch (error) {
+      if (!directoryExists(error)) {
+        if (missingFile(error)) return false;
+        throw error;
+      }
+    }
+    if ((await statusScanLockIdentity(projectPath, null)) !== identity) return false;
+  }
+  try {
+    await rename(statusScanLockPath(projectPath), statusScanLockTombstonePath(projectPath, identity));
+    return true;
+  } catch (error) {
+    if (missingFile(error) || directoryExists(error) || nonEmptyDirectory(error)) return false;
+    throw error;
+  }
+};
+
+const releaseStatusScanLock = async (projectPath: string, lockId: string): Promise<boolean> => {
+  const owner = await readStatusScanLock(projectPath);
+  if (
+    !owner ||
+    owner.id !== lockId ||
+    owner.state !== 'active' ||
+    !isProcessIdentityAlive(owner)
+  ) {
+    return false;
+  }
+  try {
+    await unlink(statusScanLockOwnerPath(projectPath));
+  } catch (error) {
+    if (!missingFile(error)) throw error;
+  }
+  try {
+    await rmdir(statusScanLockPath(projectPath));
+  } catch (error) {
+    if (!missingFile(error)) throw error;
+  }
+  return true;
+};
+
+const statusScanIsActive = async (projectPath: string): Promise<boolean> => {
+  const owner = await readStatusScanLock(projectPath);
+  if (owner && owner.state === 'active' && isProcessIdentityAlive(owner)) return true;
+  if (await reclaimStaleStatusScanLock(projectPath, owner)) return false;
+  try {
+    await stat(statusScanLockPath(projectPath));
+    return true;
+  } catch (error) {
+    if (missingFile(error)) return false;
+    throw error;
+  }
+};
+
+const mediaOperationLockIsActive = async (projectPath: string): Promise<boolean> => {
+  const owner = await readMediaOperationLock(projectPath);
+  return owner?.state === 'active' && isProcessIdentityAlive(owner);
+};
+
+export type StatusScanLockResult<T> =
+  | {acquired: true; value: T}
+  | {acquired: false};
+
+export const runWithStatusScanLock = async <T>(
+  projectPath: string,
+  scan: () => Promise<T>,
+): Promise<StatusScanLockResult<T>> => {
+  const lockPath = statusScanLockPath(projectPath);
+  await mkdir(path.dirname(lockPath), {recursive: true});
+  const pid = process.pid;
+  const processStartMarker = readProcessStartMarker(pid);
+  let lock: ActiveMediaOperationLock | null = null;
+  for (let attempt = 0; attempt <= LOCK_START_RETRY_LIMIT; attempt += 1) {
+    try {
+      await mkdir(lockPath);
+      const now = new Date();
+      const candidate: ActiveMediaOperationLock = {
+        schemaVersion: '1.0.0',
+        id: randomUUID(),
+        state: 'active',
+        pid,
+        processStartMarker,
+        leaseExpiresAt: processStartMarker ? null : markerlessLeaseExpiry(now),
+        acquiredAt: now.toISOString(),
+        releasedAt: null,
+      };
+      try {
+        await writeJson(statusScanLockOwnerPath(projectPath), MediaOperationLockSchema.parse(candidate));
+        lock = candidate;
+        break;
+      } catch (error) {
+        await releaseStatusScanLock(projectPath, candidate.id);
+        throw error;
+      }
+    } catch (error) {
+      if (!directoryExists(error)) throw error;
+    }
+    const owner = await readStatusScanLock(projectPath);
+    if (owner && owner.state === 'active' && isProcessIdentityAlive(owner)) {
+      return {acquired: false};
+    }
+    if (await reclaimStaleStatusScanLock(projectPath, owner)) continue;
+    await pause();
+  }
+  if (!lock) return {acquired: false};
+  let ownershipFailure: Error | null = null;
+  const assertOwnership = async (): Promise<MediaOperationLock> => {
+    if (ownershipFailure) throw ownershipFailure;
+    const owner = await readStatusScanLock(projectPath);
+    if (
+      !owner ||
+      owner.id !== lock.id ||
+      owner.state !== 'active' ||
+      !isProcessIdentityAlive(owner)
+    ) {
+      ownershipFailure = mediaOperationOwnershipLost();
+      throw ownershipFailure;
+    }
+    return owner;
+  };
+  const renewLease = async (): Promise<void> => {
+    const owner = await assertOwnership();
+    if (owner.processStartMarker) return;
+    const leaseExpiresAt = markerlessLeaseExpiry(new Date());
+    await runWithPublicationGuard(
+      async () => {
+        await assertOwnership();
+      },
+      async () =>
+        await writeJson(
+          statusScanLockOwnerPath(projectPath),
+          MediaOperationLockSchema.parse({...owner, leaseExpiresAt}),
+        ),
+    );
+  };
+  const heartbeat =
+    lock.processStartMarker === null
+      ? setInterval(() => {
+          void renewLease().catch((error) => {
+            ownershipFailure = asOperationError(error);
+          });
+        }, MARKERLESS_OPERATION_HEARTBEAT_MS)
+      : null;
+  heartbeat?.unref();
+  try {
+    if (await mediaOperationLockIsActive(projectPath)) return {acquired: false};
+    const value = await scan();
+    await assertOwnership();
+    return {acquired: true, value};
+  } finally {
+    if (heartbeat) clearInterval(heartbeat);
+    if (!(await releaseStatusScanLock(projectPath, lock.id))) {
+      throw mediaOperationOwnershipLost();
+    }
+  }
+};
+
 const acquireMediaOperationLock = async (
   projectPath: string,
   now: Date,
@@ -270,16 +495,20 @@ const acquireMediaOperationLock = async (
       const owner: ActiveMediaOperationLock = {
         schemaVersion: '1.0.0',
         id: randomUUID(),
+        state: 'active',
         pid,
         processStartMarker,
         leaseExpiresAt: processStartMarker ? null : markerlessLeaseExpiry(now),
         acquiredAt: now.toISOString(),
+        releasedAt: null,
       };
       try {
-        await writeJson(
-          operationLockOwnerPath(projectPath),
-          MediaOperationLockSchema.parse(owner),
-        );
+        if (!(await claimMediaOperationLock(projectPath, owner))) continue;
+        if (await statusScanIsActive(projectPath)) {
+          throw new Error(
+            'Cannot start a media operation: project status is checking inputs; retry when it completes',
+          );
+        }
         return owner;
       } catch (error) {
         await releaseMediaOperationLock(projectPath, owner.id);
@@ -298,7 +527,7 @@ const acquireMediaOperationLock = async (
         `Cannot start a media operation: ${existing.command} is already active for this reel project`,
       );
     }
-    if (owner && isProcessIdentityAlive(owner)) {
+    if (owner?.state === 'active' && isProcessIdentityAlive(owner)) {
       if (attempt === LOCK_START_RETRY_LIMIT + (reclaimedOnFinalAttempt ? 1 : 0)) {
         throw new Error('Cannot start a media operation: another media operation is still starting');
       }
@@ -321,7 +550,9 @@ const acquireMediaOperationLock = async (
   throw new Error('Cannot start a media operation: lock acquisition timed out');
 };
 
-export const readMediaOperation = async (projectPath: string): Promise<MediaOperationRecord | null> => {
+const readStoredMediaOperation = async (
+  projectPath: string,
+): Promise<MediaOperationRecord | null> => {
   try {
     return await readJson(operationPath(projectPath), MediaOperationRecordSchema);
   } catch {
@@ -329,12 +560,17 @@ export const readMediaOperation = async (projectPath: string): Promise<MediaOper
   }
 };
 
+export const readMediaOperation = async (projectPath: string): Promise<MediaOperationRecord | null> => {
+  const record = await readStoredMediaOperation(projectPath);
+  return record?.state === 'completed' ? null : record;
+};
+
 const assertMediaOperationOwnership = async (
   projectPath: string,
   operationId: string,
 ): Promise<{record: MediaOperationRecord; lock: MediaOperationLock}> => {
   const [current, owner] = await Promise.all([
-    readMediaOperation(projectPath),
+    readStoredMediaOperation(projectPath),
     readMediaOperationLock(projectPath),
   ]);
   if (
@@ -343,11 +579,32 @@ const assertMediaOperationOwnership = async (
     current.id !== operationId ||
     !owner ||
     owner.id !== operationId ||
+    owner.state !== 'active' ||
     !isProcessIdentityAlive(owner)
   ) {
     throw mediaOperationOwnershipLost();
   }
   return {record: current, lock: owner};
+};
+
+const assertMediaOperationLockOwnership = async (
+  projectPath: string,
+  operationId: string,
+): Promise<void> => {
+  const [current, owner] = await Promise.all([
+    readStoredMediaOperation(projectPath),
+    readMediaOperationLock(projectPath),
+  ]);
+  if (
+    !owner ||
+    owner.id !== operationId ||
+    owner.state !== 'active' ||
+    (current?.state === 'running' &&
+      current.id !== operationId &&
+      isMediaOperationAlive(current))
+  ) {
+    throw mediaOperationOwnershipLost();
+  }
 };
 
 export const beginMediaOperation = async (
@@ -385,7 +642,12 @@ export const beginMediaOperation = async (
     error: null,
   });
   try {
-    await writeJson(operationPath(projectPath), record);
+    await runWithPublicationGuard(
+      async () => {
+        await assertMediaOperationLockOwnership(projectPath, lock.id);
+      },
+      async () => await writeJson(operationPath(projectPath), record),
+    );
     return record;
   } catch (error) {
     await releaseMediaOperationLock(projectPath, lock.id);
@@ -410,11 +672,23 @@ export const updateMediaOperation = async (
     phase: options.phase ?? current.phase,
     progress: options.progress === undefined ? current.progress : options.progress,
   });
-  await writeJson(
-    operationLockOwnerPath(projectPath),
-    MediaOperationLockSchema.parse({...lock, leaseExpiresAt}),
+  await runWithPublicationGuard(
+    async () => {
+      await assertMediaOperationOwnership(projectPath, operationId);
+    },
+    async () => {
+      await writeJson(
+        operationLockOwnerPath(projectPath),
+        MediaOperationLockSchema.parse({
+          ...lock,
+          state: 'active',
+          releasedAt: null,
+          leaseExpiresAt,
+        }),
+      );
+      await writeJson(operationPath(projectPath), next);
+    },
   );
-  await writeJson(operationPath(projectPath), next);
   return next;
 };
 
@@ -432,7 +706,12 @@ export const failMediaOperation = async (
     finishedAt: now.toISOString(),
     error: error instanceof Error ? error.message || error.name : String(error),
   });
-  await writeJson(operationPath(projectPath), next);
+  await runWithPublicationGuard(
+    async () => {
+      await assertMediaOperationOwnership(projectPath, operationId);
+    },
+    async () => await writeJson(operationPath(projectPath), next),
+  );
   if (!(await releaseMediaOperationLock(projectPath, operationId))) {
     throw mediaOperationOwnershipLost();
   }
@@ -443,25 +722,20 @@ export const completeMediaOperation = async (
   projectPath: string,
   operationId: string,
 ): Promise<void> => {
-  await assertMediaOperationOwnership(projectPath, operationId);
-  const recordDirectoryPath = completedOperationRecordDirectoryPath(projectPath, operationId);
-  const recordPath = completedOperationRecordPath(projectPath, operationId);
-  try {
-    await mkdir(recordDirectoryPath);
-    await rename(operationPath(projectPath), recordPath);
-  } catch (error) {
-    if (missingFile(error) || directoryExists(error)) throw mediaOperationOwnershipLost();
-    throw error;
-  }
-  const claimedRecord = await readJson(recordPath, MediaOperationRecordSchema).catch(() => null);
-  if (!claimedRecord || claimedRecord.id !== operationId) {
-    try {
-      await rename(recordPath, operationPath(projectPath));
-    } catch {
-      // A successor record wins if ownership changed while the completion record was claimed.
-    }
-    throw mediaOperationOwnershipLost();
-  }
+  const {record} = await assertMediaOperationOwnership(projectPath, operationId);
+  const completed = MediaOperationRecordSchema.parse({
+    ...record,
+    state: 'completed',
+    updatedAt: new Date().toISOString(),
+    finishedAt: new Date().toISOString(),
+    error: null,
+  });
+  await runWithPublicationGuard(
+    async () => {
+      await assertMediaOperationOwnership(projectPath, operationId);
+    },
+    async () => await writeJson(operationPath(projectPath), completed),
+  );
   if (!(await releaseMediaOperationLock(projectPath, operationId))) {
     throw mediaOperationOwnershipLost();
   }

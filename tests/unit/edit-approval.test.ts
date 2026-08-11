@@ -675,6 +675,39 @@ describe('hash-bound approvals', () => {
     await expect(readFile(briefPath, 'utf8')).resolves.toBe(before);
   });
 
+  it('does not replace edit approval after a verified input changes', async () => {
+    const {projectPath} = await makeFixture();
+    const integrity = createSourceIntegrityContext();
+    await expect(validateEdit(projectPath, undefined, {integrity})).resolves.toMatchObject({
+      valid: true,
+    });
+    const approvalsPath = path.join(projectPath, 'analysis/approvals.json');
+    const before = await readFile(approvalsPath, 'utf8');
+    await writeFile(path.join(projectPath, 'input/clips/clip.mp4'), 'changed-input-bytes');
+
+    await expect(
+      approveEdit(projectPath, new Date('2026-08-11T13:05:00.000Z'), {integrity}),
+    ).rejects.toThrow(/changed during media operation|stale or inconsistent/i);
+    await expect(readFile(approvalsPath, 'utf8')).resolves.toBe(before);
+  });
+
+  it('does not replace color approval after a verified input changes', async () => {
+    const {projectPath} = await makeFixture();
+    await approveEdit(projectPath, new Date('2026-08-11T13:00:00.000Z'));
+    const integrity = createSourceIntegrityContext();
+    await expect(validateEdit(projectPath, undefined, {integrity})).resolves.toMatchObject({
+      valid: true,
+    });
+    const approvalsPath = path.join(projectPath, 'analysis/approvals.json');
+    const before = await readFile(approvalsPath, 'utf8');
+    await writeFile(path.join(projectPath, 'input/clips/clip.mp4'), 'changed-input-bytes');
+
+    await expect(
+      approveColor(projectPath, new Date('2026-08-11T13:05:00.000Z'), {integrity}),
+    ).rejects.toThrow(/changed during media operation|stale or inconsistent/i);
+    await expect(readFile(approvalsPath, 'utf8')).resolves.toBe(before);
+  });
+
   it('does not publish a QC report after a verified input changes', async () => {
     const {projectPath} = await makeFixture();
     const integrity = createSourceIntegrityContext();
