@@ -57,7 +57,6 @@ describe('media operation records', () => {
   it('reports an active operation before it scans a project with no input directories', async () => {
     const projectPath = await makeProject();
     await beginMediaOperation(projectPath, 'proxy', {
-      now: new Date('2026-08-11T10:00:00.000Z'),
       pid: process.pid,
       phase: 'transcoding',
       progress: {completed: 2, total: 7, label: 'source-03'},
@@ -108,6 +107,30 @@ describe('media operation records', () => {
     }
   });
 
+  it('admits only one retry while reclaiming a stale media lock', async () => {
+    const projectPath = await makeProject();
+    await beginMediaOperation(projectPath, 'proxy', {
+      pid: 999_999_999,
+      phase: 'interrupted-proxy',
+    });
+
+    const results = await Promise.allSettled(
+      Array.from({length: 12}, (_, index) =>
+        beginMediaOperation(projectPath, index % 2 === 0 ? 'proxy' : 'render', {
+          phase: 'starting',
+        }),
+      ),
+    );
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    for (const result of results.filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    )) {
+      expect(result.reason).toBeInstanceOf(Error);
+      expect((result.reason as Error).message).toMatch(/already active/i);
+    }
+  });
+
   it('treats a reused PID with a different process-start marker as interrupted', () => {
     const record = {
       schemaVersion: '1.0.0',
@@ -124,6 +147,47 @@ describe('media operation records', () => {
     } as unknown as MediaOperationRecord;
 
     expect(isMediaOperationAlive(record)).toBe(false);
+  });
+
+  it('treats an expired markerless operation as interrupted despite a live PID', () => {
+    const record = {
+      schemaVersion: '1.0.0',
+      command: 'proxy',
+      state: 'running',
+      pid: process.pid,
+      processStartMarker: null,
+      leaseExpiresAt: '2026-08-11T09:00:00.000Z',
+      startedAt: '2026-08-11T08:00:00.000Z',
+      updatedAt: '2026-08-11T08:55:00.000Z',
+      finishedAt: null,
+      phase: 'transcoding',
+      progress: null,
+      error: null,
+    } as unknown as MediaOperationRecord;
+
+    expect(isMediaOperationAlive(record)).toBe(false);
+  });
+
+  it('renews the lease for a markerless operation when it reports progress', async () => {
+    const projectPath = await makeProject();
+    const now = new Date();
+    const startedAt = new Date(now.getTime() - 10 * 60_000);
+    const record = await beginMediaOperation(projectPath, 'proxy', {
+      now: startedAt,
+      pid: process.pid,
+      processStartMarker: null,
+      phase: 'transcoding',
+    });
+
+    expect(record.processStartMarker).toBeNull();
+    expect(isMediaOperationAlive(record)).toBe(false);
+
+    const renewed = await updateMediaOperation(projectPath, {
+      now,
+      progress: {completed: 1, total: 2, label: 'source-02'},
+    });
+
+    expect(isMediaOperationAlive(renewed)).toBe(true);
   });
 
   it('tracks beat analysis as a mutually exclusive media operation', async () => {
