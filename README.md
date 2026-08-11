@@ -2,6 +2,10 @@
 
 A local macOS workflow for turning supplied MP4/MOV footage into cinematic 9:16 social reels with Codex, FFmpeg, Remotion, and librosa. Originals remain unchanged. Every generated artifact is checksum-bound, color transforms are explicit, and final exports require current edit, color, and user-confirmed asset-rights records.
 
+## Pipeline at a glance
+
+![Music, clips, LUT, and captions become an edited reel](public/reel-pipeline-natural.webp)
+
 ## Start a reel in a new Codex task
 
 Open this folder as the workspace, attach or provide paths to your clips/music/captions, then ask:
