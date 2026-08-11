@@ -15,7 +15,7 @@
     "test": "vitest run tests/unit tests/integration",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
-    "test:e2e": "vitest run tests/e2e",
+    "test:e2e": "vitest run tests/e2e --no-file-parallelism",
     "remotion": "remotion studio src/remotion/index.ts",
     "synthetic:e2e": "node --import tsx scripts/synthetic-e2e.ts",
     "verify": "npm run typecheck && npm run test && npm run test:e2e && npm run reel -- doctor"
