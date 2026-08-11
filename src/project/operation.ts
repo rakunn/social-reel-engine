@@ -91,14 +91,14 @@ const statusScanLockOwnerPath = (projectPath: string): string =>
 const operationLockTombstonePath = (projectPath: string, id: string): string =>
   path.join(projectPath, 'analysis', `operation.lock.reclaimed-${id}`);
 
-const ownerlessReclaimMarkerPath = (projectPath: string, identity: string): string =>
-  path.join(operationLockPath(projectPath), `.reclaim-${identity}`);
+const operationLockReclaimClaimPath = (projectPath: string, identity: string): string =>
+  path.join(projectPath, 'analysis', `operation.lock.reclaiming-${identity}.json`);
 
 const statusScanLockTombstonePath = (projectPath: string, id: string): string =>
   path.join(projectPath, 'analysis', `status-scan.lock.reclaimed-${id}`);
 
-const statusScanOwnerlessReclaimMarkerPath = (projectPath: string, identity: string): string =>
-  path.join(statusScanLockPath(projectPath), `.reclaim-${identity}`);
+const statusScanLockReclaimClaimPath = (projectPath: string, identity: string): string =>
+  path.join(projectPath, 'analysis', `status-scan.lock.reclaiming-${identity}.json`);
 
 const MediaOperationLockSchema = z
   .object({
@@ -242,6 +242,136 @@ const mediaOperationOwnershipLost = (): Error =>
 const asOperationError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
 
+const createReclaimClaim = (): ActiveMediaOperationLock => {
+  const now = new Date();
+  const processStartMarker = readProcessStartMarker(process.pid);
+  return {
+    schemaVersion: '1.0.0',
+    id: randomUUID(),
+    state: 'active',
+    pid: process.pid,
+    processStartMarker,
+    leaseExpiresAt: processStartMarker ? null : markerlessLeaseExpiry(now),
+    acquiredAt: now.toISOString(),
+    releasedAt: null,
+  };
+};
+
+const readReclaimClaim = async (claimPath: string): Promise<MediaOperationLock | null> => {
+  try {
+    return await readJson(claimPath, MediaOperationLockSchema);
+  } catch {
+    return null;
+  }
+};
+
+const reclaimClaimIsOwned = async (claimPath: string, claimId: string): Promise<boolean> => {
+  const claim = await readReclaimClaim(claimPath);
+  return (
+    claim?.id === claimId &&
+    claim.state === 'active' &&
+    isProcessIdentityAlive(claim)
+  );
+};
+
+const reclaimClaimTombstonePath = (claimPath: string, claimId: string): string =>
+  `${claimPath}.reclaimed-${claimId}`;
+
+const rotateStaleReclaimClaim = async (
+  claimPath: string,
+  claimId: string,
+): Promise<boolean> => {
+  const tombstonePath = reclaimClaimTombstonePath(claimPath, claimId);
+  try {
+    await rename(claimPath, tombstonePath);
+  } catch (error) {
+    if (missingFile(error) || directoryExists(error)) return false;
+    throw error;
+  }
+  try {
+    await rm(tombstonePath, {force: true});
+  } catch (error) {
+    if (!missingFile(error)) throw error;
+  }
+  return true;
+};
+
+const acquireReclaimClaim = async (
+  claimPath: string,
+): Promise<ActiveMediaOperationLock | null> => {
+  for (let attempt = 0; attempt <= LOCK_START_RETRY_LIMIT; attempt += 1) {
+    const candidate = createReclaimClaim();
+    try {
+      await writeFile(
+        claimPath,
+        `${JSON.stringify(MediaOperationLockSchema.parse(candidate), null, 2)}\n`,
+        {encoding: 'utf8', flag: 'wx'},
+      );
+      return candidate;
+    } catch (error) {
+      if (missingFile(error)) return null;
+      if (!directoryExists(error)) throw error;
+    }
+    const existing = await readReclaimClaim(claimPath);
+    if (existing?.state === 'active' && isProcessIdentityAlive(existing)) return null;
+    if (
+      !(await rotateStaleReclaimClaim(
+        claimPath,
+        existing?.id ?? randomUUID(),
+      ))
+    ) {
+      return null;
+    }
+  }
+  return null;
+};
+
+const releaseReclaimClaim = async (claimPath: string, claimId: string): Promise<void> => {
+  if (!(await reclaimClaimIsOwned(claimPath, claimId))) return;
+  try {
+    await rm(claimPath, {force: true});
+  } catch (error) {
+    if (!missingFile(error)) throw error;
+  }
+};
+
+type ReclaimLockOptions = {
+  claimPath: string;
+  lockPath: string;
+  canReclaim(): Promise<boolean>;
+  tombstonePath(claimId: string): string;
+};
+
+const reclaimLockWithClaim = async ({
+  claimPath,
+  lockPath,
+  canReclaim,
+  tombstonePath,
+}: ReclaimLockOptions): Promise<boolean> => {
+  const claim = await acquireReclaimClaim(claimPath);
+  if (!claim) return false;
+  try {
+    if (!(await canReclaim()) || !(await reclaimClaimIsOwned(claimPath, claim.id))) {
+      return false;
+    }
+    const reclaimedPath = tombstonePath(claim.id);
+    try {
+      await rename(lockPath, reclaimedPath);
+    } catch (error) {
+      if (missingFile(error) || directoryExists(error) || nonEmptyDirectory(error)) return false;
+      throw error;
+    }
+    try {
+      await rm(reclaimedPath, {recursive: true, force: true});
+    } catch (error) {
+      if (!missingFile(error)) throw error;
+    }
+    return true;
+  } finally {
+    await releaseReclaimClaim(claimPath, claim.id);
+  }
+};
+
 const releaseMediaOperationLock = async (
   projectPath: string,
   operationId: string,
@@ -302,31 +432,16 @@ const reclaimStaleMediaOperationLock = async (
 ): Promise<boolean> => {
   const identity = await staleLockIdentity(projectPath, owner);
   if (!identity) return false;
-  if (!owner) {
-    const markerPath = ownerlessReclaimMarkerPath(projectPath, identity);
-    try {
-      await writeFile(markerPath, `${identity}\n`, {encoding: 'utf8', flag: 'wx'});
-    } catch (error) {
-      if (!directoryExists(error)) {
-        if (missingFile(error)) return false;
-        throw error;
-      }
-    }
-    if ((await staleLockIdentity(projectPath, null)) !== identity) return false;
-  }
-  const tombstonePath = operationLockTombstonePath(projectPath, identity);
-  try {
-    await rename(operationLockPath(projectPath), tombstonePath);
-  } catch (error) {
-    if (missingFile(error) || directoryExists(error) || nonEmptyDirectory(error)) return false;
-    throw error;
-  }
-  try {
-    await rm(tombstonePath, {recursive: true, force: true});
-  } catch (error) {
-    if (!missingFile(error)) throw error;
-  }
-  return true;
+  return await reclaimLockWithClaim({
+    lockPath: operationLockPath(projectPath),
+    claimPath: operationLockReclaimClaimPath(projectPath, identity),
+    canReclaim: async () => {
+      const current = await readMediaOperationLock(projectPath);
+      if (current?.state === 'active' && isProcessIdentityAlive(current)) return false;
+      return (await staleLockIdentity(projectPath, current)) === identity;
+    },
+    tombstonePath: (claimId) => `${operationLockTombstonePath(projectPath, identity)}-${claimId}`,
+  });
 };
 
 const statusScanLockIdentity = async (
@@ -349,31 +464,17 @@ const reclaimStaleStatusScanLock = async (
 ): Promise<boolean> => {
   const identity = await statusScanLockIdentity(projectPath, owner);
   if (!identity) return false;
-  if (!owner) {
-    const markerPath = statusScanOwnerlessReclaimMarkerPath(projectPath, identity);
-    try {
-      await writeFile(markerPath, `${identity}\n`, {encoding: 'utf8', flag: 'wx'});
-    } catch (error) {
-      if (!directoryExists(error)) {
-        if (missingFile(error)) return false;
-        throw error;
-      }
-    }
-    if ((await statusScanLockIdentity(projectPath, null)) !== identity) return false;
-  }
-  const tombstonePath = statusScanLockTombstonePath(projectPath, identity);
-  try {
-    await rename(statusScanLockPath(projectPath), tombstonePath);
-  } catch (error) {
-    if (missingFile(error) || directoryExists(error) || nonEmptyDirectory(error)) return false;
-    throw error;
-  }
-  try {
-    await rm(tombstonePath, {recursive: true, force: true});
-  } catch (error) {
-    if (!missingFile(error)) throw error;
-  }
-  return true;
+  return await reclaimLockWithClaim({
+    lockPath: statusScanLockPath(projectPath),
+    claimPath: statusScanLockReclaimClaimPath(projectPath, identity),
+    canReclaim: async () => {
+      const current = await readStatusScanLock(projectPath);
+      if (current?.state === 'active' && isProcessIdentityAlive(current)) return false;
+      return (await statusScanLockIdentity(projectPath, current)) === identity;
+    },
+    tombstonePath: (claimId) =>
+      `${statusScanLockTombstonePath(projectPath, identity)}-${claimId}`,
+  });
 };
 
 const releaseStatusScanLock = async (projectPath: string, lockId: string): Promise<boolean> => {

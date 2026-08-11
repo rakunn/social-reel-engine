@@ -13,6 +13,8 @@ type Gate = {
 
 const gates = vi.hoisted(() => ({
   owner: {armed: false, blocked: false, started: null, resume: null, wait: null} as Gate,
+  reclaimClaim: {armed: false, blocked: false, started: null, resume: null, wait: null} as Gate,
+  reclaimRename: {armed: false, blocked: false, started: null, resume: null, wait: null} as Gate,
   statusOwner: {armed: false, blocked: false, started: null, resume: null, wait: null} as Gate,
   statusRenewal: {armed: false, blocked: false, started: null, resume: null, wait: null} as Gate,
   operationRecord: {armed: false, blocked: false, started: null, resume: null, wait: null} as Gate,
@@ -46,6 +48,15 @@ vi.mock('node:fs/promises', async (importOriginal) => {
         await gates.owner.wait;
       }
       if (
+        gates.reclaimClaim.armed &&
+        !gates.reclaimClaim.blocked &&
+        String(filePath).includes('/analysis/operation.lock.reclaiming-')
+      ) {
+        gates.reclaimClaim.blocked = true;
+        gates.reclaimClaim.started?.();
+        await gates.reclaimClaim.wait;
+      }
+      if (
         gates.statusOwner.armed &&
         !gates.statusOwner.blocked &&
         String(filePath).includes('/analysis/status-scan.lock/owner.json')
@@ -55,6 +66,19 @@ vi.mock('node:fs/promises', async (importOriginal) => {
         await gates.statusOwner.wait;
       }
       return await actual.writeFile(...args);
+    },
+    rename: async (...args: Parameters<typeof actual.rename>) => {
+      const [fromPath] = args;
+      if (
+        gates.reclaimRename.armed &&
+        !gates.reclaimRename.blocked &&
+        String(fromPath).endsWith('/analysis/operation.lock')
+      ) {
+        gates.reclaimRename.blocked = true;
+        gates.reclaimRename.started?.();
+        await gates.reclaimRename.wait;
+      }
+      return await actual.rename(...args);
     },
   };
 });
@@ -141,6 +165,8 @@ const resetGate = (gate: Gate): void => {
 
 afterEach(async () => {
   resetGate(gates.owner);
+  resetGate(gates.reclaimClaim);
+  resetGate(gates.reclaimRename);
   resetGate(gates.statusOwner);
   resetGate(gates.statusRenewal);
   resetGate(gates.operationRecord);
@@ -154,6 +180,46 @@ afterEach(async () => {
 });
 
 describe('media-operation publication races', () => {
+  it('does not let a delayed reclaimer move a successor lock', async () => {
+    const projectPath = await makeProject();
+    await beginMediaOperation(projectPath, 'proxy', {
+      now: new Date(0),
+      pid: process.pid,
+      processStartMarker: null,
+      phase: 'interrupted-proxy',
+    });
+    const renameGate = armGate(gates.reclaimRename);
+    const first = beginMediaOperation(projectPath, 'render', {
+      pid: process.pid,
+      processStartMarker: null,
+      phase: 'starting-render',
+    });
+
+    await renameGate.started;
+    const claimGate = armGate(gates.reclaimClaim);
+    const delayed = beginMediaOperation(projectPath, 'proxy', {
+      pid: process.pid,
+      processStartMarker: null,
+      phase: 'starting-proxy',
+    });
+    void delayed.catch(() => undefined);
+    await claimGate.started;
+    renameGate.resume();
+    const successor = await first;
+    claimGate.resume();
+
+    await expect(delayed).rejects.toThrow(/already active/i);
+    await expect(readMediaOperation(projectPath)).resolves.toMatchObject({
+      id: successor.id,
+      command: 'render',
+      state: 'running',
+    });
+    await expect(
+      readFile(path.join(projectPath, 'analysis/operation.lock/owner.json'), 'utf8'),
+    ).resolves.toContain(successor.id!);
+    await completeMediaOperation(projectPath, successor.id!);
+  });
+
   it('reports an ownerless retry lock as starting while it publishes its owner', async () => {
     const projectPath = await makeProject();
     await beginMediaOperation(projectPath, 'proxy', {
