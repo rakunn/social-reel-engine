@@ -39,10 +39,13 @@ export class OwnedProcessCleanupError extends Error {
     readonly pgid: number,
     readonly members: ProcessGroupMember[],
   ) {
+    const kernelIoExplanation = members.some((member) => member.state.includes('U'))
+      ? ' At least one member is in uninterruptible kernel I/O; termination is pending in the kernel.'
+      : '';
     super(
       `Process group ${pgid} did not exit: ${members
         .map((member) => `${member.pid} ${member.state} ${member.command}`)
-        .join('; ')}`,
+        .join('; ')}${kernelIoExplanation}`,
     );
     this.name = 'OwnedProcessCleanupError';
   }

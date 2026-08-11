@@ -1,6 +1,6 @@
 import {spawn, type ChildProcess} from 'node:child_process';
 import {EventEmitter} from 'node:events';
-import {mkdtemp, readdir, rm, writeFile} from 'node:fs/promises';
+import {mkdtemp, readFile, readdir, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -19,8 +19,13 @@ import {
 import type {RemotionWorkerRequest} from '../../src/render/remotion-worker';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const processTreeFixture = path.join(
+  repositoryRoot,
+  'tests/fixtures/process-tree-worker.ts',
+);
 const temporaryDirectories: string[] = [];
 const sentinels: ChildProcess[] = [];
+const ownedGroups = new Set<number>();
 
 const makeTemporaryDirectory = async (): Promise<string> => {
   const directory = await mkdtemp(path.join(tmpdir(), 'remotion-supervisor-'));
@@ -45,7 +50,13 @@ const writeWorker = async (directory: string, source: string): Promise<string> =
 
 const assertTemporaryProtocolFilesRemoved = async (request: RemotionWorkerRequest) => {
   const files = await readdir(path.dirname(request.rawOutput));
-  expect(files.filter((file) => file.startsWith('.remotion-worker-'))).toEqual([]);
+  expect(
+    files.filter(
+      (file) =>
+        file.startsWith('.remotion-worker-') ||
+        file.startsWith('.remotion-browser-'),
+    ),
+  ).toEqual([]);
 };
 
 const killGroupIfPresent = (pgid: number): void => {
@@ -57,6 +68,10 @@ const killGroupIfPresent = (pgid: number): void => {
 };
 
 afterEach(async () => {
+  for (const pgid of ownedGroups) {
+    killGroupIfPresent(pgid);
+  }
+  ownedGroups.clear();
   for (const sentinel of sentinels.splice(0)) {
     if (sentinel.pid !== undefined) killGroupIfPresent(sentinel.pid);
   }
@@ -69,11 +84,27 @@ describe.runIf(process.platform !== 'win32')('Remotion process supervisor', () =
   it('accepts success only after the spawned process group is empty', async () => {
     const directory = await makeTemporaryDirectory();
     const request = makeRequest(directory);
+    const browserPidRecord = path.join(directory, 'browser-pgid.txt');
     const workerEntryPoint = await writeWorker(
       directory,
       `
         import {spawn} from 'node:child_process';
-        import {writeFileSync} from 'node:fs';
+        import {readFileSync, writeFileSync} from 'node:fs';
+        const request = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+        const browser = spawn(
+          process.execPath,
+          ['--import', 'tsx', ${JSON.stringify(processTreeFixture)}, 'leave-child'],
+          {
+          detached: true,
+          stdio: 'ignore',
+          },
+        );
+        writeFileSync(${JSON.stringify(browserPidRecord)}, String(browser.pid));
+        writeFileSync(request.browserLifecycle.pgidPath, String(browser.pid));
+        await new Promise((resolve, reject) => {
+          browser.once('error', reject);
+          browser.once('close', resolve);
+        });
         const descendant = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1_000)'], {
           stdio: 'ignore',
         });
@@ -87,18 +118,55 @@ describe.runIf(process.platform !== 'win32')('Remotion process supervisor', () =
     });
     sentinels.push(sentinel);
     let workerPid = 0;
+    let thrown: unknown;
 
-    await superviseRemotionRender(request, {
-      workerEntryPoint,
-      cleanupTimeouts: {termMs: 500, killMs: 500, pollMs: 20},
-      onWorkerSpawn: (pid) => {
-        workerPid = pid;
-      },
-    });
+    try {
+      await superviseRemotionRender(request, {
+        workerEntryPoint,
+        cleanupTimeouts: {termMs: 500, killMs: 500, pollMs: 20},
+        onWorkerSpawn: (pid) => {
+          workerPid = pid;
+        },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    const browserPgid = Number(await readFile(browserPidRecord, 'utf8'));
+    ownedGroups.add(browserPgid);
+
+    expect(thrown).toBeUndefined();
+    expect(workerPid).toBeGreaterThan(0);
+    expect(await listProcessGroupMembers(workerPid)).toEqual([]);
+    expect(await listProcessGroupMembers(browserPgid)).toEqual([]);
+    ownedGroups.delete(browserPgid);
+    expect(() => process.kill(sentinel.pid!, 0)).not.toThrow();
+    await assertTemporaryProtocolFilesRemoved(request);
+  });
+
+  it('cleans the spawned group when setup fails after spawn', async () => {
+    const directory = await makeTemporaryDirectory();
+    const request = makeRequest(directory);
+    const workerEntryPoint = await writeWorker(
+      directory,
+      `setInterval(() => undefined, 1_000);`,
+    );
+    let workerPid = 0;
+
+    await expect(
+      superviseRemotionRender(request, {
+        workerEntryPoint,
+        cleanupTimeouts: {termMs: 100, killMs: 500, pollMs: 20},
+        onWorkerSpawn: (pid) => {
+          workerPid = pid;
+          ownedGroups.add(pid);
+          throw new Error('spawn observer failed');
+        },
+      }),
+    ).rejects.toThrow(/spawn observer failed/);
 
     expect(workerPid).toBeGreaterThan(0);
     expect(await listProcessGroupMembers(workerPid)).toEqual([]);
-    expect(() => process.kill(sentinel.pid!, 0)).not.toThrow();
+    ownedGroups.delete(workerPid);
     await assertTemporaryProtocolFilesRemoved(request);
   });
 
@@ -233,6 +301,43 @@ describe.runIf(process.platform !== 'win32')('Remotion process supervisor', () =
     expect(signalTarget.listenerCount('SIGTERM')).toBe(0);
     await assertTemporaryProtocolFilesRemoved(request);
   });
+
+  it('forwards graceful SIGTERM while preserving an original SIGINT', async () => {
+    const directory = await makeTemporaryDirectory();
+    const request = makeRequest(directory);
+    const readyPath = path.join(directory, 'worker-ready');
+    const receivedPath = path.join(directory, 'worker-signal');
+    const workerEntryPoint = await writeWorker(
+      directory,
+      `
+        import {writeFileSync} from 'node:fs';
+        const timer = setInterval(() => undefined, 1_000);
+        const finish = (signal) => {
+          writeFileSync(${JSON.stringify(receivedPath)}, signal);
+          clearInterval(timer);
+        };
+        process.once('SIGTERM', () => finish('SIGTERM'));
+        process.once('SIGINT', () => finish('SIGINT'));
+        writeFileSync(${JSON.stringify(readyPath)}, 'ready');
+      `,
+    );
+    const signalTarget = new EventEmitter();
+    const running = superviseRemotionRender(request, {
+      workerEntryPoint,
+      gracefulCancelMs: 500,
+      cleanupTimeouts: {termMs: 100, killMs: 500, pollMs: 20},
+      signalTarget,
+    });
+
+    await vi.waitFor(async () => {
+      expect(await readFile(readyPath, 'utf8')).toBe('ready');
+    });
+    signalTarget.emit('SIGINT');
+
+    await expect(running).rejects.toMatchObject({signal: 'SIGINT', exitCode: 130});
+    expect(await readFile(receivedPath, 'utf8')).toBe('SIGTERM');
+    await assertTemporaryProtocolFilesRemoved(request);
+  });
 });
 
 describe('render artifact lifecycle boundary', () => {
@@ -302,5 +407,13 @@ describe('render artifact lifecycle boundary', () => {
     expect(exitCodeForRenderError(new RenderInterruptedError('SIGTERM'))).toBe(143);
     expect(exitCodeForRenderError(new RenderInterruptedError('SIGHUP'))).toBe(129);
     expect(exitCodeForRenderError(new Error('render failed'))).toBe(1);
+    expect(
+      exitCodeForRenderError(
+        new AggregateError(
+          [new Error('cleanup failed'), new RenderInterruptedError('SIGINT')],
+          'render and cleanup failed',
+        ),
+      ),
+    ).toBe(130);
   });
 });

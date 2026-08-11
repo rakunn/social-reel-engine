@@ -4,6 +4,7 @@ import {
   createRemotionCancellation,
   installWorkerSignalHandlers,
   runRawRemotionRender,
+  serializeWorkerError,
   type RemotionWorkerRequest,
 } from '../../src/render/remotion-worker';
 import {DEFAULT_RENDER_SETTINGS} from '../../src/render/policy';
@@ -121,6 +122,56 @@ describe('Remotion worker lifecycle', () => {
     expect(close).toHaveBeenCalledWith({silent: true});
   });
 
+  it('prepares and passes an owned browser launcher to Remotion', async () => {
+    const prepareBrowserLauncher = vi.fn(async () => undefined);
+    const openBrowser = vi.fn(async () => ({close: vi.fn(async () => undefined)}));
+    const browserLifecycle = {
+      launcherPath: '/project/work/render/.remotion-browser-launcher.cjs',
+      pgidPath: '/project/work/render/.remotion-browser.pgid',
+    };
+
+    await runRawRemotionRender(
+      {...request, browserLifecycle},
+      {
+        bundle: vi.fn(async () => '/bundle'),
+        prepareBrowserLauncher,
+        openBrowser,
+        selectComposition: vi.fn(async () => ({id: 'SocialReel'})),
+        renderMedia: vi.fn(async () => undefined),
+      },
+    );
+
+    expect(prepareBrowserLauncher).toHaveBeenCalledWith(browserLifecycle);
+    expect(openBrowser).toHaveBeenCalledWith('chrome', {
+      logLevel: 'info',
+      browserExecutable: browserLifecycle.launcherPath,
+    });
+  });
+
+  it('bounds browser closure so the supervisor can verify its process group', async () => {
+    const close = vi.fn(() => new Promise<void>(() => undefined));
+    const forgetEventLoop = vi.fn();
+
+    await expect(
+      runRawRemotionRender(
+        request,
+        {
+          bundle: vi.fn(async () => '/bundle'),
+          openBrowser: vi.fn(async () => ({
+            close,
+            runner: {forgetEventLoop},
+          })),
+          selectComposition: vi.fn(async () => ({id: 'SocialReel'})),
+          renderMedia: vi.fn(async () => undefined),
+        },
+        createRemotionCancellation(),
+        {browserCloseTimeoutMs: 5},
+      ),
+    ).rejects.toThrow(/browser did not close within 5ms/i);
+    expect(close).toHaveBeenCalledWith({silent: true});
+    expect(forgetEventLoop).toHaveBeenCalledTimes(1);
+  });
+
   it('reports both rendering and browser cleanup failures', async () => {
     const renderError = new Error('render failed');
     const closeError = new Error('close failed');
@@ -148,6 +199,19 @@ describe('Remotion worker lifecycle', () => {
       'Remotion render and browser cleanup both failed',
     );
     expect((thrown as AggregateError).errors).toEqual([renderError, closeError]);
+  });
+
+  it('serializes every nested aggregate error for the supervisor protocol', () => {
+    const details = serializeWorkerError(
+      new AggregateError(
+        [new Error('render failed'), new Error('browser close failed')],
+        'render and cleanup failed',
+      ),
+    );
+
+    expect(details.message).toBe('render and cleanup failed');
+    expect(details.stack).toMatch(/render failed/);
+    expect(details.stack).toMatch(/browser close failed/);
   });
 
   it('cancels on the first signal and removes every installed handler', () => {

@@ -4,6 +4,7 @@ import {fileURLToPath} from 'node:url';
 import {afterEach, describe, expect, it} from 'vitest';
 import {
   listProcessGroupMembers,
+  OwnedProcessCleanupError,
   spawnOwnedProcess,
   stopOwnedProcessGroup,
 } from '../../src/render/process-group';
@@ -37,6 +38,21 @@ afterEach(async () => {
 });
 
 describe.runIf(process.platform !== 'win32')('owned process groups', () => {
+  it('explains when macOS still owns a process in kernel I/O', () => {
+    const error = new OwnedProcessCleanupError(4102, [
+      {
+        pid: 4103,
+        ppid: 1,
+        pgid: 4102,
+        state: 'UE',
+        command: '/owned/remotion-descendant',
+      },
+    ]);
+
+    expect(error.message).toMatch(/uninterruptible kernel I\/O/i);
+    expect(error.message).toMatch(/termination is pending in the kernel/i);
+  });
+
   it('removes only descendants in the owned group', async () => {
     const sentinel = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1_000)'], {
       detached: true,

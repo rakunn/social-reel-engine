@@ -55,9 +55,13 @@ const parseEntry = (line: string): RemotionProcessInventoryEntry => {
 const hasRemotionProfile = (command: string): boolean =>
   /--user-data-dir=(?:"[^"]*|\S*)puppeteer_dev_chrome_profile-/i.test(command);
 
+const isOwnedBrowserLauncher = (command: string): boolean =>
+  command.includes('.remotion-browser-launcher-');
+
 const isRemotionCommand = (command: string): boolean =>
   command.includes('/src/render/remotion-worker.ts') ||
   command.includes('/tests/fixtures/run-remotion-request.ts') ||
+  isOwnedBrowserLauncher(command) ||
   command.includes('/node_modules/@remotion/') ||
   command.includes('chrome-headless-shell') ||
   command.includes('Chrome Headless Shell') ||
@@ -74,9 +78,28 @@ export const listRemotionProcessInventory = async (
     .filter(
       (entry) =>
         isRemotionCommand(entry.command) &&
-        (entry.command.includes(root) || hasRemotionProfile(entry.command)),
+        (entry.command.includes(root) ||
+          hasRemotionProfile(entry.command) ||
+          isOwnedBrowserLauncher(entry.command)),
     )
     .sort((left, right) => left.pid - right.pid);
+};
+
+export const isProcessDescendantOf = (
+  inventory: readonly RemotionProcessInventoryEntry[],
+  pid: number,
+  ancestorPid: number,
+): boolean => {
+  if (pid === ancestorPid) return false;
+  const byPid = new Map(inventory.map((entry) => [entry.pid, entry]));
+  const visited = new Set<number>();
+  let current = byPid.get(pid);
+  while (current !== undefined && !visited.has(current.pid)) {
+    if (current.ppid === ancestorPid) return true;
+    visited.add(current.pid);
+    current = byPid.get(current.ppid);
+  }
+  return false;
 };
 
 export const newProcessIds = (

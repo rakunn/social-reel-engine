@@ -1,5 +1,6 @@
 import {bundle} from '@remotion/bundler';
 import {
+  ensureBrowser,
   makeCancelSignal,
   openBrowser,
   renderMedia,
@@ -7,6 +8,7 @@ import {
   type CancelSignal,
   type RenderMediaOptions,
 } from '@remotion/renderer';
+import {chmod, mkdir, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {z} from 'zod';
@@ -21,6 +23,12 @@ export const RemotionWorkerRequestSchema = z.object({
   rawOutput: z.string().min(1),
   inputProps: z.record(z.string(), z.unknown()),
   settings: RenderSettingsSchema,
+  browserLifecycle: z
+    .object({
+      launcherPath: z.string().min(1),
+      pgidPath: z.string().min(1),
+    })
+    .optional(),
 });
 
 export const RemotionWorkerResultSchema = z.discriminatedUnion('ok', [
@@ -36,9 +44,17 @@ export const RemotionWorkerResultSchema = z.discriminatedUnion('ok', [
 export type RemotionWorkerRequest = z.infer<typeof RemotionWorkerRequestSchema>;
 export type RemotionWorkerResult = z.infer<typeof RemotionWorkerResultSchema>;
 export type WorkerSignal = 'SIGINT' | 'SIGTERM' | 'SIGHUP';
+export type BrowserLifecycleFiles = NonNullable<
+  RemotionWorkerRequest['browserLifecycle']
+>;
+
+export const DEFAULT_BROWSER_CLOSE_TIMEOUT_MS = 10_000;
 
 type BrowserResource = {
   close(options: {silent: boolean}): Promise<void>;
+  runner?: {
+    forgetEventLoop(): void;
+  };
 };
 
 type BundleInput = {
@@ -85,7 +101,11 @@ export type RemotionWorkerDependencies<
   Composition = unknown,
 > = {
   bundle(options: BundleInput): Promise<string>;
-  openBrowser(browser: 'chrome', options: {logLevel: 'info'}): Promise<Browser>;
+  prepareBrowserLauncher?(lifecycle: BrowserLifecycleFiles): Promise<void>;
+  openBrowser(
+    browser: 'chrome',
+    options: {logLevel: 'info'; browserExecutable?: string},
+  ): Promise<Browser>;
   selectComposition(options: SelectCompositionInput<Browser>): Promise<Composition>;
   renderMedia(options: RawRenderInput<Browser, Composition>): Promise<unknown>;
 };
@@ -93,8 +113,53 @@ export type RemotionWorkerDependencies<
 type DefaultBrowser = Awaited<ReturnType<typeof openBrowser>>;
 type DefaultComposition = Awaited<ReturnType<typeof selectComposition>>;
 
+export const writeOwnedBrowserLauncher = async (
+  lifecycle: BrowserLifecycleFiles,
+  browserExecutable: string,
+): Promise<void> => {
+  const source = `#!/usr/bin/env node
+const {spawn} = require('node:child_process');
+const {writeFileSync} = require('node:fs');
+
+const browserExecutable = ${JSON.stringify(browserExecutable)};
+const pgidPath = ${JSON.stringify(lifecycle.pgidPath)};
+writeFileSync(pgidPath, String(process.pid), 'utf8');
+
+const browser = spawn(browserExecutable, process.argv.slice(2), {stdio: 'inherit'});
+let settled = false;
+browser.once('error', (error) => {
+  if (settled) return;
+  settled = true;
+  console.error(error instanceof Error ? error.stack || error.message : String(error));
+  process.exitCode = 1;
+});
+browser.once('close', (code, signal) => {
+  if (settled) return;
+  settled = true;
+  if (signal) {
+    process.kill(process.pid, signal);
+    return;
+  }
+  process.exitCode = code === null ? 1 : code;
+});
+`;
+  await mkdir(path.dirname(lifecycle.launcherPath), {recursive: true});
+  await writeFile(lifecycle.launcherPath, source, 'utf8');
+  await chmod(lifecycle.launcherPath, 0o755);
+};
+
 const defaultDependencies: RemotionWorkerDependencies<DefaultBrowser, DefaultComposition> = {
   bundle: async (options) => await bundle(options),
+  prepareBrowserLauncher: async (lifecycle) => {
+    const status = await ensureBrowser({
+      logLevel: 'info',
+      chromeMode: 'headless-shell',
+    });
+    if (!('path' in status)) {
+      throw new Error(`Remotion browser is unavailable: ${status.type}`);
+    }
+    await writeOwnedBrowserLauncher(lifecycle, status.path);
+  },
   openBrowser: async (browser, options) => await openBrowser(browser, options),
   selectComposition: async (options) => await selectComposition(options),
   renderMedia: async (options) =>
@@ -105,6 +170,10 @@ export type RemotionCancellation = {
   cancelSignal: CancelSignal;
   cancel(): void;
   isCancelled(): boolean;
+};
+
+export type RemotionWorkerRunOptions = {
+  browserCloseTimeoutMs?: number;
 };
 
 export const createRemotionCancellation = (
@@ -140,6 +209,7 @@ export const runRawRemotionRender = async <
   dependencies: RemotionWorkerDependencies<Browser, Composition> =
     defaultDependencies as unknown as RemotionWorkerDependencies<Browser, Composition>,
   cancellation = createRemotionCancellation(),
+  runOptions: RemotionWorkerRunOptions = {},
 ): Promise<void> => {
   const request = RemotionWorkerRequestSchema.parse(rawRequest);
   const serveUrl = await dependencies.bundle({
@@ -151,11 +221,24 @@ export const runRawRemotionRender = async <
   });
   cancellationCheckpoint(cancellation, 'before browser launch');
 
+  if (request.browserLifecycle !== undefined) {
+    if (dependencies.prepareBrowserLauncher === undefined) {
+      throw new Error('Owned browser launcher preparation is unavailable');
+    }
+    await dependencies.prepareBrowserLauncher(request.browserLifecycle);
+    cancellationCheckpoint(cancellation, 'before owned browser launch');
+  }
+
   let browser: Browser | undefined;
   let renderFailed = false;
   let renderError: unknown;
   try {
-    browser = await dependencies.openBrowser('chrome', {logLevel: 'info'});
+    browser = await dependencies.openBrowser('chrome', {
+      logLevel: 'info',
+      ...(request.browserLifecycle === undefined
+        ? {}
+        : {browserExecutable: request.browserLifecycle.launcherPath}),
+    });
     cancellationCheckpoint(cancellation, 'before composition selection');
     const composition = await dependencies.selectComposition({
       serveUrl,
@@ -195,11 +278,37 @@ export const runRawRemotionRender = async <
   let closeFailed = false;
   let closeError: unknown;
   if (browser !== undefined) {
+    const closeTimeoutMs = Math.max(
+      0,
+      runOptions.browserCloseTimeoutMs ?? DEFAULT_BROWSER_CLOSE_TIMEOUT_MS,
+    );
+    let timeout: NodeJS.Timeout | undefined;
     try {
-      await browser.close({silent: true});
+      await Promise.race([
+        browser.close({silent: true}),
+        new Promise<never>((_resolve, reject) => {
+          timeout = setTimeout(
+            () =>
+              reject(
+                new Error(`Remotion browser did not close within ${closeTimeoutMs}ms`),
+              ),
+            closeTimeoutMs,
+          );
+        }),
+      ]);
     } catch (error) {
       closeFailed = true;
       closeError = error;
+      try {
+        browser.runner?.forgetEventLoop();
+      } catch (forgetError) {
+        closeError = new AggregateError(
+          [error, forgetError],
+          'Remotion browser close and event-loop release both failed',
+        );
+      }
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
     }
   }
 
@@ -253,9 +362,29 @@ const exitCodeForSignal = (signal: WorkerSignal | null): number => {
   return 1;
 };
 
-const errorDetails = (error: unknown): {message: string; stack: string | null} => {
+const describeNestedError = (error: unknown, seen: Set<unknown>): string => {
+  if (seen.has(error)) return '[circular error]';
   if (error instanceof Error) {
-    return {message: error.message, stack: error.stack ?? null};
+    seen.add(error);
+    const details = [error.stack ?? error.message];
+    if (error instanceof AggregateError) {
+      error.errors.forEach((nested, index) => {
+        details.push(`Aggregate error ${index + 1}:\n${describeNestedError(nested, seen)}`);
+      });
+    }
+    if (error.cause !== undefined) {
+      details.push(`Caused by:\n${describeNestedError(error.cause, seen)}`);
+    }
+    return details.join('\n');
+  }
+  return String(error);
+};
+
+export const serializeWorkerError = (
+  error: unknown,
+): {message: string; stack: string | null} => {
+  if (error instanceof Error) {
+    return {message: error.message, stack: describeNestedError(error, new Set())};
   }
   return {message: String(error), stack: null};
 };
@@ -278,7 +407,7 @@ export const runRemotionWorkerMain = async (
       schemaVersion: '1.0.0',
       ok: false,
       signal,
-      error: errorDetails(error),
+      error: serializeWorkerError(error),
     };
     exitCode = exitCodeForSignal(signal);
     console.error(result.error.stack ?? result.error.message);

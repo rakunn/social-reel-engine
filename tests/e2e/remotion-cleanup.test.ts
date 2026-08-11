@@ -10,6 +10,7 @@ import {stopOwnedProcessGroup} from '../../src/render/process-group';
 import {prepareRenderProps} from '../../src/render/stage';
 import {
   describeProcessInventory,
+  isProcessDescendantOf,
   listRemotionProcessInventory,
   newProcessIds,
   type RemotionProcessInventoryEntry,
@@ -93,9 +94,10 @@ const waitForOwnedBrowser = async (
     const workerIsVisible = observed.some((entry) => entry.pid === workerPid);
     const browserIsVisible = observed.some(
       (entry) =>
-        entry.command.includes('chrome-headless-shell') ||
-        entry.command.includes('Chrome Headless Shell') ||
-        entry.command.includes('puppeteer_dev_chrome_profile-'),
+        (entry.command.includes('chrome-headless-shell') ||
+          entry.command.includes('Chrome Headless Shell') ||
+          entry.command.includes('puppeteer_dev_chrome_profile-')) &&
+        isProcessDescendantOf(observed, entry.pid, workerPid),
     );
     if (workerIsVisible && browserIsVisible) return observed;
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -104,6 +106,95 @@ const waitForOwnedBrowser = async (
     `Timed out waiting for worker ${workerPid} and its browser.\nObserved:\n` +
       describeProcessInventory(observed),
   );
+};
+
+const runForcedCancellation = async (
+  signal: 'SIGINT' | 'SIGTERM',
+  baseline: RemotionProcessInventoryEntry[],
+): Promise<void> => {
+  const prepared = await prepareSyntheticReel(repositoryRoot, {silent: true});
+  const {props} = await prepareRenderProps(
+    prepared.projectPath,
+    repositoryRoot,
+    'preview',
+  );
+  const settings = await readRenderSettings(prepared.projectPath);
+  const requestPath = path.join(
+    prepared.projectPath,
+    'work/render/cancel-request.json',
+  );
+  await writeJson(requestPath, {
+    schemaVersion: '1.0.0',
+    engineRoot: repositoryRoot,
+    target: 'preview',
+    rawOutput: path.join(
+      prepared.projectPath,
+      'work/render/cancel-preview.mp4',
+    ),
+    inputProps: props,
+    settings,
+  });
+
+  const runner = spawn(
+    process.execPath,
+    [
+      '--import',
+      'tsx',
+      path.join(repositoryRoot, 'tests/fixtures/run-remotion-request.ts'),
+      requestPath,
+    ],
+    {cwd: repositoryRoot, stdio: ['ignore', 'pipe', 'pipe']},
+  );
+  runners.add(runner);
+  let stdout = '';
+  let stderr = '';
+  runner.stdout!.setEncoding('utf8');
+  runner.stderr!.setEncoding('utf8');
+  runner.stdout!.on('data', (chunk: string) => {
+    stdout += chunk;
+  });
+  runner.stderr!.on('data', (chunk: string) => {
+    stderr += chunk;
+  });
+
+  const markerOutput = await waitForOutput(
+    runner.stdout!,
+    'REMOTION_WORKER_STARTED',
+    120_000,
+  );
+  const workerPid = Number(
+    markerOutput.match(/REMOTION_WORKER_STARTED (\d+)/)?.[1],
+  );
+  expect(workerPid).toBeGreaterThan(0);
+  workerGroups.add(workerPid);
+  const activeInventory = await waitForOwnedBrowser(workerPid, 120_000);
+  const ownedBrowserGroups = new Set(
+    activeInventory
+      .filter(
+        (entry) =>
+          (entry.command.includes('chrome-headless-shell') ||
+            entry.command.includes('Chrome Headless Shell') ||
+            entry.command.includes('puppeteer_dev_chrome_profile-')) &&
+          isProcessDescendantOf(activeInventory, entry.pid, workerPid),
+      )
+      .map((entry) => entry.pgid),
+  );
+  expect(ownedBrowserGroups.size).toBeGreaterThan(0);
+  for (const pgid of ownedBrowserGroups) workerGroups.add(pgid);
+
+  const closed = waitForClose(runner);
+  expect(runner.kill(signal)).toBe(true);
+  const result = await closed;
+  runners.delete(runner);
+  expect(
+    result,
+    `Runner output:\n${stdout}\nRunner errors:\n${stderr}`,
+  ).toEqual({exitCode: signal === 'SIGINT' ? 130 : 143, signal: null});
+
+  const afterCancellation = await listRemotionProcessInventory(repositoryRoot);
+  expectNoNewProcesses(`${signal} cancellation`, baseline, afterCancellation);
+  workerGroups.delete(workerPid);
+  for (const pgid of ownedBrowserGroups) workerGroups.delete(pgid);
 };
 
 afterEach(async () => {
@@ -122,82 +213,14 @@ afterEach(async () => {
 
 describe.runIf(process.platform === 'darwin')('real Remotion process lifecycle', () => {
   it(
-    'adds no stale process after success or forced cancellation',
+    'adds no stale process after success, SIGINT, or SIGTERM',
     async () => {
       const baseline = await listRemotionProcessInventory(repositoryRoot);
       await runSyntheticE2e(repositoryRoot, {silent: true});
       const afterSuccess = await listRemotionProcessInventory(repositoryRoot);
       expectNoNewProcesses('Successful render', baseline, afterSuccess);
-
-      const prepared = await prepareSyntheticReel(repositoryRoot, {silent: true});
-      const {props} = await prepareRenderProps(
-        prepared.projectPath,
-        repositoryRoot,
-        'preview',
-      );
-      const settings = await readRenderSettings(prepared.projectPath);
-      const requestPath = path.join(
-        prepared.projectPath,
-        'work/render/cancel-request.json',
-      );
-      await writeJson(requestPath, {
-        schemaVersion: '1.0.0',
-        engineRoot: repositoryRoot,
-        target: 'preview',
-        rawOutput: path.join(
-          prepared.projectPath,
-          'work/render/cancel-preview.mp4',
-        ),
-        inputProps: props,
-        settings,
-      });
-
-      const runner = spawn(
-        process.execPath,
-        [
-          '--import',
-          'tsx',
-          path.join(repositoryRoot, 'tests/fixtures/run-remotion-request.ts'),
-          requestPath,
-        ],
-        {cwd: repositoryRoot, stdio: ['ignore', 'pipe', 'pipe']},
-      );
-      runners.add(runner);
-      let stdout = '';
-      let stderr = '';
-      runner.stdout!.setEncoding('utf8');
-      runner.stderr!.setEncoding('utf8');
-      runner.stdout!.on('data', (chunk: string) => {
-        stdout += chunk;
-      });
-      runner.stderr!.on('data', (chunk: string) => {
-        stderr += chunk;
-      });
-
-      const markerOutput = await waitForOutput(
-        runner.stdout!,
-        'REMOTION_WORKER_STARTED',
-        120_000,
-      );
-      const workerPid = Number(
-        markerOutput.match(/REMOTION_WORKER_STARTED (\d+)/)?.[1],
-      );
-      expect(workerPid).toBeGreaterThan(0);
-      workerGroups.add(workerPid);
-      const activeInventory = await waitForOwnedBrowser(workerPid, 120_000);
-      expect(activeInventory.some((entry) => entry.pid === workerPid)).toBe(true);
-      const closed = waitForClose(runner);
-      expect(runner.kill('SIGTERM')).toBe(true);
-      const result = await closed;
-      runners.delete(runner);
-      workerGroups.delete(workerPid);
-      expect(
-        result,
-        `Runner output:\n${stdout}\nRunner errors:\n${stderr}`,
-      ).toEqual({exitCode: 143, signal: null});
-
-      const afterCancellation = await listRemotionProcessInventory(repositoryRoot);
-      expectNoNewProcesses('Cancelled render', baseline, afterCancellation);
+      await runForcedCancellation('SIGINT', baseline);
+      await runForcedCancellation('SIGTERM', baseline);
     },
     300_000,
   );

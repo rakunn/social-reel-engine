@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {mkdir, unlink} from 'node:fs/promises';
+import {mkdir, readFile, unlink} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {readJson, writeJson} from '../core/json';
@@ -32,8 +32,27 @@ export class RenderInterruptedError extends Error {
   }
 }
 
+const findRenderInterruption = (
+  error: unknown,
+  seen = new Set<unknown>(),
+): RenderInterruptedError | null => {
+  if (seen.has(error)) return null;
+  seen.add(error);
+  if (error instanceof RenderInterruptedError) return error;
+  if (error instanceof AggregateError) {
+    for (const nested of error.errors) {
+      const interruption = findRenderInterruption(nested, seen);
+      if (interruption !== null) return interruption;
+    }
+  }
+  if (error instanceof Error && error.cause !== undefined) {
+    return findRenderInterruption(error.cause, seen);
+  }
+  return null;
+};
+
 export const exitCodeForRenderError = (error: unknown): number =>
-  error instanceof RenderInterruptedError ? error.exitCode : 1;
+  findRenderInterruption(error)?.exitCode ?? 1;
 
 type SupervisorSignalTarget = {
   on(signal: WorkerSignal, listener: () => void): unknown;
@@ -67,35 +86,44 @@ type WorkerOutcome =
   | {kind: 'close-error'; error: unknown}
   | {kind: 'grace-expired'};
 
-const signalChild = (owned: OwnedProcess, signal: WorkerSignal): void => {
+const signalChildForGracefulShutdown = (owned: OwnedProcess): void => {
   try {
-    process.kill(owned.pid, signal);
+    process.kill(owned.pid, 'SIGTERM');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
   }
 };
 
 const installSupervisorSignalHandlers = (
-  owned: OwnedProcess,
   target: SupervisorSignalTarget,
   gracefulCancelMs: number,
 ): {
   graceExpired: Promise<WorkerOutcome>;
+  attach(owned: OwnedProcess): void;
+  markWorkerClosed(): void;
+  stopForwarding(): void;
   receivedSignal(): WorkerSignal | null;
   remove(): void;
 } => {
   let received: WorkerSignal | null = null;
+  let owned: OwnedProcess | null = null;
+  let workerAlive = false;
+  let forwarding = true;
   let timer: NodeJS.Timeout | undefined;
   let resolveGraceExpired!: (outcome: WorkerOutcome) => void;
   const graceExpired = new Promise<WorkerOutcome>((resolve) => {
     resolveGraceExpired = resolve;
   });
+  const forwardIfPossible = () => {
+    if (received === null || owned === null || !workerAlive || !forwarding) return;
+    signalChildForGracefulShutdown(owned);
+  };
   const listeners = new Map<WorkerSignal, () => void>();
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
     const listener = () => {
       if (received !== null) return;
       received = signal;
-      signalChild(owned, signal);
+      forwardIfPossible();
       timer = setTimeout(
         () => resolveGraceExpired({kind: 'grace-expired'}),
         Math.max(0, gracefulCancelMs),
@@ -106,6 +134,17 @@ const installSupervisorSignalHandlers = (
   }
   return {
     graceExpired,
+    attach: (processToOwn) => {
+      owned = processToOwn;
+      workerAlive = true;
+      forwardIfPossible();
+    },
+    markWorkerClosed: () => {
+      workerAlive = false;
+    },
+    stopForwarding: () => {
+      forwarding = false;
+    },
     receivedSignal: () => received,
     remove: () => {
       if (timer !== undefined) clearTimeout(timer);
@@ -170,21 +209,31 @@ const protocolReadError = (error: unknown, stderr: string): Error =>
     {cause: error},
   );
 
-const combineRenderAndCleanupErrors = (
-  renderError: unknown,
-  cleanupError: unknown,
-): AggregateError =>
-  new AggregateError(
-    [renderError, cleanupError],
-    'Remotion render and owned-process cleanup both failed',
-  );
-
 const unlinkIfPresent = async (filePath: string): Promise<void> => {
   try {
     await unlink(filePath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
+};
+
+const readOwnedPgidIfPresent = async (filePath: string): Promise<number | null> => {
+  let raw: string;
+  try {
+    raw = await readFile(filePath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+  const value = raw.trim();
+  if (!/^\d+$/.test(value)) {
+    throw new Error(`Invalid owned browser process-group ID in ${filePath}: ${value}`);
+  }
+  const pgid = Number(value);
+  if (!Number.isSafeInteger(pgid) || pgid <= 0) {
+    throw new Error(`Invalid owned browser process-group ID in ${filePath}: ${value}`);
+  }
+  return pgid;
 };
 
 export const superviseRemotionRender = async (
@@ -199,106 +248,149 @@ export const superviseRemotionRender = async (
   const protocolId = `${process.pid}-${randomUUID()}`;
   const requestPath = path.join(workDirectory, `.remotion-worker-${protocolId}.request.json`);
   const resultPath = path.join(workDirectory, `.remotion-worker-${protocolId}.result.json`);
+  const browserPgidPath = path.join(
+    workDirectory,
+    `.remotion-browser-${protocolId}.pgid`,
+  );
+  const browserLauncherPath = path.join(
+    workDirectory,
+    `.remotion-browser-launcher-${protocolId}.cjs`,
+  );
+  const workerRequest = RemotionWorkerRequestSchema.parse({
+    ...request,
+    browserLifecycle: {
+      launcherPath: browserLauncherPath,
+      pgidPath: browserPgidPath,
+    },
+  });
   const workerEntryPoint =
     options.workerEntryPoint ?? fileURLToPath(new URL('./remotion-worker.ts', import.meta.url));
-  let removeSignalHandlers = (): void => undefined;
-  let operationError: unknown;
+  const signalHandlers = installSupervisorSignalHandlers(
+    options.signalTarget ?? process,
+    options.gracefulCancelMs ?? DEFAULT_GRACEFUL_CANCEL_MS,
+  );
+  let owned: OwnedProcess | undefined;
+  let output: {stdout(): string; stderr(): string} = {stdout: () => '', stderr: () => ''};
+  let closedOutcome: Promise<WorkerOutcome> | undefined;
+  let outcome: WorkerOutcome | undefined;
+  let setupError: unknown;
+  const cleanupErrors: unknown[] = [];
 
   try {
-    await writeJson(requestPath, request);
-    const owned = dependencies.spawnOwnedProcess({
+    await writeJson(requestPath, workerRequest);
+    owned = dependencies.spawnOwnedProcess({
       command: process.execPath,
       args: ['--import', 'tsx', workerEntryPoint, requestPath, resultPath],
       cwd: request.engineRoot,
       env: process.env,
     });
     owned.child.stdin.end();
-    const output = captureWorkerOutput(owned);
-    const signalHandlers = installSupervisorSignalHandlers(
-      owned,
-      options.signalTarget ?? process,
-      options.gracefulCancelMs ?? DEFAULT_GRACEFUL_CANCEL_MS,
-    );
-    removeSignalHandlers = signalHandlers.remove;
+    output = captureWorkerOutput(owned);
+    signalHandlers.attach(owned);
+    closedOutcome = owned.closed
+      .then<WorkerOutcome>(({exitCode, signal}) => {
+        signalHandlers.markWorkerClosed();
+        return {kind: 'closed', exitCode, signal};
+      })
+      .catch((error: unknown): WorkerOutcome => {
+        signalHandlers.markWorkerClosed();
+        return {kind: 'close-error', error};
+      });
     options.onWorkerSpawn?.(owned.pid);
-
-    const closedOutcome: Promise<WorkerOutcome> = owned.closed
-      .then<WorkerOutcome>(({exitCode, signal}) => ({kind: 'closed', exitCode, signal}))
-      .catch((error: unknown): WorkerOutcome => ({kind: 'close-error', error}));
-    const outcome = await Promise.race([closedOutcome, signalHandlers.graceExpired]);
-    let interrupted = signalHandlers.receivedSignal();
-    let renderError: unknown =
-      interrupted === null
-        ? outcome.kind === 'grace-expired'
-          ? new Error('Remotion worker graceful shutdown expired without an interrupt')
-          : workerExitError(outcome, output.stderr())
-        : new RenderInterruptedError(interrupted);
-    let cleanupError: unknown;
-
-    if (outcome.kind === 'grace-expired') {
-      try {
-        if (owned.pgid === null) {
-          owned.child.kill('SIGKILL');
-        } else {
-          await dependencies.stopOwnedProcessGroup(owned.pgid, options.cleanupTimeouts);
-        }
-      } catch (error) {
-        cleanupError = error;
-      }
-    }
-    if (cleanupError === undefined && owned.pgid !== null) {
-      try {
-        await dependencies.stopOwnedProcessGroup(owned.pgid, options.cleanupTimeouts);
-      } catch (error) {
-        cleanupError = error;
-      }
-    }
-
-    interrupted = signalHandlers.receivedSignal();
-    if (interrupted !== null && !(renderError instanceof RenderInterruptedError)) {
-      renderError = new RenderInterruptedError(interrupted);
-    }
-
-    if (cleanupError !== undefined) {
-      operationError =
-        renderError === null || renderError === undefined
-          ? cleanupError
-          : combineRenderAndCleanupErrors(renderError, cleanupError);
-    } else {
-      let workerResult: RemotionWorkerResult | undefined;
-      let workerProtocolError: Error | undefined;
-      try {
-        workerResult = await readJson(resultPath, RemotionWorkerResultSchema);
-      } catch (error) {
-        workerProtocolError = protocolReadError(error, output.stderr());
-      }
-
-      interrupted = signalHandlers.receivedSignal();
-
-      if (interrupted !== null) {
-        const cause =
-          workerResult === undefined
-            ? workerProtocolError
-            : resultError(workerResult, output.stderr()) ?? renderError ?? undefined;
-        operationError = new RenderInterruptedError(
-          interrupted,
-          cause === undefined ? undefined : {cause},
-        );
-      } else if (workerResult === undefined) {
-        operationError = renderError ?? workerProtocolError;
-      } else {
-        operationError = resultError(workerResult, output.stderr()) ?? renderError ?? undefined;
-      }
-    }
+    outcome = await Promise.race([closedOutcome, signalHandlers.graceExpired]);
   } catch (error) {
-    operationError = operationError ?? error;
+    setupError = error;
   } finally {
-    removeSignalHandlers();
+    signalHandlers.stopForwarding();
+    if (owned !== undefined) {
+      if (owned.pgid === null) {
+        if (outcome?.kind === 'grace-expired' || setupError !== undefined) {
+          try {
+            owned.child.kill('SIGKILL');
+          } catch (error) {
+            cleanupErrors.push(error);
+          }
+        }
+      } else {
+        try {
+          await dependencies.stopOwnedProcessGroup(owned.pgid, options.cleanupTimeouts);
+          signalHandlers.markWorkerClosed();
+        } catch (error) {
+          cleanupErrors.push(error);
+        }
+      }
+    }
+
+    try {
+      const browserPgid = await readOwnedPgidIfPresent(browserPgidPath);
+      if (browserPgid !== null && browserPgid !== owned?.pgid) {
+        await dependencies.stopOwnedProcessGroup(browserPgid, options.cleanupTimeouts);
+      }
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    signalHandlers.remove();
+  }
+
+  let renderError: unknown = setupError;
+  if (renderError === undefined && outcome !== undefined) {
+    renderError =
+      outcome.kind === 'grace-expired'
+        ? new Error('Remotion worker graceful shutdown expired')
+        : workerExitError(outcome, output.stderr());
+  }
+
+  let workerResult: RemotionWorkerResult | undefined;
+  let workerProtocolError: Error | undefined;
+  if (owned !== undefined) {
+    try {
+      workerResult = await readJson(resultPath, RemotionWorkerResultSchema);
+    } catch (error) {
+      workerProtocolError = protocolReadError(error, output.stderr());
+    }
+  }
+
+  if (setupError === undefined) {
+    if (workerResult === undefined) {
+      renderError = renderError ?? workerProtocolError;
+    } else {
+      renderError = resultError(workerResult, output.stderr()) ?? renderError ?? undefined;
+    }
+  }
+
+  const interrupted = signalHandlers.receivedSignal();
+  if (interrupted !== null) {
+    renderError = new RenderInterruptedError(
+      interrupted,
+      renderError === undefined ? undefined : {cause: renderError},
+    );
+  }
+
+  let operationError = renderError;
+  if (cleanupErrors.length > 0) {
+    if (operationError === undefined && cleanupErrors.length === 1) {
+      operationError = cleanupErrors[0];
+    } else {
+      operationError = new AggregateError(
+        [
+          ...(operationError === undefined ? [] : [operationError]),
+          ...cleanupErrors,
+        ],
+        operationError === undefined
+          ? 'Owned Remotion process cleanup failed'
+          : 'Remotion render and owned-process cleanup both failed',
+      );
+    }
   }
 
   let protocolCleanupError: unknown;
   try {
-    await Promise.all([unlinkIfPresent(requestPath), unlinkIfPresent(resultPath)]);
+    await Promise.all([
+      unlinkIfPresent(requestPath),
+      unlinkIfPresent(resultPath),
+      unlinkIfPresent(browserPgidPath),
+      unlinkIfPresent(browserLauncherPath),
+    ]);
   } catch (error) {
     protocolCleanupError = error;
   }

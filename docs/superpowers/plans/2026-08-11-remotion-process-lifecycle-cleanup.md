@@ -12,9 +12,9 @@
 
 - Automatic cleanup applies only to processes created for the current render.
 - Never select signal targets by matching `remotion`, `ffprobe`, FFmpeg, or Chrome command names.
-- Concurrent renders must have independent process groups.
+- Concurrent renders must have independent worker and browser process groups.
 - Use 10 seconds for graceful cancellation, 5 seconds after `SIGTERM`, and 5 seconds after `SIGKILL`; tests may inject shorter durations.
-- Await explicit Chrome closure; use the worker process group for inherited bundler, compositor, probing, and encoding descendants.
+- Await bounded explicit Chrome closure; verify its separately detached browser group as well as the worker group used by inherited bundler, compositor, probing, and encoding descendants.
 - Do not register or refresh an artifact when worker cleanup is incomplete.
 - Preserve the original render error and append exact process-group/PID/state cleanup diagnostics.
 - Do not alter edit approval, color approval, rights, fingerprint, Rec.709, codec, delivery, or QC policy.
@@ -24,8 +24,8 @@
 ## File Map
 
 - Create `src/render/process-group.ts`: POSIX-owned child spawning, exact-PGID inspection, bounded wait, escalation, and cleanup errors.
-- Create `src/render/remotion-worker.ts`: worker request/result schemas, explicit browser and cancellation lifecycle, signal handling, and worker entrypoint.
-- Create `src/render/remotion-supervisor.ts`: request/result files, child supervision, parent-signal forwarding, error composition, and temporary-file cleanup.
+- Create `src/render/remotion-worker.ts`: worker request/result schemas, an owned Chrome launcher, explicit browser and cancellation lifecycle, signal handling, and worker entrypoint.
+- Create `src/render/remotion-supervisor.ts`: request/result/browser-PGID files, dual-group supervision, parent-signal forwarding, error composition, and temporary-file cleanup.
 - Modify `src/render/remotion.ts`: delegate only the raw Remotion phase, then post-process and register artifacts after verified cleanup.
 - Modify `src/cli.ts`: preserve signal-derived exit status for an interrupted render.
 - Create `tests/fixtures/process-tree-worker.ts`: deterministic inherited descendants and a stubborn interruptible child.
@@ -34,8 +34,10 @@
 - Create `tests/unit/remotion-worker.test.ts`: browser reuse, cancellation wiring, awaited closure, and combined errors.
 - Create `tests/unit/remotion-supervisor.test.ts`: worker results, interruption, exact cleanup, and artifact-boundary sequencing.
 - Create `tests/helpers/remotion-process-inventory.ts`: read-only macOS process inventory used only for baseline comparison.
+- Create `tests/unit/remotion-process-inventory.test.ts`: exact worker-to-browser ancestry checks against baseline and concurrent processes.
 - Modify `scripts/synthetic-e2e.ts`: expose synthetic-project preparation without changing existing acceptance behavior.
 - Create `tests/e2e/remotion-cleanup.test.ts`: real successful render and forced-cancellation process-inventory validation.
+- Modify `package.json`: serialize E2E files so process-baseline assertions cannot observe another healthy acceptance render.
 
 ---
 
@@ -310,12 +312,12 @@ export const RemotionWorkerResultSchema = z.discriminatedUnion('ok', [
 
 1. Bundle `src/remotion/index.ts` with the current `publicDir`, root, cache, and symlink settings.
 2. Stop before opening Chrome when cancellation arrived during bundling.
-3. Open one browser with `openBrowser('chrome', {logLevel: 'info'})`.
+3. Resolve the pinned Chrome executable, create a per-render launcher that records its own detached PGID before starting Chrome in that group, and pass the launcher as `browserExecutable` to `openBrowser()`.
 4. Pass that browser to `selectComposition()` and `renderMedia()` as `puppeteerInstance`.
 5. Pass the `makeCancelSignal().cancelSignal` to `renderMedia()`.
 6. Preserve every current codec, pixel format, audio, color, scale, timeout, and target-specific render option.
-7. Await `browser.close({silent: true})` in all paths.
-8. Throw the original error, the close error, or `AggregateError([renderError, closeError], 'Remotion render and browser cleanup both failed')` as applicable.
+7. Await `browser.close({silent: true})` with a bounded timeout in all paths so the supervisor can finish exact-group verification.
+8. Preserve nested render and close errors in the worker protocol, and throw the original error, the close error, or `AggregateError([renderError, closeError], 'Remotion render and browser cleanup both failed')` as applicable.
 
 The executable entrypoint reads request/result paths from `process.argv[2]` and `process.argv[3]`, installs `SIGINT`, `SIGTERM`, and `SIGHUP` handlers, runs the raw render, atomically writes a schema-valid result with `writeJson()`, removes handlers, and sets `process.exitCode` to `0`, `1`, `130`, `143`, or `129` without calling `process.exit()`.
 
@@ -465,11 +467,11 @@ export type RemotionSupervisorOptions = {
 };
 ```
 
-`superviseRemotionRender()` must atomically write one request file under the target's existing `work/render` directory, start `node --import tsx src/render/remotion-worker.ts <request> <result>` with `spawnOwnedProcess()`, mirror and capture worker stdout/stderr, and install parent `SIGINT`, `SIGTERM`, and `SIGHUP` listeners only while the worker is active.
+`superviseRemotionRender()` must atomically write one request file under the target's existing `work/render` directory, include supervisor-owned browser-launcher and browser-PGID sidecar paths, start `node --import tsx src/render/remotion-worker.ts <request> <result>` with `spawnOwnedProcess()`, mirror and capture worker stdout/stderr, and install parent `SIGINT`, `SIGTERM`, and `SIGHUP` listeners across the spawn/cleanup boundary.
 
-On the first parent signal, record it and signal the worker process itself so Task 2 can cancel Remotion and close Chrome. Race worker exit against the 10-second graceful deadline. On timeout, invoke `stopOwnedProcessGroup()` for the recorded PGID. After every normal or abnormal worker exit, invoke exact-group cleanup again before reading the result. Always remove parent listeners and unlink the request/result files in `finally`.
+On the first parent signal, record it and forward graceful `SIGTERM` to the live worker so Task 2 can cancel Remotion and close Chrome without triggering Remotion's immediate-exit `SIGINT` handler. Retain the original parent signal for the final conventional exit status. Race worker exit against the 10-second graceful deadline. Structurally guarantee cleanup after every successful spawn: disable further PID forwarding, quiesce and verify the worker PGID once, read the browser sidecar, then verify its exact PGID once. Always remove parent listeners and unlink request, result, launcher, and PGID files.
 
-If both rendering and group cleanup fail, throw `AggregateError([renderError, cleanupError], 'Remotion render and owned-process cleanup both failed')`. If a signal was received and cleanup completed, throw `RenderInterruptedError` after reading the worker result. Never search or signal by executable name.
+If both rendering and group cleanup fail, throw `AggregateError([renderError, ...cleanupErrors], 'Remotion render and owned-process cleanup both failed')`. Preserve a nested `RenderInterruptedError` when mapping the CLI status. If a signal was received and cleanup completed, throw `RenderInterruptedError` after reading the worker result. Never search or signal by executable name.
 
 - [ ] **Step 4: Integrate the artifact boundary**
 
@@ -535,7 +537,7 @@ git commit -m "fix: supervise Remotion process cleanup"
 
 The inventory helper must run `ps -ax -o pid=,ppid=,pgid=,stat=,etime=,command=`, parse rows, and return only commands rooted in the current `engineRoot` or the worker's Remotion temporary profile. It is read-only and exposes no signal function.
 
-Write an e2e test that snapshots PIDs before a successful synthetic render, checks that the after-minus-before set is empty, then prepares a second synthetic preview request, launches the signalable fixture, waits for `REMOTION_WORKER_STARTED`, sends `SIGTERM` to that fixture process, and again checks that no new Remotion-related PID remains:
+Write an e2e test that snapshots PIDs before a successful synthetic render, checks that the after-minus-before set is empty, then prepares signalable synthetic preview requests. For both `SIGINT` and `SIGTERM`, launch the fixture, wait for `REMOTION_WORKER_STARTED`, require a Chrome process whose PPID ancestry reaches that exact worker through its owned launcher, send the signal to the fixture, and again check that no new Remotion-related PID remains. A pre-existing or concurrent Chrome process must not satisfy the active-browser condition.
 
 ```ts
 const baseline = await listRemotionProcessInventory(repositoryRoot);
@@ -589,7 +591,7 @@ The inventory helper must compare by PID and include state/elapsed time in asser
 
 Run: `npx vitest run tests/e2e/remotion-cleanup.test.ts --testTimeout=300000`
 
-Expected: PASS. The five pre-existing PID-1 `UE` processes may remain in both snapshots, but no new PID may remain after success or forced cancellation.
+Expected: PASS. The five pre-existing PID-1 `UE` processes may remain in both snapshots, but no new PID may remain after success, `SIGINT`, or `SIGTERM` cancellation.
 
 - [ ] **Step 5: Run the complete repository verification**
 
