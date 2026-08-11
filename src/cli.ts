@@ -14,6 +14,7 @@ import {ingestFiles, INPUT_KINDS, type InputKind} from './project/ingest';
 import {installCatalogLut, readLutCatalog} from './project/library';
 import {createReelProject, getProjectStatus} from './project/workspace';
 import {renderMasterAndDelivery, renderPreview} from './render/remotion';
+import {exitCodeForRenderError} from './render/remotion-supervisor';
 
 export const ENGINE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -184,6 +185,6 @@ const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1]
 if (import.meta.url === invokedPath) {
   main().catch((error) => {
     process.stderr.write(`Reel command failed: ${(error as Error).message}\n`);
-    process.exitCode = 1;
+    process.exitCode = exitCodeForRenderError(error);
   });
 }

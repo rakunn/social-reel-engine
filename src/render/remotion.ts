@@ -1,5 +1,3 @@
-import {bundle} from '@remotion/bundler';
-import {renderMedia, selectComposition} from '@remotion/renderer';
 import {mkdir} from 'node:fs/promises';
 import path from 'node:path';
 import {assertFinalReadiness} from '../edit/approve';
@@ -10,7 +8,6 @@ import {
   deliveryFfmpegArgs,
   deliveryLoudnormAnalysisFilter,
   readRenderSettings,
-  renderOptionsFor,
 } from './policy';
 import {prepareRenderProps} from './stage';
 import {
@@ -18,18 +15,71 @@ import {
   readRenderArtifactFreshness,
   recordRenderArtifact,
 } from './artifacts';
+import {superviseRemotionRender} from './remotion-supervisor';
+import type {RemotionWorkerRequest} from './remotion-worker';
 
-let bundlePromise: Promise<string> | null = null;
+export type FinalizeRawRenderInput = {
+  projectPath: string;
+  target: 'preview' | 'master';
+  rawOutput: string;
+  outputLocation: string;
+  fingerprint: string;
+  workerRequest: RemotionWorkerRequest;
+};
 
-const getBundle = async (engineRoot: string): Promise<string> => {
-  bundlePromise ??= bundle({
-    entryPoint: path.join(engineRoot, 'src/remotion/index.ts'),
-    publicDir: path.join(engineRoot, 'public'),
-    rootDir: engineRoot,
-    enableCaching: true,
-    symlinkPublicDir: true,
-  });
-  return await bundlePromise;
+export type FinalizeRawRenderDependencies = {
+  supervise: typeof superviseRemotionRender;
+  runFfmpeg: typeof runFfmpeg;
+  recordArtifact: typeof recordRenderArtifact;
+};
+
+const defaultFinalizeDependencies: FinalizeRawRenderDependencies = {
+  supervise: superviseRemotionRender,
+  runFfmpeg,
+  recordArtifact: recordRenderArtifact,
+};
+
+const postProcessArgs = (
+  target: 'preview' | 'master',
+  rawOutput: string,
+  outputLocation: string,
+): string[] => [
+  '-i',
+  rawOutput,
+  '-map',
+  '0',
+  '-c',
+  'copy',
+  ...(target === 'preview'
+    ? [
+        '-bsf:v',
+        'h264_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1',
+      ]
+    : []),
+  '-color_primaries',
+  'bt709',
+  '-color_trc',
+  'bt709',
+  '-colorspace',
+  'bt709',
+  ...(target === 'preview' ? ['-movflags', '+faststart'] : []),
+  outputLocation,
+];
+
+export const finalizeRawRender = async (
+  input: FinalizeRawRenderInput,
+  dependencies: FinalizeRawRenderDependencies = defaultFinalizeDependencies,
+): Promise<void> => {
+  await dependencies.supervise(input.workerRequest);
+  await dependencies.runFfmpeg(
+    postProcessArgs(input.target, input.rawOutput, input.outputLocation),
+  );
+  await dependencies.recordArtifact(
+    input.projectPath,
+    input.target,
+    input.outputLocation,
+    input.fingerprint,
+  );
 };
 
 const renderTarget = async (
@@ -55,15 +105,7 @@ const renderTarget = async (
   if (current.fresh) return outputLocation;
 
   const {props} = await prepareRenderProps(projectPath, engineRoot, target);
-  const serveUrl = await getBundle(engineRoot);
-  const composition = await selectComposition({
-    serveUrl,
-    id: 'SocialReel',
-    inputProps: props as unknown as Record<string, unknown>,
-    timeoutInMilliseconds: 120_000,
-  });
   const settings = await readRenderSettings(projectPath);
-  const options = renderOptionsFor(target, settings);
   await mkdir(path.dirname(outputLocation), {recursive: true});
   const rawDirectory = path.join(projectPath, 'work/render');
   await mkdir(rawDirectory, {recursive: true});
@@ -71,48 +113,22 @@ const renderTarget = async (
     rawDirectory,
     target === 'preview' ? 'preview-remotion.mp4' : 'master-remotion.mov',
   );
-  await renderMedia({
-    serveUrl,
-    composition,
-    inputProps: props as unknown as Record<string, unknown>,
-    outputLocation: rawOutput,
-    codec: options.codec,
-    pixelFormat: options.pixelFormat,
-    imageFormat: options.imageFormat,
-    audioCodec: options.audioCodec,
-    colorSpace: options.colorSpace,
-    scale: options.scale,
-    overwrite: true,
-    enforceAudioTrack: true,
-    logLevel: 'info',
-    timeoutInMilliseconds: 120_000,
-    ...(target === 'preview'
-      ? {crf: options.crf, audioBitrate: options.audioBitrate}
-      : {proResProfile: options.proResProfile, sampleRate: options.sampleRate}),
-  });
-  await runFfmpeg([
-    '-i',
+  const workerRequest: RemotionWorkerRequest = {
+    schemaVersion: '1.0.0',
+    engineRoot,
+    target,
     rawOutput,
-    '-map',
-    '0',
-    '-c',
-    'copy',
-    ...(target === 'preview'
-      ? [
-          '-bsf:v',
-          'h264_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1',
-        ]
-      : []),
-    '-color_primaries',
-    'bt709',
-    '-color_trc',
-    'bt709',
-    '-colorspace',
-    'bt709',
-    ...(target === 'preview' ? ['-movflags', '+faststart'] : []),
+    inputProps: props as unknown as Record<string, unknown>,
+    settings,
+  };
+  await finalizeRawRender({
+    projectPath,
+    target,
+    rawOutput,
     outputLocation,
-  ]);
-  await recordRenderArtifact(projectPath, target, outputLocation, fingerprint);
+    fingerprint,
+    workerRequest,
+  });
   return outputLocation;
 };
 
