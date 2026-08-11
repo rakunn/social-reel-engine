@@ -1,6 +1,6 @@
 import {execFileSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
-import {mkdir, rename, stat, writeFile} from 'node:fs/promises';
+import {mkdir, rename, rm, stat, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {z} from 'zod';
 import {readJson, writeJson} from '../core/json';
@@ -348,13 +348,19 @@ const reclaimStaleStatusScanLock = async (
     }
     if ((await statusScanLockIdentity(projectPath, null)) !== identity) return false;
   }
+  const tombstonePath = statusScanLockTombstonePath(projectPath, identity);
   try {
-    await rename(statusScanLockPath(projectPath), statusScanLockTombstonePath(projectPath, identity));
-    return true;
+    await rename(statusScanLockPath(projectPath), tombstonePath);
   } catch (error) {
     if (missingFile(error) || directoryExists(error) || nonEmptyDirectory(error)) return false;
     throw error;
   }
+  try {
+    await rm(tombstonePath, {recursive: true, force: true});
+  } catch (error) {
+    if (!missingFile(error)) throw error;
+  }
+  return true;
 };
 
 const releaseStatusScanLock = async (projectPath: string, lockId: string): Promise<boolean> => {
@@ -403,7 +409,7 @@ const statusScanIsActive = async (projectPath: string): Promise<boolean> => {
   }
 };
 
-const mediaOperationLockIsActive = async (projectPath: string): Promise<boolean> => {
+export const isMediaOperationLockActive = async (projectPath: string): Promise<boolean> => {
   const owner = await readMediaOperationLock(projectPath);
   return owner?.state === 'active' && isProcessIdentityAlive(owner);
 };
@@ -484,25 +490,35 @@ export const runWithStatusScanLock = async <T>(
         ),
     );
   };
+  let renewalQueue: Promise<void> = Promise.resolve();
+  const enqueueRenewal = (): void => {
+    const renewal = renewalQueue.then(async () => await renewLease());
+    renewalQueue = renewal.then(
+      () => undefined,
+      (error) => {
+        ownershipFailure = asOperationError(error);
+      },
+    );
+  };
   const heartbeat =
     lock.processStartMarker === null
       ? setInterval(() => {
-          void renewLease().catch((error) => {
-            ownershipFailure = asOperationError(error);
-          });
+          enqueueRenewal();
         }, MARKERLESS_OPERATION_HEARTBEAT_MS)
       : null;
   heartbeat?.unref();
   try {
-    if (await mediaOperationLockIsActive(projectPath)) return {acquired: false};
+    if (await isMediaOperationLockActive(projectPath)) return {acquired: false};
     const value = await scan();
     await assertOwnership();
     return {acquired: true, value};
   } finally {
     if (heartbeat) clearInterval(heartbeat);
+    await renewalQueue;
     if (!(await releaseStatusScanLock(projectPath, lock.id))) {
       throw mediaOperationOwnershipLost();
     }
+    if (ownershipFailure) throw ownershipFailure;
   }
 };
 

@@ -10,6 +10,7 @@ import {assertSafeReelName} from '../core/paths';
 import {validateEdit} from '../edit/validate';
 import {scanInputs} from './ingest';
 import {
+  isMediaOperationLockActive,
   isMediaOperationAlive,
   readMediaOperation,
   runWithStatusScanLock,
@@ -259,7 +260,13 @@ const getProjectStatusWithoutOperation = async (projectPath: string): Promise<Pr
 
 export const getProjectStatus = async (projectPath: string): Promise<ProjectStatus> => {
   const operation = await readMediaOperation(projectPath);
-  if (operation) return statusFromOperation(operation);
+  if (operation) {
+    if (isMediaOperationAlive(operation)) return statusFromOperation(operation);
+    if (await isMediaOperationLockActive(projectPath)) return mediaOperationStartingStatus();
+    return statusFromOperation(operation);
+  }
+
+  await assertProjectScaffold(projectPath);
 
   const locked = await runWithStatusScanLock(projectPath, async () => {
     const operationAfterLock = await readMediaOperation(projectPath);

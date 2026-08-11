@@ -143,6 +143,22 @@ describe('media operation records', () => {
     await completeMediaOperation(projectPath, media.id!);
   });
 
+  it('removes a reclaimed status-lock tombstone before the next scan completes', async () => {
+    const projectPath = await makeProject();
+
+    await expect(
+      runWithStatusScanLock(projectPath, async () => 'first status'),
+    ).resolves.toEqual({acquired: true, value: 'first status'});
+    await expect(
+      runWithStatusScanLock(projectPath, async () => 'second status'),
+    ).resolves.toEqual({acquired: true, value: 'second status'});
+
+    const analysisEntries = await readdir(path.join(projectPath, 'analysis'));
+    expect(
+      analysisEntries.filter((entry) => entry.startsWith('status-scan.lock.reclaimed-')),
+    ).toEqual([]);
+  });
+
   it('does not replace a live operation with a competing media command', async () => {
     const projectPath = await makeProject();
     await beginMediaOperation(projectPath, 'proxy', {

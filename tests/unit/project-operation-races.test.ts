@@ -1,4 +1,4 @@
-import {mkdtemp, readFile, rm} from 'node:fs/promises';
+import {mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {afterEach, describe, expect, it, vi} from 'vitest';
@@ -14,8 +14,21 @@ type Gate = {
 const gates = vi.hoisted(() => ({
   owner: {armed: false, blocked: false, started: null, resume: null, wait: null} as Gate,
   statusOwner: {armed: false, blocked: false, started: null, resume: null, wait: null} as Gate,
+  statusRenewal: {armed: false, blocked: false, started: null, resume: null, wait: null} as Gate,
   operationRecord: {armed: false, blocked: false, started: null, resume: null, wait: null} as Gate,
+  markerlessProcess: false,
 }));
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return {
+    ...actual,
+    execFileSync: ((...args: Parameters<typeof actual.execFileSync>) => {
+      if (gates.markerlessProcess) throw new Error('ps unavailable');
+      return actual.execFileSync(...args);
+    }) as typeof actual.execFileSync,
+  };
+});
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
@@ -61,6 +74,15 @@ vi.mock('../../src/core/json', async (importOriginal) => {
         gates.operationRecord.started?.();
         await gates.operationRecord.wait;
       }
+      if (
+        gates.statusRenewal.armed &&
+        !gates.statusRenewal.blocked &&
+        String(filePath).includes('/analysis/status-scan.lock/owner.json')
+      ) {
+        gates.statusRenewal.blocked = true;
+        gates.statusRenewal.started?.();
+        await gates.statusRenewal.wait;
+      }
       return await actual.writeJson(...args);
     },
   };
@@ -79,6 +101,15 @@ const temporaryProjects: string[] = [];
 
 const makeProject = async (): Promise<string> => {
   const projectPath = await mkdtemp(path.join(tmpdir(), 'reel-operation-race-'));
+  await Promise.all([
+    mkdir(path.join(projectPath, 'analysis'), {recursive: true}),
+    mkdir(path.join(projectPath, 'config'), {recursive: true}),
+    mkdir(path.join(projectPath, 'edits'), {recursive: true}),
+  ]);
+  await Promise.all([
+    writeFile(path.join(projectPath, 'brief.json'), '{}\n'),
+    writeFile(path.join(projectPath, 'edits/edit.json'), '{}\n'),
+  ]);
   temporaryProjects.push(projectPath);
   return projectPath;
 };
@@ -111,7 +142,10 @@ const resetGate = (gate: Gate): void => {
 afterEach(async () => {
   resetGate(gates.owner);
   resetGate(gates.statusOwner);
+  resetGate(gates.statusRenewal);
   resetGate(gates.operationRecord);
+  gates.markerlessProcess = false;
+  vi.useRealTimers();
   await Promise.all(
     temporaryProjects.splice(0).map(async (projectPath) =>
       await rm(projectPath, {recursive: true, force: true}),
@@ -120,6 +154,34 @@ afterEach(async () => {
 });
 
 describe('media-operation publication races', () => {
+  it('reports a retry as starting instead of its stale predecessor', async () => {
+    const projectPath = await makeProject();
+    await beginMediaOperation(projectPath, 'proxy', {
+      now: new Date(0),
+      pid: process.pid,
+      processStartMarker: null,
+      phase: 'interrupted-proxy',
+    });
+    const recordGate = armGate(gates.operationRecord);
+    const retry = beginMediaOperation(projectPath, 'render', {
+      pid: process.pid,
+      processStartMarker: null,
+      phase: 'starting-render',
+    });
+
+    await recordGate.started;
+    try {
+      await expect(getProjectStatus(projectPath)).resolves.toMatchObject({
+        stage: 'media-in-progress',
+        nextAction: expect.stringMatching(/starting/i),
+      });
+    } finally {
+      recordGate.resume();
+      const operation = await retry;
+      await completeMediaOperation(projectPath, operation.id!);
+    }
+  });
+
   it('does not scan after delayed status-owner publication loses its claim', async () => {
     const projectPath = await makeProject();
     const statusOwnerGate = armGate(gates.statusOwner);
@@ -149,6 +211,49 @@ describe('media-operation publication races', () => {
       releaseSecond();
       await second.catch(() => undefined);
     }
+  });
+
+  it('drains a markerless status lease renewal before releasing the lock', async () => {
+    vi.useFakeTimers();
+    gates.markerlessProcess = true;
+    const projectPath = await makeProject();
+    let releaseScan!: () => void;
+    let markScanStarted!: () => void;
+    const scanStarted = new Promise<void>((resolve) => {
+      markScanStarted = resolve;
+    });
+    const scanRelease = new Promise<void>((resolve) => {
+      releaseScan = resolve;
+    });
+    const statusScan = runWithStatusScanLock(projectPath, async () => {
+      markScanStarted();
+      await scanRelease;
+      return 'scanned';
+    });
+
+    await scanStarted;
+    const renewalGate = armGate(gates.statusRenewal);
+    await vi.advanceTimersByTimeAsync(100_000);
+    await renewalGate.started;
+    releaseScan();
+
+    let settled = false;
+    void statusScan.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    renewalGate.resume();
+    await expect(statusScan).resolves.toEqual({acquired: true, value: 'scanned'});
+    await expect(
+      readFile(path.join(projectPath, 'analysis/status-scan.lock/owner.json'), 'utf8'),
+    ).resolves.toContain('"state": "released"');
   });
 
   it('returns media-in-progress without scanning during producer record publication', async () => {

@@ -26,15 +26,11 @@ const unlinkIfPresent = async (filePath: string): Promise<void> => {
 
 const removeOrphanedPartials = async (
   outputPath: string,
-  operationId: string | null,
 ): Promise<void> => {
   const directory = path.dirname(outputPath);
   const extension = path.extname(outputPath);
   const filename = path.basename(outputPath, extension);
   const prefix = `.${filename}.partial-`;
-  const currentOperationPrefix = operationId
-    ? `.${filename}.partial-${operationId}-`
-    : null;
   const entries = await readdir(directory, {withFileTypes: true});
   for (const entry of entries) {
     if (
@@ -44,13 +40,10 @@ const removeOrphanedPartials = async (
     ) {
       continue;
     }
-    if (currentOperationPrefix && !entry.name.startsWith(currentOperationPrefix)) {
-      // A different operation ID may still belong to a successor that owns this output now.
-      // It remains an inert partial rather than risking destructive cross-operation cleanup.
-      continue;
-    }
-    // A media operation can only remove another operation's partial while it still owns the
-    // project lock. Rechecking immediately before unlink fences same-operation recovery.
+    // A tracked producer has the project-wide media lock while this guard succeeds. A partial
+    // that already exists at this point is therefore from an inactive predecessor; a successor
+    // uses a distinct operation ID and cannot begin until this guard no longer succeeds.
+    // Rechecking immediately before unlink fences that handoff without leaking large partials.
     await assertPublicationGuard();
     await unlink(path.join(directory, entry.name));
   }
@@ -64,7 +57,7 @@ export const writeAtomically = async <T>(
   await assertPublicationGuard();
   await mkdir(path.dirname(outputPath), {recursive: true});
   const operationId = currentPublicationOperationId();
-  await removeOrphanedPartials(outputPath, operationId);
+  await removeOrphanedPartials(outputPath);
   const temporaryPath = temporaryOutputPath(outputPath, operationId);
   try {
     const result = await write(temporaryPath);

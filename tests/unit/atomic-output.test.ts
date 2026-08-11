@@ -92,14 +92,14 @@ describe('atomic media output', () => {
     await expect(readFile(output, 'utf8')).resolves.toBe('operation-owned proxy');
   });
 
-  it('leaves a different media operation partial inert during cleanup', async () => {
+  it('reclaims a predecessor media operation partial during cleanup', async () => {
     const directory = await makeDirectory();
     const output = path.join(directory, 'proxy.mp4');
-    const successorPartial = path.join(
+    const predecessorPartial = path.join(
       directory,
-      '.proxy.partial-successor-operation.mp4',
+      '.proxy.partial-interrupted-operation.mp4',
     );
-    await writeFile(successorPartial, 'successor proxy');
+    await writeFile(predecessorPartial, 'interrupted proxy');
 
     await runWithMediaOperationPublicationGuard(
       'operation-123',
@@ -110,7 +110,7 @@ describe('atomic media output', () => {
         }),
     );
 
-    await expect(readFile(successorPartial, 'utf8')).resolves.toBe('successor proxy');
+    await expect(readFile(predecessorPartial, 'utf8')).rejects.toThrow(/ENOENT/);
     await expect(readFile(output, 'utf8')).resolves.toBe('replacement proxy');
   });
 
