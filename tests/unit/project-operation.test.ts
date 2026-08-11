@@ -58,7 +58,7 @@ describe('media operation records', () => {
     await expect(readMediaOperation(projectPath)).resolves.toBeNull();
   });
 
-  it('marks completed operation state released before a successor starts', async () => {
+  it('reclaims completed operation locks without retaining tombstones', async () => {
     const projectPath = await makeProject();
     const completed = await beginMediaOperation(projectPath, 'proxy', {
       pid: process.pid,
@@ -82,12 +82,10 @@ describe('media operation records', () => {
       pid: process.pid,
       phase: 'rendering-master',
     });
-    await expect(
-      readFile(
-        path.join(projectPath, `analysis/operation.lock.reclaimed-${completed.id}/owner.json`),
-        'utf8',
-      ),
-    ).resolves.toContain(completed.id!);
+    const analysisEntries = await readdir(path.join(projectPath, 'analysis'));
+    expect(
+      analysisEntries.filter((entry) => entry.startsWith('operation.lock.reclaimed-')),
+    ).toEqual([]);
     await completeMediaOperation(projectPath, successor.id!);
   });
 
@@ -243,11 +241,11 @@ describe('media operation records', () => {
       state: 'running',
       phase: 'recovering-ownerless-lock',
     });
-    const tombstone = (await readdir(path.join(projectPath, 'analysis'))).find((entry) =>
-      entry.startsWith('operation.lock.reclaimed-'),
-    );
-    expect(tombstone).toBeDefined();
-    expect(await readdir(path.join(projectPath, 'analysis', tombstone!))).not.toEqual([]);
+    expect(
+      (await readdir(path.join(projectPath, 'analysis'))).filter((entry) =>
+        entry.startsWith('operation.lock.reclaimed-'),
+      ),
+    ).toEqual([]);
     await completeMediaOperation(projectPath, recovered.id!);
   });
 

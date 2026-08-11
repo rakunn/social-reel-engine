@@ -136,6 +136,16 @@ const nonEmptyDirectory = (error: unknown): boolean =>
 const pause = async (): Promise<void> =>
   await new Promise<void>((resolve) => setTimeout(resolve, LOCK_RETRY_DELAY_MS));
 
+const lockIsInitializing = async (lockPath: string): Promise<boolean> => {
+  try {
+    const lockStat = await stat(lockPath);
+    return Date.now() - lockStat.mtimeMs < LOCK_INITIALIZATION_GRACE_MS;
+  } catch (error) {
+    if (missingFile(error)) return false;
+    throw error;
+  }
+};
+
 const markerlessLeaseExpiry = (now: Date): string =>
   new Date(now.getTime() + MARKERLESS_OPERATION_LEASE_MS).toISOString();
 
@@ -193,7 +203,7 @@ const claimMediaOperationLock = async (
       {encoding: 'utf8', flag: 'wx'},
     );
   } catch (error) {
-    if (directoryExists(error)) return false;
+    if (directoryExists(error) || missingFile(error)) return false;
     throw error;
   }
   const claimed = await readMediaOperationLock(projectPath);
@@ -219,7 +229,7 @@ const claimStatusScanLock = async (
       {encoding: 'utf8', flag: 'wx'},
     );
   } catch (error) {
-    if (directoryExists(error)) return false;
+    if (directoryExists(error) || missingFile(error)) return false;
     throw error;
   }
   const claimed = await readStatusScanLock(projectPath);
@@ -304,16 +314,19 @@ const reclaimStaleMediaOperationLock = async (
     }
     if ((await staleLockIdentity(projectPath, null)) !== identity) return false;
   }
+  const tombstonePath = operationLockTombstonePath(projectPath, identity);
   try {
-    await rename(
-      operationLockPath(projectPath),
-      operationLockTombstonePath(projectPath, identity),
-    );
-    return true;
+    await rename(operationLockPath(projectPath), tombstonePath);
   } catch (error) {
     if (missingFile(error) || directoryExists(error) || nonEmptyDirectory(error)) return false;
     throw error;
   }
+  try {
+    await rm(tombstonePath, {recursive: true, force: true});
+  } catch (error) {
+    if (!missingFile(error)) throw error;
+  }
+  return true;
 };
 
 const statusScanLockIdentity = async (
@@ -399,6 +412,7 @@ const releaseStatusScanLock = async (projectPath: string, lockId: string): Promi
 const statusScanIsActive = async (projectPath: string): Promise<boolean> => {
   const owner = await readStatusScanLock(projectPath);
   if (owner && owner.state === 'active' && isProcessIdentityAlive(owner)) return true;
+  if (!owner && (await lockIsInitializing(statusScanLockPath(projectPath)))) return true;
   if (await reclaimStaleStatusScanLock(projectPath, owner)) return false;
   try {
     await stat(statusScanLockPath(projectPath));
@@ -411,7 +425,8 @@ const statusScanIsActive = async (projectPath: string): Promise<boolean> => {
 
 export const isMediaOperationLockActive = async (projectPath: string): Promise<boolean> => {
   const owner = await readMediaOperationLock(projectPath);
-  return owner?.state === 'active' && isProcessIdentityAlive(owner);
+  if (owner?.state === 'active' && isProcessIdentityAlive(owner)) return true;
+  return owner === null && (await lockIsInitializing(operationLockPath(projectPath)));
 };
 
 export type StatusScanLockResult<T> =
@@ -456,6 +471,7 @@ export const runWithStatusScanLock = async <T>(
     if (owner && owner.state === 'active' && isProcessIdentityAlive(owner)) {
       return {acquired: false};
     }
+    if (!owner && (await lockIsInitializing(lockPath))) return {acquired: false};
     if (await reclaimStaleStatusScanLock(projectPath, owner)) continue;
     await pause();
   }

@@ -154,6 +154,34 @@ afterEach(async () => {
 });
 
 describe('media-operation publication races', () => {
+  it('reports an ownerless retry lock as starting while it publishes its owner', async () => {
+    const projectPath = await makeProject();
+    await beginMediaOperation(projectPath, 'proxy', {
+      now: new Date(0),
+      pid: process.pid,
+      processStartMarker: null,
+      phase: 'interrupted-proxy',
+    });
+    const ownerGate = armGate(gates.owner);
+    const retry = beginMediaOperation(projectPath, 'render', {
+      pid: process.pid,
+      processStartMarker: null,
+      phase: 'starting-render',
+    });
+
+    await ownerGate.started;
+    try {
+      await expect(getProjectStatus(projectPath)).resolves.toMatchObject({
+        stage: 'media-in-progress',
+        nextAction: expect.stringMatching(/starting/i),
+      });
+    } finally {
+      ownerGate.resume();
+      const operation = await retry;
+      await completeMediaOperation(projectPath, operation.id!);
+    }
+  });
+
   it('reports a retry as starting instead of its stale predecessor', async () => {
     const projectPath = await makeProject();
     await beginMediaOperation(projectPath, 'proxy', {
@@ -189,6 +217,7 @@ describe('media-operation publication races', () => {
     void first.catch(() => undefined);
 
     await statusOwnerGate.started;
+    await new Promise<void>((resolve) => setTimeout(resolve, 1_100));
     let releaseSecond!: () => void;
     let markSecondStarted!: () => void;
     const secondStarted = new Promise<void>((resolve) => {
@@ -210,6 +239,28 @@ describe('media-operation publication races', () => {
     } finally {
       releaseSecond();
       await second.catch(() => undefined);
+    }
+  });
+
+  it('does not let a producer displace an initializing status lock', async () => {
+    const projectPath = await makeProject();
+    const statusOwnerGate = armGate(gates.statusOwner);
+    const statusScan = runWithStatusScanLock(projectPath, async () => 'scanned');
+    void statusScan.catch(() => undefined);
+
+    await statusOwnerGate.started;
+    const producer = beginMediaOperation(projectPath, 'proxy', {
+      pid: process.pid,
+      phase: 'starting-proxy',
+    });
+    try {
+      await expect(producer).rejects.toThrow(/status is checking inputs/i);
+    } finally {
+      statusOwnerGate.resume();
+      await producer
+        .then(async (operation) => await completeMediaOperation(projectPath, operation.id!))
+        .catch(() => undefined);
+      await statusScan.catch(() => undefined);
     }
   });
 
