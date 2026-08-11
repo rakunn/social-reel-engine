@@ -25,6 +25,7 @@ import {
 import {validateEdit} from '../../src/edit/validate';
 import {confirmRights, readRightsConfirmationStatus} from '../../src/edit/rights';
 import {sourceIdFor} from '../../src/media/analyze';
+import {runQc} from '../../src/media/qc-report';
 import {createSourceIntegrityContext} from '../../src/media/source-integrity';
 import {
   expectedRenderFingerprint,
@@ -656,6 +657,36 @@ describe('hash-bound approvals', () => {
       recordRenderArtifact(projectPath, 'master', masterPath, fingerprint, new Date(), {integrity}),
     ).rejects.toThrow(/changed during media operation|stale or inconsistent/i);
     await expect(readRenderArtifactRecord(projectPath, 'master')).resolves.toBeNull();
+  });
+
+  it('does not replace rights confirmation after a verified input changes', async () => {
+    const {projectPath} = await makeFixture();
+    const integrity = createSourceIntegrityContext();
+    await expect(validateEdit(projectPath, undefined, {integrity})).resolves.toMatchObject({
+      valid: true,
+    });
+    const briefPath = path.join(projectPath, 'brief.json');
+    const before = await readFile(briefPath, 'utf8');
+    await writeFile(path.join(projectPath, 'input/clips/clip.mp4'), 'changed-input-bytes');
+
+    await expect(
+      confirmRights(projectPath, new Date('2026-08-11T13:05:00.000Z'), {integrity}),
+    ).rejects.toThrow(/changed during media operation|stale or inconsistent/i);
+    await expect(readFile(briefPath, 'utf8')).resolves.toBe(before);
+  });
+
+  it('does not publish a QC report after a verified input changes', async () => {
+    const {projectPath} = await makeFixture();
+    const integrity = createSourceIntegrityContext();
+    await expectedRenderFingerprint(projectPath, 'preview', {integrity});
+    await writeFile(path.join(projectPath, 'input/clips/clip.mp4'), 'changed-input-bytes');
+
+    await expect(
+      runQc(projectPath, 'preview', new Date('2026-08-11T13:05:00.000Z'), {integrity}),
+    ).rejects.toThrow(/changed during media operation|stale or inconsistent/i);
+    await expect(readFile(path.join(projectPath, 'analysis/qc-preview.json'), 'utf8')).rejects.toThrow(
+      /ENOENT/,
+    );
   });
 
   it('keeps render fingerprints stable when unreferenced footage changes', async () => {

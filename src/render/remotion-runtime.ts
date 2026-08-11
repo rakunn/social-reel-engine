@@ -42,6 +42,9 @@ const compositorCandidates = (platform: NodeJS.Platform, arch: string): string[]
       `@remotion/compositor-linux-${arch}-musl`,
     ];
   }
+  if (platform === 'win32') {
+    return [`@remotion/compositor-win32-${arch}-msvc`];
+  }
   return [];
 };
 
@@ -79,7 +82,10 @@ const resolveRemotionRuntimes = async (
     try {
       const packageJson = resolvePackage(`${candidate}/package.json`);
       const compositorDirectory = path.dirname(packageJson);
-      const ffprobePath = path.join(compositorDirectory, 'ffprobe');
+      const ffprobePath = path.join(
+        compositorDirectory,
+        platform === 'win32' ? 'ffprobe.exe' : 'ffprobe',
+      );
       await access(ffprobePath);
       const workerEnvironment =
         platform === 'darwin'

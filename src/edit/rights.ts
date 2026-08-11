@@ -9,6 +9,7 @@ import {hashFile, hashValue} from '../core/hash';
 import {readJson, writeJson} from '../core/json';
 import {resolveInside} from '../core/paths';
 import {
+  assertVerifiedInputSnapshotUnchanged,
   createSourceIntegrityContext,
   readValidatedSourceManifest,
   type SourceIntegrityContext,
@@ -97,6 +98,7 @@ export const confirmRights = async (
     rightsConfirmed: true,
     rightsConfirmation,
   });
+  await assertVerifiedInputSnapshotUnchanged(projectPath, integrity);
   await writeJson(briefPath, next);
   return rightsConfirmation;
 };

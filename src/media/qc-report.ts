@@ -17,7 +17,11 @@ import {
   type OutputTarget,
 } from '../render/policy';
 import {readRenderArtifactFreshness} from '../render/artifacts';
-import {createSourceIntegrityContext, type SourceIntegrityContext} from './source-integrity';
+import {
+  assertVerifiedInputSnapshotUnchanged,
+  createSourceIntegrityContext,
+  type SourceIntegrityContext,
+} from './source-integrity';
 import {probeFile, runFfmpeg} from './ffmpeg';
 import {
   parseBlackFrames,
@@ -393,6 +397,7 @@ export const runQc = async (
   });
   const jsonPath = path.join(projectPath, `analysis/qc-${target}.json`);
   const markdownPath = path.join(projectPath, `analysis/qc-${target}.md`);
+  await assertVerifiedInputSnapshotUnchanged(projectPath, integrity);
   await writeJson(jsonPath, report);
   await writeFile(markdownPath, reportMarkdown(report, outputPath), 'utf8');
   return report;

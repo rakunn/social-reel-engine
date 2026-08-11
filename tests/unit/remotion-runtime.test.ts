@@ -135,4 +135,31 @@ describe('Remotion compositor runtime', () => {
     });
     expect(runProcess).toHaveBeenCalledTimes(2);
   });
+
+  it('resolves the bundled Windows compositor executable', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'reel-remotion-windows-runtime-'));
+    temporaryDirectories.push(root);
+    const compositor = path.join(root, 'node_modules/@remotion/compositor-win32-x64-msvc');
+    const packageJson = path.join(compositor, 'package.json');
+    const ffprobe = path.join(compositor, 'ffprobe.exe');
+    await mkdir(compositor, {recursive: true});
+    await Promise.all([
+      writeFile(packageJson, '{"name":"@remotion/compositor-win32-x64-msvc"}\n'),
+      writeFile(ffprobe, 'windows ffprobe fixture\n'),
+    ]);
+
+    const runtime = await resolveRemotionRuntime(root, {
+      platform: 'win32',
+      arch: 'x64',
+      environment: {PATH: 'C:\\Windows\\System32'},
+      resolvePackage: () => packageJson,
+    });
+
+    expect(runtime).toMatchObject({
+      compositorPackage: '@remotion/compositor-win32-x64-msvc',
+      compositorDirectory: compositor,
+      ffprobePath: ffprobe,
+      workerEnvironment: {PATH: 'C:\\Windows\\System32'},
+    });
+  });
 });
