@@ -265,6 +265,20 @@ const readReclaimClaim = async (claimPath: string): Promise<MediaOperationLock |
   }
 };
 
+const staleReclaimClaimIdentity = async (
+  claimPath: string,
+  claim: MediaOperationLock | null,
+): Promise<string | null> => {
+  if (claim?.id) return claim.id;
+  try {
+    const claimStat = await stat(claimPath);
+    return `uninitialized-${claimStat.dev}-${claimStat.ino}`;
+  } catch (error) {
+    if (missingFile(error)) return null;
+    throw error;
+  }
+};
+
 const reclaimClaimIsOwned = async (claimPath: string, claimId: string): Promise<boolean> => {
   const claim = await readReclaimClaim(claimPath);
   return (
@@ -274,31 +288,130 @@ const reclaimClaimIsOwned = async (claimPath: string, claimId: string): Promise<
   );
 };
 
-const reclaimClaimTombstonePath = (claimPath: string, claimId: string): string =>
+const reclaimClaimFencePath = (claimPath: string, claimId: string): string =>
   `${claimPath}.reclaimed-${claimId}`;
 
-const rotateStaleReclaimClaim = async (
-  claimPath: string,
-  claimId: string,
-): Promise<boolean> => {
-  const tombstonePath = reclaimClaimTombstonePath(claimPath, claimId);
+const reclaimClaimFenceOwnerPath = (fencePath: string): string =>
+  path.join(fencePath, 'owner.json');
+
+const reclaimClaimFenceSnapshotPath = (fencePath: string): string =>
+  path.join(fencePath, 'claim.json');
+
+const reclaimClaimFenceInitializationPath = (fencePath: string, ownerId: string): string =>
+  `${fencePath}.initializing-${ownerId}`;
+
+const reclaimClaimFenceRetirementPath = (fencePath: string, ownerId: string): string =>
+  `${fencePath}.retired-${ownerId}`;
+
+const readReclaimClaimFenceOwner = async (
+  fencePath: string,
+): Promise<MediaOperationLock | null> => {
   try {
-    await rename(claimPath, tombstonePath);
-  } catch (error) {
-    if (missingFile(error) || directoryExists(error)) return false;
-    throw error;
+    return await readJson(reclaimClaimFenceOwnerPath(fencePath), MediaOperationLockSchema);
+  } catch {
+    return null;
   }
-  try {
-    await rm(tombstonePath, {force: true});
-  } catch (error) {
-    if (!missingFile(error)) throw error;
-  }
-  return true;
 };
 
-const acquireReclaimClaim = async (
-  claimPath: string,
+const reclaimClaimFenceContainsSnapshot = async (fencePath: string): Promise<boolean> => {
+  try {
+    await stat(reclaimClaimFenceSnapshotPath(fencePath));
+    return true;
+  } catch (error) {
+    if (missingFile(error)) return false;
+    throw error;
+  }
+};
+
+const reclaimClaimFenceIsOwned = async (fencePath: string, ownerId: string): Promise<boolean> => {
+  const owner = await readReclaimClaimFenceOwner(fencePath);
+  return owner?.id === ownerId && owner.state === 'active' && isProcessIdentityAlive(owner);
+};
+
+const createReclaimClaimFence = async (
+  fencePath: string,
 ): Promise<ActiveMediaOperationLock | null> => {
+  const owner = createReclaimClaim();
+  const initializationPath = reclaimClaimFenceInitializationPath(fencePath, owner.id);
+  let initialized = false;
+  try {
+    try {
+      await mkdir(initializationPath);
+      initialized = true;
+      await writeFile(
+        reclaimClaimFenceOwnerPath(initializationPath),
+        `${JSON.stringify(MediaOperationLockSchema.parse(owner), null, 2)}\n`,
+        {encoding: 'utf8', flag: 'wx'},
+      );
+    } catch (error) {
+      if (directoryExists(error)) return null;
+      throw error;
+    }
+    try {
+      await rename(initializationPath, fencePath);
+      initialized = false;
+      return owner;
+    } catch (error) {
+      if (directoryExists(error) || nonEmptyDirectory(error)) return null;
+      throw error;
+    }
+  } finally {
+    if (initialized) {
+      try {
+        await rm(initializationPath, {recursive: true, force: true});
+      } catch (error) {
+        if (!missingFile(error)) throw error;
+      }
+    }
+  }
+};
+
+const retireStaleReclaimClaimFence = async (
+  fencePath: string,
+  owner: MediaOperationLock,
+): Promise<boolean> => {
+  if (!owner.id) return false;
+  const retirementPath = reclaimClaimFenceRetirementPath(fencePath, owner.id);
+  try {
+    await rename(fencePath, retirementPath);
+    // Keep the retired directory non-empty. A delayed contender that observed this
+    // owner must fail rather than move a successor fence into a reusable pathname.
+    return true;
+  } catch (error) {
+    if (missingFile(error) || directoryExists(error) || nonEmptyDirectory(error)) return false;
+    throw error;
+  }
+};
+
+const rotateStaleReclaimClaim = async (claimPath: string, claimId: string): Promise<boolean> => {
+  const fencePath = reclaimClaimFencePath(claimPath, claimId);
+  for (let attempt = 0; attempt <= LOCK_START_RETRY_LIMIT; attempt += 1) {
+    const owner = await createReclaimClaimFence(fencePath);
+    if (owner) {
+      if (!(await reclaimClaimFenceIsOwned(fencePath, owner.id))) return false;
+      try {
+        await rename(claimPath, reclaimClaimFenceSnapshotPath(fencePath));
+        return true;
+      } catch (error) {
+        if (missingFile(error) || directoryExists(error) || nonEmptyDirectory(error)) {
+          return false;
+        }
+        throw error;
+      }
+    }
+
+    if (await reclaimClaimFenceContainsSnapshot(fencePath)) return false;
+    const existingOwner = await readReclaimClaimFenceOwner(fencePath);
+    if (!existingOwner) return false;
+    if (existingOwner.state === 'active' && isProcessIdentityAlive(existingOwner)) {
+      return false;
+    }
+    if (!(await retireStaleReclaimClaimFence(fencePath, existingOwner))) return false;
+  }
+  return false;
+};
+
+const acquireReclaimClaim = async (claimPath: string): Promise<ActiveMediaOperationLock | null> => {
   for (let attempt = 0; attempt <= LOCK_START_RETRY_LIMIT; attempt += 1) {
     const candidate = createReclaimClaim();
     try {
@@ -314,12 +427,9 @@ const acquireReclaimClaim = async (
     }
     const existing = await readReclaimClaim(claimPath);
     if (existing?.state === 'active' && isProcessIdentityAlive(existing)) return null;
-    if (
-      !(await rotateStaleReclaimClaim(
-        claimPath,
-        existing?.id ?? randomUUID(),
-      ))
-    ) {
+    const identity = await staleReclaimClaimIdentity(claimPath, existing);
+    if (!identity) return null;
+    if (!(await rotateStaleReclaimClaim(claimPath, identity))) {
       return null;
     }
   }
@@ -647,7 +757,6 @@ const acquireMediaOperationLock = async (
 ): Promise<ActiveMediaOperationLock> => {
   const lockPath = operationLockPath(projectPath);
   await mkdir(path.dirname(lockPath), {recursive: true});
-  const acquisitionStartedAt = Date.now();
   let reclaimedOnFinalAttempt = false;
   for (
     let attempt = 0;
@@ -698,10 +807,7 @@ const acquireMediaOperationLock = async (
       await pause();
       continue;
     }
-    if (
-      !owner &&
-      Date.now() - acquisitionStartedAt < LOCK_INITIALIZATION_GRACE_MS
-    ) {
+    if (!owner && (await lockIsInitializing(lockPath))) {
       await pause();
       continue;
     }

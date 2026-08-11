@@ -1,4 +1,4 @@
-import {mkdir, mkdtemp, readFile, readdir, rm, writeFile} from 'node:fs/promises';
+import {mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {afterEach, describe, expect, it, vi} from 'vitest';
@@ -218,14 +218,12 @@ describe('media operation records', () => {
 
   it('retries lock acquisition after reclaiming an ownerless stale lock', async () => {
     const projectPath = await makeProject();
-    await mkdir(path.join(projectPath, 'analysis/operation.lock'), {recursive: true});
+    const lockPath = path.join(projectPath, 'analysis/operation.lock');
+    await mkdir(lockPath, {recursive: true});
+    const currentTime = Date.now();
+    await utimes(lockPath, new Date(currentTime - 5_000), new Date(currentTime - 5_000));
 
-    let nowCalls = 0;
-    const now = vi.spyOn(Date, 'now').mockImplementation(() => {
-      nowCalls += 1;
-      if (nowCalls === 1) return 0;
-      return nowCalls <= 101 ? 999 : 1_000;
-    });
+    const now = vi.spyOn(Date, 'now').mockReturnValue(currentTime);
     let recovered: MediaOperationRecord;
     try {
       recovered = await beginMediaOperation(projectPath, 'proxy', {
@@ -493,6 +491,15 @@ describe('media operation records', () => {
       phase: 'transcoding',
       progress: {completed: 3, total: 7, label: 'source-04'},
       error: 'ffmpeg exited with code 1',
+    });
+    await expect(getProjectStatus(projectPath)).resolves.toMatchObject({
+      stage: 'interrupted-media-job',
+      nextAction: expect.stringMatching(/ffmpeg exited with code 1.*run proxy again/i),
+      activity: {
+        command: 'proxy',
+        phase: 'transcoding',
+        error: 'ffmpeg exited with code 1',
+      },
     });
   });
 });

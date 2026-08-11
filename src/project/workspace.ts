@@ -111,7 +111,7 @@ export type ProjectStatus = {
   colorApproved: boolean;
   activity?: Pick<
     MediaOperationRecord,
-    'command' | 'phase' | 'progress' | 'startedAt' | 'updatedAt' | 'finishedAt'
+    'command' | 'phase' | 'progress' | 'startedAt' | 'updatedAt' | 'finishedAt' | 'error'
   >;
 };
 
@@ -122,6 +122,7 @@ const statusActivity = (record: MediaOperationRecord) => ({
   startedAt: record.startedAt,
   updatedAt: record.updatedAt,
   finishedAt: record.finishedAt,
+  error: record.error,
 });
 
 const statusFromOperation = (operation: MediaOperationRecord): ProjectStatus => {
@@ -131,6 +132,13 @@ const statusFromOperation = (operation: MediaOperationRecord): ProjectStatus => 
       ...base,
       stage: 'media-in-progress',
       nextAction: `${operation.command} is running (${operation.phase}). Wait for completion before starting another media command.`,
+    };
+  }
+  if (operation.state === 'failed' && operation.error) {
+    return {
+      ...base,
+      stage: 'interrupted-media-job',
+      nextAction: `${operation.command} failed during ${operation.phase}: ${operation.error}. Resolve the failure, then run ${operation.command} again.`,
     };
   }
   return {
@@ -146,6 +154,14 @@ const mediaOperationStartingStatus = (): ProjectStatus => ({
   colorApproved: false,
   stage: 'media-in-progress',
   nextAction: 'A media operation is starting. Wait for it to publish activity before requesting status again.',
+});
+
+const statusScanInProgressStatus = (): ProjectStatus => ({
+  inputs: 0,
+  editApproved: false,
+  colorApproved: false,
+  stage: 'media-in-progress',
+  nextAction: 'Project status is checking inputs. Wait for it to finish, then request status again.',
 });
 
 const getProjectStatusWithoutOperation = async (projectPath: string): Promise<ProjectStatus> => {
@@ -276,7 +292,7 @@ export const getProjectStatus = async (projectPath: string): Promise<ProjectStat
   if (locked.acquired) return locked.value;
 
   const operationAfterBusyLock = await readMediaOperation(projectPath);
-  return operationAfterBusyLock
-    ? statusFromOperation(operationAfterBusyLock)
-    : mediaOperationStartingStatus();
+  if (operationAfterBusyLock) return statusFromOperation(operationAfterBusyLock);
+  if (await isMediaOperationLockActive(projectPath)) return mediaOperationStartingStatus();
+  return statusScanInProgressStatus();
 };

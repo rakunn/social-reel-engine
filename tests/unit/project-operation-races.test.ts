@@ -14,6 +14,7 @@ type Gate = {
 const gates = vi.hoisted(() => ({
   owner: {armed: false, blocked: false, started: null, resume: null, wait: null} as Gate,
   reclaimClaim: {armed: false, blocked: false, started: null, resume: null, wait: null} as Gate,
+  reclaimFence: {armed: false, blocked: false, started: null, resume: null, wait: null} as Gate,
   reclaimRename: {armed: false, blocked: false, started: null, resume: null, wait: null} as Gate,
   statusOwner: {armed: false, blocked: false, started: null, resume: null, wait: null} as Gate,
   statusRenewal: {armed: false, blocked: false, started: null, resume: null, wait: null} as Gate,
@@ -36,6 +37,20 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   return {
     ...actual,
+    mkdir: async (...args: Parameters<typeof actual.mkdir>) => {
+      const [directoryPath] = args;
+      if (
+        gates.reclaimFence.armed &&
+        !gates.reclaimFence.blocked &&
+        String(directoryPath).includes('/analysis/operation.lock.reclaiming-') &&
+        String(directoryPath).includes('.reclaimed-')
+      ) {
+        gates.reclaimFence.blocked = true;
+        gates.reclaimFence.started?.();
+        await gates.reclaimFence.wait;
+      }
+      return await actual.mkdir(...args);
+    },
     writeFile: async (...args: Parameters<typeof actual.writeFile>) => {
       const [filePath] = args;
       if (
@@ -166,6 +181,7 @@ const resetGate = (gate: Gate): void => {
 afterEach(async () => {
   resetGate(gates.owner);
   resetGate(gates.reclaimClaim);
+  resetGate(gates.reclaimFence);
   resetGate(gates.reclaimRename);
   resetGate(gates.statusOwner);
   resetGate(gates.statusRenewal);
@@ -220,6 +236,62 @@ describe('media-operation publication races', () => {
     await completeMediaOperation(projectPath, successor.id!);
   });
 
+  it('fences a delayed stale reclaim-claim contender from a successor claim', async () => {
+    const projectPath = await makeProject();
+    const interrupted = await beginMediaOperation(projectPath, 'proxy', {
+      now: new Date(0),
+      pid: process.pid,
+      processStartMarker: null,
+      phase: 'interrupted-proxy',
+    });
+    const staleClaimId = 'stale-reclaim-claim';
+    const reclaimClaimPath = path.join(
+      projectPath,
+      'analysis',
+      `operation.lock.reclaiming-${interrupted.id}.json`,
+    );
+    await writeFile(
+      reclaimClaimPath,
+      `${JSON.stringify({
+        schemaVersion: '1.0.0',
+        id: staleClaimId,
+        state: 'active',
+        pid: process.pid,
+        processStartMarker: null,
+        leaseExpiresAt: new Date(0).toISOString(),
+        acquiredAt: new Date(0).toISOString(),
+        releasedAt: null,
+      })}\n`,
+    );
+
+    const fenceGate = armGate(gates.reclaimFence);
+    const delayed = beginMediaOperation(projectPath, 'proxy', {
+      pid: process.pid,
+      processStartMarker: null,
+      phase: 'starting-proxy',
+    });
+    void delayed.catch(() => undefined);
+    await fenceGate.started;
+
+    const successor = await beginMediaOperation(projectPath, 'render', {
+      pid: process.pid,
+      processStartMarker: null,
+      phase: 'starting-render',
+    });
+    fenceGate.resume();
+
+    await expect(delayed).rejects.toThrow(/already active/i);
+    await expect(readMediaOperation(projectPath)).resolves.toMatchObject({
+      id: successor.id,
+      command: 'render',
+      state: 'running',
+    });
+    await expect(
+      readFile(`${reclaimClaimPath}.reclaimed-${staleClaimId}/claim.json`, 'utf8'),
+    ).resolves.toContain(staleClaimId);
+    await completeMediaOperation(projectPath, successor.id!);
+  });
+
   it('reports an ownerless retry lock as starting while it publishes its owner', async () => {
     const projectPath = await makeProject();
     await beginMediaOperation(projectPath, 'proxy', {
@@ -246,6 +318,32 @@ describe('media-operation publication races', () => {
       const operation = await retry;
       await completeMediaOperation(projectPath, operation.id!);
     }
+  });
+
+  it('reports an overlapping status scan without calling it a media startup', async () => {
+    const projectPath = await makeProject();
+    let releaseScan!: () => void;
+    let markScanStarted!: () => void;
+    const scanStarted = new Promise<void>((resolve) => {
+      markScanStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseScan = resolve;
+    });
+    const scan = runWithStatusScanLock(projectPath, async () => {
+      markScanStarted();
+      await release;
+      return 'scanned';
+    });
+
+    await scanStarted;
+    await expect(getProjectStatus(projectPath)).resolves.toMatchObject({
+      stage: 'media-in-progress',
+      nextAction: expect.stringMatching(/status is checking inputs/i),
+    });
+
+    releaseScan();
+    await expect(scan).resolves.toEqual({acquired: true, value: 'scanned'});
   });
 
   it('reports a retry as starting instead of its stale predecessor', async () => {
