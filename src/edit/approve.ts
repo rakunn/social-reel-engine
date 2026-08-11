@@ -147,6 +147,7 @@ const currentReviewHashes = async (
   }
   const freshness = await readRenderArtifactFreshness(projectPath, 'preview', {
     expectedFingerprint: previewFingerprint,
+    integrity: options.integrity,
   });
   if (!freshness.fresh) {
     return {

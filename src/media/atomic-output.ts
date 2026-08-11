@@ -1,6 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {mkdir, readdir, rename, unlink} from 'node:fs/promises';
 import path from 'node:path';
+import {assertPublicationGuard} from '../core/publication-guard';
 
 const temporaryOutputPath = (outputPath: string): string => {
   const extension = path.extname(outputPath);
@@ -42,12 +43,14 @@ export const writeAtomically = async <T>(
   write: (temporaryPath: string) => Promise<T>,
   validate: (temporaryPath: string) => Promise<void> = async () => undefined,
 ): Promise<T> => {
+  await assertPublicationGuard();
   await mkdir(path.dirname(outputPath), {recursive: true});
   await removeOrphanedPartials(outputPath);
   const temporaryPath = temporaryOutputPath(outputPath);
   try {
     const result = await write(temporaryPath);
     await validate(temporaryPath);
+    await assertPublicationGuard();
     await rename(temporaryPath, outputPath);
     return result;
   } catch (error) {

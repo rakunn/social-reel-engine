@@ -38,9 +38,9 @@ const runTrackedMediaCommand = async <T>(
 ): Promise<T> => {
   const projectPath = project(reelName);
   await assertProjectScaffold(projectPath);
-  return await runMediaOperation(projectPath, command, async ({update}) => {
+  return await runMediaOperation(projectPath, command, async ({update, assertOwnership}) => {
     await update({phase});
-    return await operation({update});
+    return await operation({update, assertOwnership});
   });
 };
 

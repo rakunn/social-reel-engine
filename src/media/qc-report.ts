@@ -22,6 +22,7 @@ import {
   createSourceIntegrityContext,
   type SourceIntegrityContext,
 } from './source-integrity';
+import {writeAtomically} from './atomic-output';
 import {probeFile, runFfmpeg} from './ffmpeg';
 import {
   parseBlackFrames,
@@ -399,6 +400,8 @@ export const runQc = async (
   const markdownPath = path.join(projectPath, `analysis/qc-${target}.md`);
   await assertVerifiedInputSnapshotUnchanged(projectPath, integrity);
   await writeJson(jsonPath, report);
-  await writeFile(markdownPath, reportMarkdown(report, outputPath), 'utf8');
+  await writeAtomically(markdownPath, async (temporaryPath) => {
+    await writeFile(temporaryPath, reportMarkdown(report, outputPath), 'utf8');
+  });
   return report;
 };

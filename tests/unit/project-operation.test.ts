@@ -1,8 +1,10 @@
-import {mkdir, mkdtemp, readFile, rm} from 'node:fs/promises';
+import {mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {getProjectStatus} from '../../src/project/workspace';
+import {writeJson} from '../../src/core/json';
+import {writeAtomically} from '../../src/media/atomic-output';
 import {
   MEDIA_OPERATION_COMMANDS,
   beginMediaOperation,
@@ -178,6 +180,29 @@ describe('media operation records', () => {
     expect(isMediaOperationAlive(record)).toBe(false);
   });
 
+  it('records a time-zone independent process-start marker', async () => {
+    const projectPath = await makeProject();
+    const originalTimezone = process.env.TZ;
+    try {
+      process.env.TZ = 'UTC';
+      const utc = await beginMediaOperation(projectPath, 'proxy', {phase: 'transcoding'});
+      await completeMediaOperation(projectPath, utc.id!);
+
+      process.env.TZ = 'America/Los_Angeles';
+      const pacific = await beginMediaOperation(projectPath, 'proxy', {phase: 'transcoding'});
+
+      expect(utc.processStartMarker).not.toBeNull();
+      expect(pacific.processStartMarker).toBe(utc.processStartMarker);
+      await completeMediaOperation(projectPath, pacific.id!);
+    } finally {
+      if (originalTimezone === undefined) {
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = originalTimezone;
+      }
+    }
+  });
+
   it('treats an expired markerless operation as interrupted despite a live PID', () => {
     const record = {
       schemaVersion: '1.0.0',
@@ -271,6 +296,53 @@ describe('media operation records', () => {
       readFile(path.join(projectPath, 'analysis/operation.lock/owner.json'), 'utf8'),
     ).resolves.toContain(replacement.id!);
 
+    await completeMediaOperation(projectPath, replacement.id!);
+  });
+
+  it('prevents a fenced-off producer from publishing media or reports', async () => {
+    const projectPath = await makeProject();
+    const outputPath = path.join(projectPath, 'work/proxies/late.mp4');
+    const reportPath = path.join(projectPath, 'analysis/late-proxy.json');
+    let startProducer!: () => void;
+    let resumeProducer!: () => void;
+    const producerStarted = new Promise<void>((resolve) => {
+      startProducer = resolve;
+    });
+    const producerResumed = new Promise<void>((resolve) => {
+      resumeProducer = resolve;
+    });
+    const staleProducer = runMediaOperation(
+      projectPath,
+      'proxy',
+      async () => {
+        startProducer();
+        await producerResumed;
+        await Promise.all([
+          writeAtomically(outputPath, async (temporaryOutput) => {
+            await writeFile(temporaryOutput, 'late proxy');
+          }),
+          writeJson(reportPath, {published: 'late'}),
+        ]);
+      },
+      {
+        now: new Date('2000-01-01T00:00:00.000Z'),
+        pid: process.pid,
+        processStartMarker: null,
+        phase: 'transcoding',
+      },
+    );
+
+    await producerStarted;
+    const replacement = await beginMediaOperation(projectPath, 'render', {
+      pid: process.pid,
+      processStartMarker: null,
+      phase: 'rendering-master',
+    });
+    resumeProducer();
+
+    await expect(staleProducer).rejects.toThrow(/ownership.*lost/i);
+    await expect(readFile(outputPath, 'utf8')).rejects.toThrow(/ENOENT/);
+    await expect(readFile(reportPath, 'utf8')).rejects.toThrow(/ENOENT/);
     await completeMediaOperation(projectPath, replacement.id!);
   });
 

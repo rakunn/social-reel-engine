@@ -4,6 +4,7 @@ import {mkdir, rename, rmdir, stat, unlink} from 'node:fs/promises';
 import path from 'node:path';
 import {z} from 'zod';
 import {readJson, writeJson} from '../core/json';
+import {runWithPublicationGuard} from '../core/publication-guard';
 
 export const MEDIA_OPERATION_COMMANDS = [
   'analyze',
@@ -66,6 +67,7 @@ export type UpdateMediaOperationOptions = {
 
 export type MediaOperationContext = {
   update(options: UpdateMediaOperationOptions): Promise<MediaOperationRecord>;
+  assertOwnership(): Promise<void>;
 };
 
 const operationPath = (projectPath: string): string =>
@@ -125,6 +127,7 @@ const readProcessStartMarker = (pid: number): string | null => {
     const marker = execFileSync('ps', ['-p', String(pid), '-o', 'lstart='], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      env: {...process.env, LC_ALL: 'C', TZ: 'UTC'},
     }).trim();
     return marker.length > 0 ? marker : null;
   } catch {
@@ -158,6 +161,9 @@ const readMediaOperationLock = async (projectPath: string): Promise<MediaOperati
 
 const mediaOperationOwnershipLost = (): Error =>
   new Error('Cannot mutate a media operation after its ownership was lost');
+
+const asOperationError = (error: unknown): Error =>
+  error instanceof Error ? error : new Error(String(error));
 
 const releaseMediaOperationLock = async (
   projectPath: string,
@@ -425,10 +431,27 @@ export const runMediaOperation = async <T>(
     throw new Error('Cannot run a media operation without an immutable ownership ID');
   }
   const operationId = record.id;
+  let ownershipFailure: Error | null = null;
+  const assertOwnership = async (): Promise<void> => {
+    if (ownershipFailure) throw ownershipFailure;
+    try {
+      await assertMediaOperationOwnership(projectPath, operationId);
+    } catch (error) {
+      ownershipFailure = asOperationError(error);
+      throw ownershipFailure;
+    }
+  };
   let updateQueue: Promise<void> = Promise.resolve();
   const update = async (next: UpdateMediaOperationOptions): Promise<MediaOperationRecord> => {
     const pending = updateQueue.then(
-      async () => await updateMediaOperation(projectPath, operationId, next),
+      async () => {
+        try {
+          return await updateMediaOperation(projectPath, operationId, next);
+        } catch (error) {
+          ownershipFailure = asOperationError(error);
+          throw ownershipFailure;
+        }
+      },
     );
     updateQueue = pending.then(
       () => undefined,
@@ -448,9 +471,9 @@ export const runMediaOperation = async <T>(
     await updateQueue;
   };
   try {
-    const result = await operation({
-      update,
-    });
+    const result = await runWithPublicationGuard(assertOwnership, async () =>
+      await operation({update, assertOwnership}),
+    );
     await stopHeartbeat();
     await completeMediaOperation(projectPath, operationId);
     return result;
