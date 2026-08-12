@@ -1,6 +1,6 @@
 import type {Caption} from '@remotion/captions';
 import {loadFont} from '@remotion/fonts';
-import {Audio} from '@remotion/media';
+import {Audio, Video} from '@remotion/media';
 import {TransitionSeries, linearTiming} from '@remotion/transitions';
 import {fade} from '@remotion/transitions/fade';
 import {slide} from '@remotion/transitions/slide';
@@ -9,7 +9,6 @@ import type {TransitionPresentation} from '@remotion/transitions';
 import React from 'react';
 import {
   AbsoluteFill,
-  OffthreadVideo,
   Sequence,
   staticFile,
   useCurrentFrame,
@@ -65,16 +64,17 @@ const Shot: React.FC<{
   const crop = cropTransform(clip.crop, frame, durationInFrames);
   return (
     <AbsoluteFill style={{backgroundColor: '#050505', overflow: 'hidden'}}>
-      <OffthreadVideo
+      <Video
         src={staticFile(src)}
         trimBefore={trimBeforeFrames}
         playbackRate={clip.playbackRate}
         muted={clip.audio.muted}
         volume={dbToGain(clip.audio.gainDb)}
+        objectFit="cover"
+        disallowFallbackToOffthreadVideo
         style={{
           width: '100%',
           height: '100%',
-          objectFit: 'cover',
           ...crop,
         }}
       />

@@ -17,7 +17,7 @@ import {
   recordRenderArtifact,
 } from './artifacts';
 import {superviseRemotionRender} from './remotion-supervisor';
-import type {RemotionWorkerRequest} from './remotion-worker';
+import type {RemotionWorkerRequest} from './remotion-protocol';
 import {checkRemotionRuntime} from './remotion-runtime';
 import {
   createSourceIntegrityContext,
