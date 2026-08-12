@@ -61,7 +61,10 @@ const checkCommand = async (
   success: string,
 ): Promise<DoctorCheck> => {
   try {
-    const result = await runProcess(command, args, {allowFailure: true});
+    const result = await runProcess(command, args, {
+      allowFailure: true,
+      timeoutMs: 30_000,
+    });
     const output = `${result.stdout}\n${result.stderr}`;
     return result.exitCode === 0 && predicate(output)
       ? {id, status: 'pass', message: success}

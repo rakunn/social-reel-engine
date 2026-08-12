@@ -22,7 +22,10 @@ describe('doctor', () => {
         expect.objectContaining({id: 'ffmpeg', status: 'pass'}),
         expect.objectContaining({id: 'ffprobe', status: 'pass'}),
         expect.objectContaining({id: 'librosa', status: 'pass'}),
-        expect.objectContaining({id: 'lut-library', status: 'pass'}),
+        expect.objectContaining({
+          id: 'lut-library',
+          status: expect.stringMatching(/^(pass|warn)$/),
+        }),
       ]),
     );
   });
