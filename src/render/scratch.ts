@@ -1,4 +1,14 @@
-import {copyFile, link, mkdir, readdir, rm, rmdir, unlink} from 'node:fs/promises';
+import {
+  copyFile,
+  link,
+  lstat,
+  mkdir,
+  readdir,
+  realpath,
+  rm,
+  rmdir,
+  unlink,
+} from 'node:fs/promises';
 import path from 'node:path';
 import {hashFile} from '../core/hash';
 import {assertSafeReelName, resolveInside} from '../core/paths';
@@ -17,6 +27,79 @@ const hardLinkFallbackCodes = new Set([
 
 const jobsRootFor = (engineRoot: string): string =>
   path.resolve(engineRoot, 'public/jobs');
+
+const lstatIfPresent = async (
+  filePath: string,
+): Promise<Awaited<ReturnType<typeof lstat>> | null> => {
+  try {
+    return await lstat(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+};
+
+const verifiedJobsRoot = async (engineRoot: string): Promise<string> => {
+  const resolvedEngineRoot = path.resolve(engineRoot);
+  const realEngineRoot = await realpath(resolvedEngineRoot);
+  const publicRoot = path.join(resolvedEngineRoot, 'public');
+  await mkdir(publicRoot, {recursive: true});
+  const publicStats = await lstat(publicRoot);
+  const realPublicRoot = await realpath(publicRoot);
+  if (
+    publicStats.isSymbolicLink() ||
+    realPublicRoot !== path.join(realEngineRoot, 'public')
+  ) {
+    throw new Error(`Render scratch boundary uses a symlink outside the engine: ${publicRoot}`);
+  }
+  const jobsRoot = jobsRootFor(engineRoot);
+  await mkdir(jobsRoot, {recursive: true});
+  const jobsStats = await lstat(jobsRoot);
+  const realJobsRoot = await realpath(jobsRoot);
+  if (
+    jobsStats.isSymbolicLink() ||
+    realJobsRoot !== path.join(realPublicRoot, 'jobs')
+  ) {
+    throw new Error(`Render scratch boundary uses a symlink outside public/jobs: ${jobsRoot}`);
+  }
+  return realJobsRoot;
+};
+
+const verifiedReelRoot = async (
+  engineRoot: string,
+  reelRoot: string,
+): Promise<string | null> => {
+  const realJobsRoot = await verifiedJobsRoot(engineRoot);
+  const stats = await lstatIfPresent(reelRoot);
+  if (stats === null) return null;
+  if (!stats.isDirectory() || stats.isSymbolicLink()) {
+    throw new Error(`Render scratch reel boundary is not a real directory: ${reelRoot}`);
+  }
+  const realReelRoot = await realpath(reelRoot);
+  if (path.dirname(realReelRoot) !== realJobsRoot) {
+    throw new Error(`Render scratch reel boundary resolves outside public/jobs: ${reelRoot}`);
+  }
+  return realReelRoot;
+};
+
+const verifiedExistingStage = async (
+  engineRoot: string,
+  stageRoot: string,
+): Promise<boolean> => {
+  const validated = exactRenderStage(engineRoot, stageRoot);
+  const realReelRoot = await verifiedReelRoot(engineRoot, validated.reelRoot);
+  if (realReelRoot === null) return false;
+  const stats = await lstatIfPresent(validated.stageRoot);
+  if (stats === null) return false;
+  if (!stats.isDirectory() || stats.isSymbolicLink()) {
+    throw new Error(`Render stage is not a real directory: ${validated.stageRoot}`);
+  }
+  const realStageRoot = await realpath(validated.stageRoot);
+  if (path.dirname(realStageRoot) !== realReelRoot) {
+    throw new Error(`Render stage resolves outside its reel boundary: ${validated.stageRoot}`);
+  }
+  return true;
+};
 
 const assertRenderFingerprint = (fingerprint: string): string => {
   if (!renderFingerprintPattern.test(fingerprint)) {
@@ -66,6 +149,7 @@ export const removeRenderStage = async (
   stageRoot: string,
 ): Promise<void> => {
   const validated = exactRenderStage(engineRoot, stageRoot);
+  if (!(await verifiedExistingStage(engineRoot, validated.stageRoot))) return;
   await rm(validated.stageRoot, {recursive: true, force: true});
   try {
     await rmdir(validated.reelRoot);
@@ -87,6 +171,13 @@ export const pruneRenderStages = async (
     keepStageRoot === undefined ? null : exactRenderStage(engineRoot, keepStageRoot);
   if (keep !== null && keep.reelName !== safeReelName) {
     throw new Error(`Render stage ${keepStageRoot} does not belong to reel ${safeReelName}`);
+  }
+  if ((await verifiedReelRoot(engineRoot, reelRoot)) === null) return;
+  if (
+    keep !== null &&
+    (await lstatIfPresent(keep.stageRoot)) !== null
+  ) {
+    await verifiedExistingStage(engineRoot, keep.stageRoot);
   }
   let entries;
   try {
@@ -160,16 +251,18 @@ export const withDisposableRenderStage = async <T>(
   operation: () => Promise<T>,
 ): Promise<T> => {
   let result: T | undefined;
+  let operationFailed = false;
   let operationError: unknown;
   try {
     result = await operation();
   } catch (error) {
+    operationFailed = true;
     operationError = error;
   }
   try {
     await removeRenderStage(engineRoot, stageRoot);
   } catch (cleanupError) {
-    if (operationError !== undefined) {
+    if (operationFailed) {
       throw new AggregateError(
         [operationError, cleanupError],
         'Render failed and its disposable stage could not be removed',
@@ -177,7 +270,7 @@ export const withDisposableRenderStage = async <T>(
     }
     throw cleanupError;
   }
-  if (operationError !== undefined) throw operationError;
+  if (operationFailed) throw operationError;
   return result as T;
 };
 

@@ -56,6 +56,8 @@ const defaultCriticalDependencyRoots = (engineRoot: string): string[] => [
   path.join(engineRoot, '.venv/lib/python3.11/site-packages/numba'),
   path.join(engineRoot, '.venv/lib/python3.11/site-packages/scipy'),
   path.join(engineRoot, '.venv/lib/python3.11/site-packages/soundfile.py'),
+  path.join(engineRoot, 'library/luts'),
+  path.join(engineRoot, 'library/guides'),
 ];
 
 export const dependencyMaterializationCheck = async (
@@ -304,8 +306,15 @@ export const runDoctor = async (engineRoot: string): Promise<DoctorReport> => {
   } catch (error) {
     checks.push({id: 'remotion-versions', status: 'fail', message: (error as Error).message});
   }
-  checks.push(await storageCapacityCheck(engineRoot));
-  checks.push(await dependencyMaterializationCheck(engineRoot));
+  const storageCapacity = await storageCapacityCheck(engineRoot);
+  const dependencyMaterialization = await dependencyMaterializationCheck(engineRoot);
+  checks.push(storageCapacity, dependencyMaterialization);
+  if (
+    storageCapacity.status === 'fail' ||
+    dependencyMaterialization.status === 'fail'
+  ) {
+    return {ok: false, checks};
+  }
   const remotionRuntime = await checkRemotionRuntime(engineRoot);
   checks.push({
     id: 'remotion-runtime',

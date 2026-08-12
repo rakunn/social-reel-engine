@@ -5,6 +5,7 @@ import {
   readFile,
   rm,
   stat,
+  symlink,
   writeFile,
 } from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -73,6 +74,41 @@ describe('render scratch lifecycle', () => {
       /render stage|public\/jobs/i,
     );
     await expect(readFile(path.join(outside, 'sentinel'), 'utf8')).resolves.toBe('keep');
+  });
+
+  it('does not follow a symlinked reel directory during recursive cleanup', async () => {
+    const engineRoot = await makeDirectory();
+    const jobsRoot = path.join(engineRoot, 'public/jobs');
+    const outsideReel = path.join(engineRoot, 'outside/camp-reel');
+    const outsideStage = path.join(outsideReel, '7777777777777777');
+    const sentinel = path.join(outsideStage, 'sentinel');
+    await mkdir(jobsRoot, {recursive: true});
+    await mkdir(outsideStage, {recursive: true});
+    await writeFile(sentinel, 'keep');
+    await symlink(outsideReel, path.join(jobsRoot, 'camp-reel'), 'dir');
+
+    await expect(
+      removeRenderStage(
+        engineRoot,
+        path.join(jobsRoot, 'camp-reel/7777777777777777'),
+      ),
+    ).rejects.toThrow(/symlink|outside|boundary/i);
+    await expect(readFile(sentinel, 'utf8')).resolves.toBe('keep');
+  });
+
+  it('rejects a symlink at the current fingerprint before staging into it', async () => {
+    const engineRoot = await makeDirectory();
+    const jobsRoot = path.join(engineRoot, 'public/jobs');
+    const reelRoot = path.join(jobsRoot, 'camp-reel');
+    const outsideStage = path.join(engineRoot, 'outside/current-stage');
+    const keep = path.join(reelRoot, '8888888888888888');
+    await mkdir(reelRoot, {recursive: true});
+    await mkdir(outsideStage, {recursive: true});
+    await symlink(outsideStage, keep, 'dir');
+
+    await expect(pruneRenderStages(engineRoot, 'camp-reel', keep)).rejects.toThrow(
+      /symlink|real directory|boundary/i,
+    );
   });
 
   it('hard-links immutable staged media when source and stage share a filesystem', async () => {

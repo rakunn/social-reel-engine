@@ -4,6 +4,7 @@ import path from 'node:path';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   dependencyMaterializationCheck,
+  runDoctor,
   storageCapacityCheck,
 } from '../../src/commands/doctor';
 
@@ -95,5 +96,18 @@ describe('Doctor workspace preflight', () => {
     await expect(withAvailableGiB(100)).resolves.toEqual(
       expect.objectContaining({id: 'storage-capacity', status: 'pass'}),
     );
+  });
+
+  it('stops before runtime probes when workspace materialization fails', async () => {
+    const engineRoot = await makeDirectory();
+
+    const report = await runDoctor(engineRoot);
+
+    expect(report.ok).toBe(false);
+    expect(report.checks).toContainEqual(
+      expect.objectContaining({id: 'dependency-materialization', status: 'fail'}),
+    );
+    expect(report.checks.some((check) => check.id === 'remotion-runtime')).toBe(false);
+    expect(report.checks.some((check) => check.id === 'ffmpeg')).toBe(false);
   });
 });
