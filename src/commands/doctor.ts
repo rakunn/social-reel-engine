@@ -41,6 +41,11 @@ export type StorageCapacityCheckOptions = {
   statfs?: (target: string) => Promise<StorageStats>;
 };
 
+type DependencyMaterializationOutcome = {
+  check: DoctorCheck;
+  confirmedDataless: boolean;
+};
+
 export type RunDoctorOptions = {
   dependencyMaterialization?: DependencyMaterializationCheckOptions;
   storageCapacity?: StorageCapacityCheckOptions;
@@ -64,16 +69,19 @@ const defaultCriticalDependencyRoots = (engineRoot: string): string[] => [
   path.join(engineRoot, '.venv/lib/python3.11/site-packages/soundfile.py'),
 ];
 
-export const dependencyMaterializationCheck = async (
+const inspectDependencyMaterialization = async (
   engineRoot: string,
   options: DependencyMaterializationCheckOptions = {},
-): Promise<DoctorCheck> => {
+): Promise<DependencyMaterializationOutcome> => {
   const platform = options.platform ?? process.platform;
   if (platform !== 'darwin') {
     return {
-      id: 'dependency-materialization',
-      status: 'pass',
-      message: `macOS dataless dependency placeholders do not apply on ${platform}`,
+      check: {
+        id: 'dependency-materialization',
+        status: 'pass',
+        message: `macOS dataless dependency placeholders do not apply on ${platform}`,
+      },
+      confirmedDataless: false,
     };
   }
   const candidates = [...(options.criticalRoots ?? defaultCriticalDependencyRoots(engineRoot))];
@@ -88,9 +96,12 @@ export const dependencyMaterializationCheck = async (
   }
   if (roots.length === 0) {
     return {
-      id: 'dependency-materialization',
-      status: 'fail',
-      message: 'No critical Remotion or Python dependency roots are installed',
+      check: {
+        id: 'dependency-materialization',
+        status: 'fail',
+        message: 'No critical Remotion or Python dependency roots are installed',
+      },
+      confirmedDataless: false,
     };
   }
   try {
@@ -101,36 +112,54 @@ export const dependencyMaterializationCheck = async (
     );
     if (result.exitCode !== 0) {
       return {
-        id: 'dependency-materialization',
-        status: 'fail',
-        message: `Could not inspect dependency materialization: ${result.stderr.trim() || `find exited ${result.exitCode}`}`,
+        check: {
+          id: 'dependency-materialization',
+          status: 'fail',
+          message: `Could not inspect dependency materialization: ${result.stderr.trim() || `find exited ${result.exitCode}`}`,
+        },
+        confirmedDataless: false,
       };
     }
     const firstDatalessPath = result.stdout.trim().split('\n')[0];
     if (firstDatalessPath) {
       const relative = path.relative(engineRoot, firstDatalessPath).split(path.sep).join('/');
       return {
-        id: 'dependency-materialization',
-        status: 'fail',
-        message:
-          `Critical dependency ${relative || firstDatalessPath} is a macOS dataless/offloaded placeholder. ` +
-          'Materialize dependencies in a non-cloud-backed worktree before media work.',
+        check: {
+          id: 'dependency-materialization',
+          status: 'fail',
+          message:
+            `Critical dependency ${relative || firstDatalessPath} is a macOS dataless/offloaded placeholder. ` +
+            'Materialize dependencies in a non-cloud-backed worktree before media work.',
+        },
+        confirmedDataless: true,
       };
     }
     return {
-      id: 'dependency-materialization',
-      status: 'pass',
-      message: `${roots.length} critical Remotion/Python dependency roots are materialized`,
+      check: {
+        id: 'dependency-materialization',
+        status: 'pass',
+        message: `${roots.length} critical Remotion/Python dependency roots are materialized`,
+      },
+      confirmedDataless: false,
     };
   } catch (error) {
     if (findRenderInterruption(error)) throw error;
     return {
-      id: 'dependency-materialization',
-      status: 'fail',
-      message: `Could not inspect dependency materialization: ${(error as Error).message}`,
+      check: {
+        id: 'dependency-materialization',
+        status: 'fail',
+        message: `Could not inspect dependency materialization: ${(error as Error).message}`,
+      },
+      confirmedDataless: false,
     };
   }
 };
+
+export const dependencyMaterializationCheck = async (
+  engineRoot: string,
+  options: DependencyMaterializationCheckOptions = {},
+): Promise<DoctorCheck> =>
+  (await inspectDependencyMaterialization(engineRoot, options)).check;
 
 export const storageCapacityCheck = async (
   engineRoot: string,
@@ -316,12 +345,12 @@ export const runDoctor = async (
     checks.push({id: 'remotion-versions', status: 'fail', message: (error as Error).message});
   }
   const storageCapacity = await storageCapacityCheck(engineRoot, options.storageCapacity);
-  const dependencyMaterialization = await dependencyMaterializationCheck(
+  const dependencyMaterialization = await inspectDependencyMaterialization(
     engineRoot,
     options.dependencyMaterialization,
   );
-  checks.push(storageCapacity, dependencyMaterialization);
-  if (dependencyMaterialization.status === 'fail') {
+  checks.push(storageCapacity, dependencyMaterialization.check);
+  if (dependencyMaterialization.confirmedDataless) {
     return {ok: false, checks};
   }
   const remotionRuntime = await checkRemotionRuntime(engineRoot);

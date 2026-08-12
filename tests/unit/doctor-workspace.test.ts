@@ -166,11 +166,70 @@ describe('Doctor workspace preflight', () => {
     expect(report.checks).toContainEqual(expect.objectContaining({id: 'ffmpeg'}));
   });
 
-  it('stops before runtime probes when workspace materialization fails', async () => {
+  it('continues safe probes when critical dependency roots are not installed', async () => {
+    const report = await runDoctor(repositoryRoot, {
+      dependencyMaterialization: {platform: 'darwin', criticalRoots: []},
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.checks).toContainEqual(
+      expect.objectContaining({id: 'dependency-materialization', status: 'fail'}),
+    );
+    expect(report.checks).toContainEqual(expect.objectContaining({id: 'remotion-runtime'}));
+    expect(report.checks).toContainEqual(expect.objectContaining({id: 'ffmpeg'}));
+    expect(report.checks).toContainEqual(expect.objectContaining({id: 'ffprobe'}));
+    expect(report.checks).toContainEqual(expect.objectContaining({id: 'librosa'}));
+    expect(report.checks).toContainEqual(expect.objectContaining({id: 'lut-library'}));
+  });
+
+  it('continues safe probes when dependency materialization cannot be inspected', async () => {
+    const criticalRoot = await makeDirectory();
+    const report = await runDoctor(repositoryRoot, {
+      dependencyMaterialization: {
+        platform: 'darwin',
+        criticalRoots: [criticalRoot],
+        runProcess: async () => ({
+          command: '/usr/bin/find',
+          args: [],
+          stdout: '',
+          stderr: 'operation not permitted',
+          exitCode: 1,
+        }),
+      },
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.checks).toContainEqual(
+      expect.objectContaining({
+        id: 'dependency-materialization',
+        status: 'fail',
+        message: expect.stringMatching(/could not inspect/i),
+      }),
+    );
+    expect(report.checks).toContainEqual(expect.objectContaining({id: 'ffmpeg'}));
+    expect(report.checks).toContainEqual(expect.objectContaining({id: 'ffprobe'}));
+    expect(report.checks).toContainEqual(expect.objectContaining({id: 'librosa'}));
+    expect(report.checks).toContainEqual(expect.objectContaining({id: 'lut-library'}));
+  });
+
+  it('stops before runtime probes for a confirmed dataless dependency', async () => {
     const engineRoot = await makeDirectory();
+    const criticalRoot = path.join(engineRoot, 'node_modules/@remotion');
+    const dataless = path.join(criticalRoot, 'studio/dist/bundle.js');
+    await mkdir(criticalRoot, {recursive: true});
 
     const report = await runDoctor(engineRoot, {
-      dependencyMaterialization: {platform: 'darwin', criticalRoots: []},
+      dependencyMaterialization: {
+        platform: 'darwin',
+        criticalRoots: [criticalRoot],
+        runProcess: async () => ({
+          command: '/usr/bin/find',
+          args: [],
+          stdout: `${dataless}\n`,
+          stderr: '',
+          exitCode: 0,
+        }),
+      },
     });
 
     expect(report.ok).toBe(false);
