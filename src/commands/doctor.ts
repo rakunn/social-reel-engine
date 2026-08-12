@@ -62,8 +62,6 @@ const defaultCriticalDependencyRoots = (engineRoot: string): string[] => [
   path.join(engineRoot, '.venv/lib/python3.11/site-packages/numba'),
   path.join(engineRoot, '.venv/lib/python3.11/site-packages/scipy'),
   path.join(engineRoot, '.venv/lib/python3.11/site-packages/soundfile.py'),
-  path.join(engineRoot, 'library/luts'),
-  path.join(engineRoot, 'library/guides'),
 ];
 
 export const dependencyMaterializationCheck = async (

@@ -83,6 +83,34 @@ describe('Doctor workspace preflight', () => {
     );
   });
 
+  it('excludes optional LUT and guide roots from the critical materialization scan', async () => {
+    const engineRoot = await makeDirectory();
+    const runtimeRoot = path.join(engineRoot, 'node_modules/@remotion');
+    const lutRoot = path.join(engineRoot, 'library/luts');
+    const guideRoot = path.join(engineRoot, 'library/guides');
+    await Promise.all(
+      [runtimeRoot, lutRoot, guideRoot].map(async (root) => await mkdir(root, {recursive: true})),
+    );
+    const runProcess = vi.fn(async (_command: string, args: readonly string[]) => ({
+      command: '/usr/bin/find',
+      args: [...args],
+      stdout: args.includes(lutRoot) ? `${lutRoot}/optional.cube\n` : '',
+      stderr: '',
+      exitCode: 0,
+    }));
+
+    await expect(
+      dependencyMaterializationCheck(engineRoot, {platform: 'darwin', runProcess}),
+    ).resolves.toEqual(
+      expect.objectContaining({id: 'dependency-materialization', status: 'pass'}),
+    );
+    expect(runProcess).toHaveBeenCalledWith(
+      '/usr/bin/find',
+      expect.not.arrayContaining([lutRoot, guideRoot]),
+      expect.objectContaining({allowFailure: true}),
+    );
+  });
+
   it('propagates an interrupt nested in dependency-inspection cleanup failure', async () => {
     const engineRoot = await makeDirectory();
     const criticalRoot = path.join(engineRoot, 'node_modules/@remotion');
@@ -141,7 +169,9 @@ describe('Doctor workspace preflight', () => {
   it('stops before runtime probes when workspace materialization fails', async () => {
     const engineRoot = await makeDirectory();
 
-    const report = await runDoctor(engineRoot);
+    const report = await runDoctor(engineRoot, {
+      dependencyMaterialization: {platform: 'darwin', criticalRoots: []},
+    });
 
     expect(report.ok).toBe(false);
     expect(report.checks).toContainEqual(

@@ -653,6 +653,32 @@ describe('hash-bound approvals', () => {
     await expect(access(staleStage)).rejects.toThrow(/ENOENT/);
   });
 
+  it('rejects a copied edit identity before pruning another reel stage', async () => {
+    const {projectPath} = await makeFixture();
+    const editPath = path.join(projectPath, 'edits/edit.json');
+    const edit = JSON.parse(await readFile(editPath, 'utf8'));
+    await writeJson(editPath, {...edit, reelName: 'another-reel'});
+    const previewPath = path.join(projectPath, 'previews/preview.mp4');
+    await recordRenderArtifact(
+      projectPath,
+      'preview',
+      previewPath,
+      await expectedRenderFingerprint(projectPath, 'preview'),
+    );
+    const engineRoot = path.join(projectPath, 'engine');
+    const foreignStage = path.join(
+      engineRoot,
+      'public/jobs/another-reel/feedfacefeedface',
+    );
+    await mkdir(foreignStage, {recursive: true});
+    await writeFile(path.join(foreignStage, 'active-media.mp4'), 'another reel media');
+
+    await expect(renderPreview(projectPath, engineRoot)).rejects.toThrow(
+      /reel.*identity|does not match/i,
+    );
+    await expect(access(foreignStage)).resolves.toBeUndefined();
+  });
+
   it('does not publish a render artifact after a verified input changes mid-operation', async () => {
     const {projectPath} = await makeFixture();
     const integrity = createSourceIntegrityContext();

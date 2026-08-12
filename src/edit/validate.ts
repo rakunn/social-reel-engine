@@ -61,6 +61,11 @@ export const validateEdit = async (
   const brief = ReelBriefSchema.parse(await readJson(path.join(projectPath, 'brief.json')));
   const failures = validateTransitionDurations(edit);
   const warnings: string[] = [];
+  if (edit.reelName !== brief.identity.reelName) {
+    failures.push(
+      `Edit reel identity ${edit.reelName} does not match project brief identity ${brief.identity.reelName}`,
+    );
+  }
   const durationFrames = timelineDurationFrames(edit);
   if (!brief.options.music && edit.music) {
     failures.push('Music is disabled by the project brief');
