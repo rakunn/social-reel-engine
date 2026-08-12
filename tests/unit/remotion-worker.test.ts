@@ -12,6 +12,7 @@ import {DEFAULT_RENDER_SETTINGS} from '../../src/render/policy';
 const request: RemotionWorkerRequest = {
   schemaVersion: '1.0.0',
   engineRoot: '/engine',
+  publicDir: '/project/public',
   target: 'preview',
   rawOutput: '/project/work/render/preview-remotion.mp4',
   inputProps: {reelName: 'lifecycle-test'},
@@ -47,12 +48,15 @@ describe('Remotion worker lifecycle', () => {
     expect(settled).toBe(false);
     expect(bundle).toHaveBeenCalledWith({
       entryPoint: '/engine/src/remotion/index.ts',
-      publicDir: '/engine/public',
+      publicDir: request.publicDir,
       rootDir: '/engine',
       enableCaching: true,
       symlinkPublicDir: true,
     });
-    expect(openBrowser).toHaveBeenCalledWith('chrome', {logLevel: 'info'});
+    expect(openBrowser).toHaveBeenCalledWith('chrome', {
+      logLevel: 'info',
+      chromeMode: 'headless-shell',
+    });
     expect(selectComposition).toHaveBeenCalledWith({
       serveUrl: '/bundle',
       id: 'SocialReel',
@@ -144,7 +148,10 @@ describe('Remotion worker lifecycle', () => {
     expect(prepareBrowserLauncher).toHaveBeenCalledWith(browserLifecycle);
     expect(openBrowser).toHaveBeenCalledWith('chrome', {
       logLevel: 'info',
-      browserExecutable: browserLifecycle.launcherPath,
+      chromeMode: 'headless-shell',
+      ...(process.platform === 'darwin'
+        ? {}
+        : {browserExecutable: browserLifecycle.launcherPath}),
     });
   });
 

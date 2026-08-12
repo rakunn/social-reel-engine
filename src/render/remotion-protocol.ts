@@ -4,6 +4,7 @@ import {RenderSettingsSchema} from '../contracts/schemas';
 export const RemotionWorkerRequestSchema = z.object({
   schemaVersion: z.literal('1.0.0'),
   engineRoot: z.string().min(1),
+  publicDir: z.string().min(1),
   target: z.enum(['preview', 'master']),
   rawOutput: z.string().min(1),
   inputProps: z.record(z.string(), z.unknown()),

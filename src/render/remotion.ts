@@ -155,7 +155,7 @@ const renderTarget = async (
     phase: target === 'preview' ? 'preparing-proxies' : 'grading-selected-clips',
     progress: null,
   });
-  const {props} = await prepareRenderProps(projectPath, engineRoot, target, {
+  const {props, stageRoot} = await prepareRenderProps(projectPath, engineRoot, target, {
     integrity,
     onProgress: async (progress) =>
       await options.onActivity?.({
@@ -174,6 +174,7 @@ const renderTarget = async (
   const workerRequest: RemotionWorkerRequest = {
     schemaVersion: '1.0.0',
     engineRoot,
+    publicDir: stageRoot,
     target,
     rawOutput,
     inputProps: props as unknown as Record<string, unknown>,
