@@ -2,6 +2,7 @@ import {access} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import path from 'node:path';
 import {runProcess, type ProcessResult} from '../media/process';
+import {findRenderInterruption} from './errors';
 
 export type ResolvedRemotionRuntime = {
   compositorPackage: string;
@@ -143,6 +144,7 @@ export const checkRemotionRuntime = async (
           runtime,
         };
       } catch (error) {
+        if (findRenderInterruption(error)) throw error;
         failures.push(
           `${runtime.compositorPackage}: ${error instanceof Error ? error.message : String(error)}`,
         );
@@ -155,6 +157,7 @@ export const checkRemotionRuntime = async (
         'The render worker will use a compositor-local DYLD_LIBRARY_PATH; reinstall the matching Remotion compositor if this persists.',
     };
   } catch (error) {
+    if (findRenderInterruption(error)) throw error;
     return {
       ok: false,
       message: `Remotion compositor runtime is unavailable before render: ${error instanceof Error ? error.message : String(error)}`,

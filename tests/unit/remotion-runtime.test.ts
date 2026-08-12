@@ -2,6 +2,7 @@ import {mkdir, mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {afterEach, describe, expect, it, vi} from 'vitest';
+import {RenderInterruptedError} from '../../src/render/errors';
 import {
   checkRemotionRuntime,
   resolveRemotionRuntime,
@@ -89,6 +90,26 @@ describe('Remotion compositor runtime', () => {
         message: expect.stringMatching(/Remotion compositor ffprobe.*DYLD_LIBRARY_PATH/i),
       }),
     );
+  });
+
+  it('propagates an interrupt nested in compositor cleanup failure', async () => {
+    const fixture = await makeCompositorFixture();
+    const interruption = new RenderInterruptedError('SIGINT');
+    const aggregate = new AggregateError(
+      [new Error('ffprobe cleanup failed'), interruption],
+      'ffprobe interrupted during cleanup',
+    );
+
+    await expect(
+      checkRemotionRuntime(fixture.root, {
+        runtime: {
+          platform: 'darwin',
+          arch: 'arm64',
+          resolvePackage: () => fixture.packageJson,
+        },
+        runProcess: vi.fn().mockRejectedValue(aggregate),
+      }),
+    ).rejects.toBe(aggregate);
   });
 
   it('falls back to the runnable Linux musl compositor when GNU ffprobe fails', async () => {

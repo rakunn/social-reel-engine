@@ -8,6 +8,7 @@ import {
   runDoctor,
   storageCapacityCheck,
 } from '../../src/commands/doctor';
+import {RenderInterruptedError} from '../../src/render/errors';
 
 const temporaryDirectories: string[] = [];
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -80,6 +81,27 @@ describe('Doctor workspace preflight', () => {
     ).resolves.toEqual(
       expect.objectContaining({id: 'dependency-materialization', status: 'pass'}),
     );
+  });
+
+  it('propagates an interrupt nested in dependency-inspection cleanup failure', async () => {
+    const engineRoot = await makeDirectory();
+    const criticalRoot = path.join(engineRoot, 'node_modules/@remotion');
+    await mkdir(criticalRoot, {recursive: true});
+    const interruption = new RenderInterruptedError('SIGTERM');
+    const aggregate = new AggregateError(
+      [interruption, new Error('find cleanup failed')],
+      'dependency inspection interrupted during cleanup',
+    );
+
+    await expect(
+      dependencyMaterializationCheck(engineRoot, {
+        platform: 'darwin',
+        criticalRoots: [criticalRoot],
+        runProcess: async () => {
+          throw aggregate;
+        },
+      }),
+    ).rejects.toBe(aggregate);
   });
 
   it('classifies available render space into fail, warn, and pass bands', async () => {
