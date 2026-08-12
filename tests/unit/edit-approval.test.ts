@@ -1,4 +1,4 @@
-import {mkdir, mkdtemp, readFile, unlink, writeFile} from 'node:fs/promises';
+import {access, mkdir, mkdtemp, readFile, unlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {describe, expect, it} from 'vitest';
@@ -637,12 +637,20 @@ describe('hash-bound approvals', () => {
     expect(integrity.snapshot).toBe(snapshot);
   });
 
-  it('returns a fresh preview without requiring a Remotion runtime', async () => {
+  it('returns a fresh preview without requiring a Remotion runtime and prunes stale stages', async () => {
     const {projectPath} = await makeFixture();
+    const engineRoot = path.join(projectPath, 'missing-remotion-runtime');
+    const staleStage = path.join(
+      engineRoot,
+      'public/jobs/approval-test/deadbeefdeadbeef',
+    );
+    await mkdir(staleStage, {recursive: true});
+    await writeFile(path.join(staleStage, 'copied-media.mp4'), 'stale copied media');
 
     await expect(
-      renderPreview(projectPath, path.join(projectPath, 'missing-remotion-runtime')),
+      renderPreview(projectPath, engineRoot),
     ).resolves.toBe(path.join(projectPath, 'previews/preview.mp4'));
+    await expect(access(staleStage)).rejects.toThrow(/ENOENT/);
   });
 
   it('does not publish a render artifact after a verified input changes mid-operation', async () => {

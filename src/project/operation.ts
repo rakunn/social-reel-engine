@@ -1071,13 +1071,24 @@ export const runMediaOperation = async <T>(
     await completeMediaOperation(projectPath, operationId);
     return result;
   } catch (error) {
-    await stopHeartbeat();
+    const finalizationFailures: unknown[] = [];
+    try {
+      await stopHeartbeat();
+    } catch (failure) {
+      finalizationFailures.push(failure);
+    }
     try {
       await failMediaOperation(projectPath, operationId, error);
     } catch (failure) {
       if (!(failure instanceof Error) || !/ownership.*lost/i.test(failure.message)) {
-        throw failure;
+        finalizationFailures.push(failure);
       }
+    }
+    if (finalizationFailures.length > 0) {
+      throw new AggregateError(
+        [error, ...finalizationFailures],
+        'Media operation failed and its failure state could not be finalized',
+      );
     }
     throw error;
   }

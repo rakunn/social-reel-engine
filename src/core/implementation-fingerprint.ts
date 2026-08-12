@@ -29,6 +29,7 @@ const fingerprintImplementationPath = 'src/core/implementation-fingerprint.ts';
 const rendererEntrypoints = [
   'src/remotion/index.ts',
   'src/render/remotion-worker.ts',
+  'src/render/remotion-runtime.ts',
 ] as const;
 const renderShallowFiles = ['src/render/remotion.ts', 'remotion.config.ts'] as const;
 

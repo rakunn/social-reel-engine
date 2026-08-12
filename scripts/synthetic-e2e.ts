@@ -16,12 +16,12 @@ import {renderMasterAndDelivery, renderPreview} from '../src/render/remotion';
 
 const IDENTITY_CUBE = `TITLE "Synthetic Identity"\nLUT_3D_SIZE 2\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 1 1 1\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n`;
 
-export const prepareSyntheticReel = async (
+const prepareSyntheticReelAtRoot = async (
   engineRoot: string,
+  temporaryRoot: string,
   options: {silent?: boolean} = {},
 ) => {
   const reelName = options.silent ? 'synthetic-silent-acceptance' : 'synthetic-acceptance';
-  const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'social-reel-e2e-'));
   const projectPath = await createReelProject({
     engineRoot,
     projectsRoot: path.join(temporaryRoot, 'projects'),
@@ -217,12 +217,51 @@ export const prepareSyntheticReel = async (
   };
 };
 
+const withSyntheticTemporaryRoot = async <T>(
+  cleanupAfterSuccess: boolean,
+  operation: (temporaryRoot: string) => Promise<T>,
+): Promise<T> => {
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'social-reel-e2e-'));
+  let result: T | undefined;
+  let operationFailed = false;
+  let operationError: unknown;
+  try {
+    result = await operation(temporaryRoot);
+  } catch (error) {
+    operationFailed = true;
+    operationError = error;
+  }
+  if (operationFailed || cleanupAfterSuccess) {
+    try {
+      await rm(temporaryRoot, {recursive: true, force: true});
+    } catch (cleanupError) {
+      if (operationFailed) {
+        throw new AggregateError(
+          [operationError, cleanupError],
+          'Synthetic E2E failed and its temporary fixture could not be removed',
+        );
+      }
+      throw cleanupError;
+    }
+  }
+  if (operationFailed) throw operationError;
+  return result as T;
+};
+
+export const prepareSyntheticReel = async (
+  engineRoot: string,
+  options: {silent?: boolean} = {},
+) =>
+  await withSyntheticTemporaryRoot(false, async (temporaryRoot) =>
+    await prepareSyntheticReelAtRoot(engineRoot, temporaryRoot, options),
+  );
+
 export const runSyntheticE2e = async (
   engineRoot: string,
   options: {silent?: boolean; cleanup?: boolean} = {},
-) => {
-  const prepared = await prepareSyntheticReel(engineRoot, options);
-  try {
+) =>
+  await withSyntheticTemporaryRoot(options.cleanup === true, async (temporaryRoot) => {
+    const prepared = await prepareSyntheticReelAtRoot(engineRoot, temporaryRoot, options);
     const {projectPath, originalFiles, originalHashes} = prepared;
 
     const preview = await renderPreview(projectPath, engineRoot);
@@ -262,12 +301,7 @@ export const runSyntheticE2e = async (
       throw new Error(`Synthetic acceptance failed: ${JSON.stringify(result, null, 2)}`);
     }
     return result;
-  } finally {
-    if (options.cleanup) {
-      await rm(prepared.temporaryRoot, {recursive: true, force: true});
-    }
-  }
-};
+  });
 
 const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : '';
 if (import.meta.url === invokedPath) {
