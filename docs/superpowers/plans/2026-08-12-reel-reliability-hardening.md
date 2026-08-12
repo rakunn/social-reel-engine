@@ -188,7 +188,7 @@ Expected: dependency materialization passes, low-but-usable storage warns, and m
 
 Require sequential render/master-QC/delivery-QC execution, surface the new workspace preflights, and rely on exact tracked retries instead of command-name process killing.
 
-- [ ] **Step 5: Commit Task 4**
+- [x] **Step 5: Commit Task 4**
 
 Commit: `fix(doctor): detect unsafe reel workspace state`
 
@@ -196,23 +196,23 @@ Commit: `fix(doctor): detect unsafe reel workspace state`
 
 ### Task 5: Repository Verification and Review
 
-- [ ] **Step 1: Run type checking**
+- [x] **Step 1: Run type checking**
 
 Run: `npm run typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 2: Run the complete unit/integration suite**
+- [x] **Step 2: Run the complete unit/integration suite**
 
 Run: `npm test`
 
 Expected: all engine tests pass; ignored local LUT assets remain a Doctor warning rather than an environment-dependent test failure.
 
-- [ ] **Step 3: Run representative synthetic validation**
+- [x] **Step 3: Run representative synthetic validation**
 
 Run the smallest repository-provided synthetic render/QC command that exercises proxy, grade, render, and cleanup without requiring user media. Compare process inventory before and after.
 
-- [ ] **Step 4: Review the complete branch diff**
+- [x] **Step 4: Review the complete branch diff**
 
 Check deletion boundaries, cache dependency coverage, error preservation, compatibility, and repository cleanliness. Fix any material issue and rerun affected verification.
 
