@@ -13,7 +13,7 @@ export class RenderInterruptedError extends Error {
   }
 }
 
-const findRenderInterruption = (
+export const findRenderInterruption = (
   error: unknown,
   seen = new Set<unknown>(),
 ): RenderInterruptedError | null => {

@@ -34,6 +34,7 @@ import {
   recordRenderArtifact,
 } from '../../src/render/artifacts';
 import {getProjectStatus} from '../../src/project/workspace';
+import {RenderInterruptedError} from '../../src/render/errors';
 import {renderPreview} from '../../src/render/remotion';
 
 const makeFixture = async () => {
@@ -720,6 +721,23 @@ describe('hash-bound approvals', () => {
     await expect(readFile(path.join(projectPath, 'analysis/qc-preview.json'), 'utf8')).rejects.toThrow(
       /ENOENT/,
     );
+  });
+
+  it('propagates an interrupt nested in QC media-probe cleanup failure', async () => {
+    const {projectPath} = await makeFixture();
+    const interruption = new RenderInterruptedError('SIGHUP');
+    const aggregate = new AggregateError(
+      [new Error('probe cleanup failed'), interruption],
+      'QC probe interrupted during cleanup',
+    );
+
+    await expect(
+      runQc(projectPath, 'preview', new Date('2026-08-11T13:05:00.000Z'), {
+        probeFile: async () => {
+          throw aggregate;
+        },
+      }),
+    ).rejects.toBe(aggregate);
   });
 
   it('keeps render fingerprints stable when unreferenced footage changes', async () => {

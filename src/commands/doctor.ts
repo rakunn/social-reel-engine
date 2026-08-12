@@ -10,6 +10,7 @@ import {
 } from '../media/process';
 import {LutDefinitionSchema} from '../contracts/schemas';
 import {checkRemotionRuntime} from '../render/remotion-runtime';
+import {findRenderInterruption} from '../render/errors';
 
 export type DoctorCheck = {
   id: string;
@@ -124,6 +125,7 @@ export const dependencyMaterializationCheck = async (
       message: `${roots.length} critical Remotion/Python dependency roots are materialized`,
     };
   } catch (error) {
+    if (findRenderInterruption(error)) throw error;
     return {
       id: 'dependency-materialization',
       status: 'fail',
@@ -224,6 +226,7 @@ const checkCommand = async (
       ? {id, status: 'pass', message: success}
       : {id, status: 'fail', message: `${command} is present but lacks required capability`};
   } catch (error) {
+    if (findRenderInterruption(error)) throw error;
     return {id, status: 'fail', message: `${command} is unavailable: ${(error as Error).message}`};
   }
 };

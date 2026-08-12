@@ -141,4 +141,36 @@ describe('preview stabilization fallback', () => {
 
     await expect(prepareFixtureClip(fixture)).rejects.toBe(interruption);
   });
+
+  it('propagates an interrupt nested in a detection cleanup failure', async () => {
+    const fixture = await makeStabilizationFixture();
+    const interruption = new RenderInterruptedError('SIGINT');
+    const aggregate = new AggregateError(
+      [interruption, new Error('temporary transform cleanup failed')],
+      'detection and cleanup failed',
+    );
+    runFfmpeg.mockRejectedValueOnce(aggregate);
+
+    await expect(prepareFixtureClip(fixture)).rejects.toBe(aggregate);
+  });
+
+  it('propagates an interrupt nested in a transformation cleanup failure', async () => {
+    const fixture = await makeStabilizationFixture();
+    const interruption = new RenderInterruptedError('SIGTERM');
+    const aggregate = new AggregateError(
+      [new Error('temporary output cleanup failed'), interruption],
+      'transformation and cleanup failed',
+    );
+    runFfmpeg
+      .mockImplementationOnce(async (args: readonly string[]) => {
+        const filter = args[args.indexOf('-vf') + 1];
+        const transformsPath = filter.match(/result=(.+)$/)?.[1];
+        if (!transformsPath) throw new Error('test could not locate transform path');
+        await writeFile(transformsPath, 'detected-transforms');
+        return processResult(0);
+      })
+      .mockRejectedValueOnce(aggregate);
+
+    await expect(prepareFixtureClip(fixture)).rejects.toBe(aggregate);
+  });
 });

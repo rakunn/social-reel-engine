@@ -34,12 +34,19 @@ import {
   type DetectedSection,
 } from './qc';
 import {writeFile} from 'node:fs/promises';
+import {findRenderInterruption} from '../render/errors';
 
 type ApprovalStatus = {editApproved: boolean; colorApproved: boolean};
 type Loudness = {
   integratedLufs: number;
   truePeakDbtp: number;
   loudnessRangeLu: number;
+};
+
+export type RunQcOptions = {
+  integrity?: SourceIntegrityContext;
+  probeFile?: typeof probeFile;
+  runFfmpeg?: typeof runFfmpeg;
 };
 
 export type QcEvaluationInput = {
@@ -304,9 +311,11 @@ export const runQc = async (
   projectPath: string,
   target: OutputTarget = 'delivery',
   now = new Date(),
-  options: {integrity?: SourceIntegrityContext} = {},
+  options: RunQcOptions = {},
 ): Promise<QcReport> => {
   const integrity = options.integrity ?? createSourceIntegrityContext();
+  const probeMedia = options.probeFile ?? probeFile;
+  const runMediaFfmpeg = options.runFfmpeg ?? runFfmpeg;
   const outputPath = outputFor(projectPath, target);
   const renderSettings = await readRenderSettings(projectPath);
   const edit = EditManifestSchema.parse(
@@ -341,25 +350,25 @@ export const runQc = async (
     renderFresh = false;
   }
   try {
-    observed = summarizeProbe(await probeFile(outputPath));
+    observed = summarizeProbe(await probeMedia(outputPath));
     if (target === 'preview' || target === 'delivery') {
       observed.fastStart = await inspectMp4FastStart(outputPath);
     }
     readable = true;
-    const black = await runFfmpeg(
+    const black = await runMediaFfmpeg(
       ['-i', outputPath, '-vf', 'blackdetect=d=0.5:pix_th=0.10', '-an', '-f', 'null', '-'],
       {allowFailure: true},
     );
     blackDetectionSucceeded = black.exitCode === 0;
     blackFrames = blackDetectionSucceeded ? parseBlackFrames(black.stderr) : [];
-    const freeze = await runFfmpeg(
+    const freeze = await runMediaFfmpeg(
       ['-i', outputPath, '-vf', 'freezedetect=n=-60dB:d=2', '-an', '-f', 'null', '-'],
       {allowFailure: true},
     );
     freezeDetectionSucceeded = freeze.exitCode === 0;
     freezeSections = freezeDetectionSucceeded ? parseFreezeSections(freeze.stderr) : [];
     if (observed.audioCodec) {
-      const measured = await runFfmpeg(
+      const measured = await runMediaFfmpeg(
         [
           '-i',
           outputPath,
@@ -375,7 +384,8 @@ export const runQc = async (
       loudness = parseLoudness(measured.stderr);
       observedSilent = isSilentLoudness(measured.stderr);
     }
-  } catch {
+  } catch (error) {
+    if (findRenderInterruption(error)) throw error;
     readable = false;
   }
   const report = evaluateQc({

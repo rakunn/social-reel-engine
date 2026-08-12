@@ -11,7 +11,7 @@ import {stabilizationOutcome, validateStabilizedCrop} from './stabilize';
 import {escapeFfmpegFilterValue} from './filter-escape';
 import {REC709_OUTPUT_METADATA_ARGS} from './color-ffmpeg';
 import {writeAtomically} from './atomic-output';
-import {RenderInterruptedError} from '../render/errors';
+import {findRenderInterruption} from '../render/errors';
 
 export type PreviewStabilizationItem = {
   clipId: string;
@@ -151,7 +151,7 @@ export const preparePreviewStabilizedClip = async (
     );
     detectionSucceeded = true;
   } catch (error) {
-    if (error instanceof RenderInterruptedError) throw error;
+    if (findRenderInterruption(error)) throw error;
     detectionSucceeded = false;
   }
   const outcome = stabilizationOutcome(detectionSucceeded, clip.stabilization.fallbackToUnstabilized);
@@ -214,7 +214,7 @@ export const preparePreviewStabilizedClip = async (
     );
     transformationSucceeded = true;
   } catch (error) {
-    if (error instanceof RenderInterruptedError) throw error;
+    if (findRenderInterruption(error)) throw error;
     transformationSucceeded = false;
   }
   const transformationOutcome = stabilizationOutcome(
