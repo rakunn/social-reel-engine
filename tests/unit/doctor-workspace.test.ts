@@ -1,6 +1,7 @@
 import {mkdir, mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   dependencyMaterializationCheck,
@@ -9,6 +10,7 @@ import {
 } from '../../src/commands/doctor';
 
 const temporaryDirectories: string[] = [];
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 const makeDirectory = async (): Promise<string> => {
   const directory = await mkdtemp(path.join(tmpdir(), 'reel-doctor-workspace-'));
@@ -96,6 +98,22 @@ describe('Doctor workspace preflight', () => {
     await expect(withAvailableGiB(100)).resolves.toEqual(
       expect.objectContaining({id: 'storage-capacity', status: 'pass'}),
     );
+  });
+
+  it('continues runtime and tool probes after recording a storage failure', async () => {
+    const report = await runDoctor(repositoryRoot, {
+      storageCapacity: {
+        statfs: async () => ({bsize: 1024, bavail: 5 * 1024 * 1024}),
+      },
+      dependencyMaterialization: {platform: 'linux'},
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.checks).toContainEqual(
+      expect.objectContaining({id: 'storage-capacity', status: 'fail'}),
+    );
+    expect(report.checks).toContainEqual(expect.objectContaining({id: 'remotion-runtime'}));
+    expect(report.checks).toContainEqual(expect.objectContaining({id: 'ffmpeg'}));
   });
 
   it('stops before runtime probes when workspace materialization fails', async () => {

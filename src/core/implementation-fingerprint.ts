@@ -198,23 +198,109 @@ type PackageManifest = {
   optionalDependencies?: Record<string, string>;
 };
 
+type PackageLockEntry = {
+  dependencies?: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  [key: string]: unknown;
+};
+
+type PackageLock = {
+  lockfileVersion?: number;
+  packages?: Record<string, PackageLockEntry>;
+};
+
+const resolveLockedPackagePath = (
+  entries: Record<string, PackageLockEntry>,
+  requesterPath: string,
+  packageName: string,
+): string | null => {
+  let packageRoot = requesterPath;
+  while (true) {
+    const candidate = packageRoot
+      ? `${packageRoot}/node_modules/${packageName}`
+      : `node_modules/${packageName}`;
+    if (entries[candidate] !== undefined) return candidate;
+    const parentMarker = packageRoot.lastIndexOf('/node_modules/');
+    if (parentMarker >= 0) {
+      packageRoot = packageRoot.slice(0, parentMarker);
+      continue;
+    }
+    if (packageRoot === '') return null;
+    packageRoot = '';
+  }
+};
+
+const resolvedPackageClosure = (
+  packageNames: Set<string>,
+  packageLock: PackageLock,
+): {
+  lockfileVersion: number | null;
+  roots: Array<{name: string; path: string | null}>;
+  entries: Array<{path: string; package: PackageLockEntry}>;
+} => {
+  const entries = packageLock.packages ?? {};
+  const roots = [...packageNames]
+    .sort((left, right) => left.localeCompare(right))
+    .map((name) => ({
+      name,
+      path: resolveLockedPackagePath(entries, '', name),
+    }));
+  const pending = roots.flatMap(({path: packagePath}) =>
+    packagePath === null ? [] : [packagePath],
+  );
+  const visited = new Set<string>();
+
+  while (pending.length > 0) {
+    const packagePath = pending.pop()!;
+    if (visited.has(packagePath)) continue;
+    const entry = entries[packagePath];
+    if (entry === undefined) continue;
+    visited.add(packagePath);
+    const dependencies = new Set([
+      ...Object.keys(entry.dependencies ?? {}),
+      ...Object.keys(entry.optionalDependencies ?? {}),
+      ...Object.keys(entry.peerDependencies ?? {}),
+    ]);
+    for (const dependencyName of dependencies) {
+      const dependencyPath = resolveLockedPackagePath(entries, packagePath, dependencyName);
+      if (dependencyPath !== null && !visited.has(dependencyPath)) {
+        pending.push(dependencyPath);
+      }
+    }
+  }
+
+  return {
+    lockfileVersion: packageLock.lockfileVersion ?? null,
+    roots,
+    entries: [...visited]
+      .sort((left, right) => left.localeCompare(right))
+      .map((packagePath) => ({
+        path: packagePath,
+        package: entries[packagePath],
+      })),
+  };
+};
+
 const uncachedImplementationFingerprint = async (
   scope: ImplementationFingerprintScope,
   engineRoot: string,
 ): Promise<string> => {
   const definition = scopeDefinitions[scope];
-  const [{files, packages}, packageManifestRaw] = await Promise.all([
+  const [{files, packages}, packageManifestRaw, packageLockRaw] = await Promise.all([
     collectScopeFiles(engineRoot, definition),
     readFile(path.join(engineRoot, 'package.json'), 'utf8'),
+    readFile(path.join(engineRoot, 'package-lock.json'), 'utf8'),
   ]);
   const packageManifest = JSON.parse(packageManifestRaw) as PackageManifest;
+  const packageLock = JSON.parse(packageLockRaw) as PackageLock;
   const declaredPackages = {
     ...packageManifest.devDependencies,
     ...packageManifest.optionalDependencies,
     ...packageManifest.dependencies,
   };
   return hashValue({
-    contractVersion: '1.0.0',
+    contractVersion: '1.1.0',
     scope,
     node: packageManifest.engines?.node ?? null,
     packages: Object.fromEntries(
@@ -222,6 +308,7 @@ const uncachedImplementationFingerprint = async (
         .sort((left, right) => left.localeCompare(right))
         .map((packageName) => [packageName, declaredPackages[packageName] ?? 'transitive']),
     ),
+    resolvedPackages: resolvedPackageClosure(packages, packageLock),
     files: [...files]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([file, content]) => ({file, checksumSha256: hashValue(content)})),

@@ -40,6 +40,11 @@ export type StorageCapacityCheckOptions = {
   statfs?: (target: string) => Promise<StorageStats>;
 };
 
+export type RunDoctorOptions = {
+  dependencyMaterialization?: DependencyMaterializationCheckOptions;
+  storageCapacity?: StorageCapacityCheckOptions;
+};
+
 const GIBIBYTE = 1024 ** 3;
 const MINIMUM_RENDER_SPACE_GIB = 8;
 const RECOMMENDED_RENDER_SPACE_GIB = 40;
@@ -271,7 +276,10 @@ const libraryCheck = async (engineRoot: string): Promise<DoctorCheck> => {
   }
 };
 
-export const runDoctor = async (engineRoot: string): Promise<DoctorReport> => {
+export const runDoctor = async (
+  engineRoot: string,
+  options: RunDoctorOptions = {},
+): Promise<DoctorReport> => {
   const checks: DoctorCheck[] = [];
   checks.push(
     process.version === 'v24.12.0'
@@ -306,13 +314,13 @@ export const runDoctor = async (engineRoot: string): Promise<DoctorReport> => {
   } catch (error) {
     checks.push({id: 'remotion-versions', status: 'fail', message: (error as Error).message});
   }
-  const storageCapacity = await storageCapacityCheck(engineRoot);
-  const dependencyMaterialization = await dependencyMaterializationCheck(engineRoot);
+  const storageCapacity = await storageCapacityCheck(engineRoot, options.storageCapacity);
+  const dependencyMaterialization = await dependencyMaterializationCheck(
+    engineRoot,
+    options.dependencyMaterialization,
+  );
   checks.push(storageCapacity, dependencyMaterialization);
-  if (
-    storageCapacity.status === 'fail' ||
-    dependencyMaterialization.status === 'fail'
-  ) {
+  if (dependencyMaterialization.status === 'fail') {
     return {ok: false, checks};
   }
   const remotionRuntime = await checkRemotionRuntime(engineRoot);

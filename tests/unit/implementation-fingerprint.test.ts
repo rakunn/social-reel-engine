@@ -1,4 +1,4 @@
-import {mkdir, mkdtemp, rm, writeFile} from 'node:fs/promises';
+import {mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
@@ -26,6 +26,31 @@ const makeEngineFixture = async (): Promise<string> => {
     'package.json': JSON.stringify({
       dependencies: {'@remotion/renderer': '4.0.507'},
       devDependencies: {typescript: '5.9.3'},
+    }),
+    'package-lock.json': JSON.stringify({
+      name: 'fingerprint-fixture',
+      version: '1.0.0',
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        '': {
+          dependencies: {'@remotion/renderer': '4.0.507'},
+          devDependencies: {typescript: '5.9.3'},
+        },
+        'node_modules/@remotion/renderer': {
+          version: '4.0.507',
+          integrity: 'sha512-renderer-v1',
+          dependencies: {'render-runtime-child': '1.0.0'},
+        },
+        'node_modules/render-runtime-child': {
+          version: '1.0.0',
+          integrity: 'sha512-child-v1',
+        },
+        'node_modules/unrelated-package': {
+          version: '1.0.0',
+          integrity: 'sha512-unrelated-v1',
+        },
+      },
     }),
     'remotion.config.ts': "export const config = 'remotion-config-v1';\n",
     'src/cli.ts': "export const cli = 'v1';\n",
@@ -145,5 +170,35 @@ describe('stage-scoped implementation fingerprints', () => {
     expect(afterRenderer.delivery).not.toBe(afterGrade.delivery);
     expect(afterRenderer.proxy).toBe(afterGrade.proxy);
     expect(afterRenderer.grade).toBe(afterGrade.grade);
+  });
+
+  it('tracks the relevant resolved lockfile closure without invalidating unrelated stages', async () => {
+    const root = await makeEngineFixture();
+    const initial = await fingerprints(root);
+    const lockPath = path.join(root, 'package-lock.json');
+    const lock = JSON.parse(await readFile(lockPath, 'utf8')) as {
+      packages: Record<string, Record<string, unknown>>;
+    };
+
+    lock.packages['node_modules/unrelated-package'] = {
+      version: '2.0.0',
+      integrity: 'sha512-unrelated-v2',
+    };
+    await writeFixtureFile(root, 'package-lock.json', JSON.stringify(lock));
+    expect(await fingerprints(root)).toEqual(initial);
+
+    lock.packages['node_modules/render-runtime-child'] = {
+      version: '1.1.0',
+      integrity: 'sha512-child-v2',
+    };
+    await writeFixtureFile(root, 'package-lock.json', JSON.stringify(lock));
+    const afterResolvedDependencyChange = await fingerprints(root);
+
+    expect(afterResolvedDependencyChange.preview).not.toBe(initial.preview);
+    expect(afterResolvedDependencyChange.master).not.toBe(initial.master);
+    expect(afterResolvedDependencyChange.delivery).not.toBe(initial.delivery);
+    expect(afterResolvedDependencyChange.proxy).toBe(initial.proxy);
+    expect(afterResolvedDependencyChange.stabilize).toBe(initial.stabilize);
+    expect(afterResolvedDependencyChange.grade).toBe(initial.grade);
   });
 });
