@@ -16,6 +16,7 @@ import {isCanonicalRec709ColorSpace} from '../core/color-spaces';
 import {createColorHash, createEditHash} from '../core/approvals';
 import {artifactFingerprint} from '../project/artifacts';
 import {hashFile} from '../core/hash';
+import {implementationFingerprint} from '../core/implementation-fingerprint';
 import {readJson, writeJson} from '../core/json';
 import {resolveInside} from '../core/paths';
 import {buildFfmpegColorGraph} from './color-ffmpeg';
@@ -26,7 +27,6 @@ import {
   readValidatedSourceManifest,
   type SourceIntegrityContext,
 } from './source-integrity';
-import {pipelineBuildFingerprint} from '../render/artifacts';
 import {escapeFfmpegFilterValue} from './filter-escape';
 import type {
   PreviewStabilizationItem,
@@ -268,7 +268,7 @@ export const gradeSelectedClips = async (
   await mkdir(path.join(projectPath, 'work/graded'), {recursive: true});
   await mkdir(path.join(projectPath, 'work/stabilization'), {recursive: true});
   const items: GradedClipReport['items'] = [];
-  const pipelineBuild = await pipelineBuildFingerprint();
+  const pipelineBuild = await implementationFingerprint('grade');
 
   for (const [index, clip] of edit.clips.entries()) {
     await options.onProgress?.({

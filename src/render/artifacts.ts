@@ -1,6 +1,5 @@
-import {access, readdir, stat} from 'node:fs/promises';
+import {access, stat} from 'node:fs/promises';
 import path from 'node:path';
-import {fileURLToPath} from 'node:url';
 import {
   EditManifestSchema,
   LutDefinitionsSchema,
@@ -13,6 +12,7 @@ import {
 } from '../contracts/schemas';
 import {createEditHash} from '../core/approvals';
 import {hashFile, hashValue} from '../core/hash';
+import {implementationFingerprint} from '../core/implementation-fingerprint';
 import {readJson, writeJson} from '../core/json';
 import {resolveInside} from '../core/paths';
 import type {SourcesConfig} from '../media/analyze';
@@ -60,40 +60,6 @@ export type RenderArtifactOptions = {
 
 const indexPath = (projectPath: string): string =>
   path.join(projectPath, 'analysis/render-artifacts.json');
-
-const engineRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-let pipelineFingerprintPromise: Promise<string> | null = null;
-
-const walkImplementationFiles = async (directory: string): Promise<string[]> => {
-  const entries = await readdir(directory, {withFileTypes: true});
-  const nested = await Promise.all(
-    entries.map(async (entry) => {
-      const entryPath = path.join(directory, entry.name);
-      return entry.isDirectory() ? await walkImplementationFiles(entryPath) : [entryPath];
-    }),
-  );
-  return nested.flat();
-};
-
-export const pipelineBuildFingerprint = async (): Promise<string> => {
-  pipelineFingerprintPromise ??= (async () => {
-    const files = [
-      path.join(engineRoot, 'package.json'),
-      path.join(engineRoot, 'package-lock.json'),
-      path.join(engineRoot, 'remotion.config.ts'),
-      ...(await walkImplementationFiles(path.join(engineRoot, 'src'))),
-    ].sort();
-    return hashValue(
-      await Promise.all(
-        files.map(async (file) => ({
-          file: path.relative(engineRoot, file).split(path.sep).join('/'),
-          checksumSha256: await hashFile(file),
-        })),
-      ),
-    );
-  })();
-  return await pipelineFingerprintPromise;
-};
 
 const readIndex = async (projectPath: string): Promise<RenderArtifactIndex> => {
   try {
@@ -216,7 +182,7 @@ export const expectedRenderFingerprint = async (
         path.join(projectPath, 'config/luts.json'),
       ),
       readRenderSettings(projectPath),
-      pipelineBuildFingerprint(),
+      implementationFingerprint(target),
       readJson(path.join(projectPath, 'brief.json')),
     ]);
   const luts = LutDefinitionsSchema.parse(lutsConfig.luts);

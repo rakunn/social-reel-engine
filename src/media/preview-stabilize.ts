@@ -3,11 +3,11 @@ import {access, mkdir} from 'node:fs/promises';
 import path from 'node:path';
 import type {EditClip} from '../contracts/schemas';
 import {hashFile} from '../core/hash';
+import {implementationFingerprint} from '../core/implementation-fingerprint';
 import {artifactFingerprint} from '../project/artifacts';
 import {resolveInside} from '../core/paths';
 import {probeFile, runFfmpeg} from './ffmpeg';
 import {stabilizationOutcome, validateStabilizedCrop} from './stabilize';
-import {pipelineBuildFingerprint} from '../render/artifacts';
 import {escapeFfmpegFilterValue} from './filter-escape';
 import {REC709_OUTPUT_METADATA_ARGS} from './color-ffmpeg';
 import {writeAtomically} from './atomic-output';
@@ -94,7 +94,7 @@ export const preparePreviewStabilizedClip = async (
 
   const detectionSourceChecksumSha256 =
     options.detectionSourceChecksumSha256 ?? (await hashFile(originalPath));
-  const pipelineBuild = await pipelineBuildFingerprint();
+  const pipelineBuild = await implementationFingerprint('stabilize');
   const fingerprint = previewStabilizationFingerprint({
     pipelineBuild,
     detectionSourceChecksumSha256,

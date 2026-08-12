@@ -7,8 +7,8 @@ import {resolveInside} from '../core/paths';
 import {analyzeSources} from './analyze';
 import {probeFile, runFfmpeg} from './ffmpeg';
 import {hashFile} from '../core/hash';
+import {implementationFingerprint} from '../core/implementation-fingerprint';
 import {lutCompatibilityFailures} from '../core/lut-compatibility';
-import {pipelineBuildFingerprint} from '../render/artifacts';
 import {escapeFfmpegFilterValue} from './filter-escape';
 import {REC709_OUTPUT_METADATA_ARGS} from './color-ffmpeg';
 import {streamDurationSeconds} from './duration';
@@ -140,7 +140,7 @@ export const generateProxies = async (
     throw new Error('config/settings.json contains invalid proxy dimensions or CRF');
   }
   const artifacts = await readArtifactIndex(projectPath);
-  const pipelineBuild = await pipelineBuildFingerprint();
+  const pipelineBuild = await implementationFingerprint('proxy');
   const items: ProxyItem[] = [];
   await Promise.all(
     ['work/proxies', 'analysis/frames', 'analysis/contact-sheets'].map((directory) =>
