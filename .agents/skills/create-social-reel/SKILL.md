@@ -45,7 +45,7 @@ Treat this skill as the complete orchestration workflow for routine reel product
 
 ### 1. Preflight and create the job
 
-Run `npm run reel -- doctor`. Its `remotion-runtime` check must pass before an expensive preview or final render; this is a technical preflight, not an additional user approval gate. Resolve a safe kebab-case reel name, then create the job with `npm run reel -- new <reel-name> --title "<title>"`.
+Run `npm run reel -- doctor`. Its `dependency-materialization` and `remotion-runtime` checks must pass before an expensive preview or final render, and a failing `storage-capacity` check must be resolved; these are technical preflights, not additional user approval gates. Treat a storage warning as a concrete capacity risk when planning repeated ProRes renders. Resolve a safe kebab-case reel name, then create the job with `npm run reel -- new <reel-name> --title "<title>"`.
 
 Inventory every supplied file and the user's stated facts. Ingest each asset into its typed destination. Use the local LUT catalog only when its declared camera/profile and semantics match the user's confirmation. Record confirmations in `config/sources.json` and LUT declarations in `config/luts.json`; run `analyze` again after either changes.
 
@@ -73,7 +73,7 @@ Set exposure, white balance, and tint before the exact normalizer; set one optio
 
 Only after explicit approval of the displayed reference frames, run `approve-color`, then `status`. Do not ask about rights again when status shows that the user's checksum-bound confirmation remains current. If status reports `awaiting-rights-confirmation`, run `confirm-rights` immediately when an explicit user statement already covers the exact current used set; otherwise stop and request only the missing confirmation, then run `confirm-rights` after the user answers.
 
-Run `grade` and inspect `analysis/graded-clips.json`. Any stabilization fallback must match the per-shot fallback decision approved with the rough cut; otherwise stop and return to editorial approval. Then run `render`, followed by QC for `master` and `delivery` and finally `status`.
+Run `grade` and inspect `analysis/graded-clips.json`. Any stabilization fallback must match the per-shot fallback decision approved with the rough cut; otherwise stop and return to editorial approval. Then run `render`, wait for it to exit and release the media operation, run QC for `master` to completion, run QC for `delivery` to completion, and finally run `status`. Never parallelize render or either QC command.
 
 Do not claim completion when QC has a failure, a render fingerprint is stale, an output is unreadable, or a warning has not been reviewed. Deliver absolute paths to the ProRes master, H.264 delivery, and both human-readable QC reports, plus a concise note about warnings and stabilization outcomes.
 
@@ -81,7 +81,9 @@ Do not claim completion when QC has a failure, a render fingerprint is stale, an
 
 When `analysis/operation.json` records a live media command, `status` is safe to run: it returns the recorded command, phase, and progress before any input checksum scan. Use that snapshot and low-impact PID observation for ETA. Do not run `analyze`, `proxy`, or any other media producer concurrently with the recorded job.
 
-If `status` reports `interrupted-media-job`, do not manually trust, copy, delete, or register partial media/artifact files. Rerun the exact command named by `status`; durable outputs are atomically published only after validation, and a successful retry replaces the stale operation record. This recovery does not bypass any rights or approval gate.
+External media commands are process-group owned and bounded: FFmpeg is stopped after a prolonged period without output, while probes and preflight commands have wall-clock limits. Do not start an ad hoc duplicate or kill processes by command name when a job is merely quiet; let the tracked command return, then follow `status`.
+
+If `status` reports `interrupted-media-job`, do not manually trust, copy, delete, or register partial media/artifact files. Rerun the exact command named by `status`; durable outputs are atomically published only after validation, disposable render staging is rebuilt automatically, and a successful retry replaces the stale operation record. This recovery does not bypass any rights or approval gate.
 
 ## Resume an existing job
 

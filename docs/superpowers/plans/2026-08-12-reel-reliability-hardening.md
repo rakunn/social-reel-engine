@@ -154,13 +154,47 @@ Run: `npx vitest run tests/unit/media-process.test.ts tests/unit/ffmpeg-process-
 
 Expected: PASS with no owned descendants left behind.
 
-- [ ] **Step 6: Commit Task 3**
+- [x] **Step 6: Commit Task 3**
 
 Commit: `fix(process): bound external reel commands`
 
 ---
 
-### Task 4: Repository Verification and Review
+### Task 4: Workspace Preflight and Skill Recovery Guidance
+
+**Files:**
+- Modify: `src/commands/doctor.ts`
+- Create: `tests/unit/doctor-workspace.test.ts`
+- Modify: `tests/integration/doctor.test.ts`
+- Modify: `.agents/skills/create-social-reel/SKILL.md`
+
+- [x] **Step 1: Write and run failing workspace-preflight tests**
+
+Cover macOS dataless dependency detection and fail/warn/pass storage-capacity bands.
+
+- [x] **Step 2: Implement bounded materialization and capacity checks**
+
+Use a bounded macOS metadata-only `find` check over critical Remotion and Python runtime roots. Fail below 8 GiB free, warn below 40 GiB, and keep optional local LUT assets as warnings.
+
+- [x] **Step 3: Verify Doctor in a clean worktree**
+
+Run: `npx vitest run tests/unit/doctor-workspace.test.ts tests/integration/doctor.test.ts`
+
+Run: `npm run reel -- doctor`
+
+Expected: dependency materialization passes, low-but-usable storage warns, and missing ignored LUT assets warn without failing the toolchain.
+
+- [x] **Step 4: Update stable recovery guidance**
+
+Require sequential render/master-QC/delivery-QC execution, surface the new workspace preflights, and rely on exact tracked retries instead of command-name process killing.
+
+- [ ] **Step 5: Commit Task 4**
+
+Commit: `fix(doctor): detect unsafe reel workspace state`
+
+---
+
+### Task 5: Repository Verification and Review
 
 - [ ] **Step 1: Run type checking**
 
@@ -172,7 +206,7 @@ Expected: PASS.
 
 Run: `npm test`
 
-Expected: all engine tests pass; the existing fresh-worktree Doctor LUT-library assertion may remain a documented fixture/environment warning because ignored LUT assets are intentionally absent.
+Expected: all engine tests pass; ignored local LUT assets remain a Doctor warning rather than an environment-dependent test failure.
 
 - [ ] **Step 3: Run representative synthetic validation**
 
@@ -182,6 +216,6 @@ Run the smallest repository-provided synthetic render/QC command that exercises 
 
 Check deletion boundaries, cache dependency coverage, error preservation, compatibility, and repository cleanliness. Fix any material issue and rerun affected verification.
 
-- [ ] **Step 5: Update the reel skill troubleshooting guidance if behavior changed**
+- [x] **Step 5: Update the reel skill troubleshooting guidance if behavior changed**
 
 Document only stable user-facing recovery behavior. Do not add redundant manual repair steps that the engine now handles automatically.

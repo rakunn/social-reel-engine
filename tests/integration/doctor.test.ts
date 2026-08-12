@@ -18,6 +18,11 @@ describe('doctor', () => {
       expect.arrayContaining([
         expect.objectContaining({id: 'node', status: 'pass'}),
         expect.objectContaining({id: 'remotion-versions', status: 'pass'}),
+        expect.objectContaining({
+          id: 'storage-capacity',
+          status: expect.stringMatching(/^(pass|warn)$/),
+        }),
+        expect.objectContaining({id: 'dependency-materialization', status: 'pass'}),
         expect.objectContaining({id: 'remotion-runtime', status: 'pass'}),
         expect.objectContaining({id: 'ffmpeg', status: 'pass'}),
         expect.objectContaining({id: 'ffprobe', status: 'pass'}),

@@ -1,9 +1,13 @@
-import {access} from 'node:fs/promises';
+import {access, statfs as readStatfs} from 'node:fs/promises';
 import path from 'node:path';
 import {hashFile} from '../core/hash';
 import {readJson} from '../core/json';
 import {FFMPEG, FFPROBE} from '../media/ffmpeg';
-import {runProcess} from '../media/process';
+import {
+  runProcess,
+  type ProcessResult,
+  type RunProcessOptions,
+} from '../media/process';
 import {LutDefinitionSchema} from '../contracts/schemas';
 import {checkRemotionRuntime} from '../render/remotion-runtime';
 
@@ -16,6 +20,149 @@ export type DoctorCheck = {
 export type DoctorReport = {
   ok: boolean;
   checks: DoctorCheck[];
+};
+
+type DoctorProcessRunner = (
+  command: string,
+  args: readonly string[],
+  options: RunProcessOptions,
+) => Promise<ProcessResult>;
+
+type StorageStats = {bsize: number | bigint; bavail: number | bigint};
+
+export type DependencyMaterializationCheckOptions = {
+  platform?: NodeJS.Platform;
+  criticalRoots?: readonly string[];
+  runProcess?: DoctorProcessRunner;
+};
+
+export type StorageCapacityCheckOptions = {
+  statfs?: (target: string) => Promise<StorageStats>;
+};
+
+const GIBIBYTE = 1024 ** 3;
+const MINIMUM_RENDER_SPACE_GIB = 8;
+const RECOMMENDED_RENDER_SPACE_GIB = 40;
+
+const defaultCriticalDependencyRoots = (engineRoot: string): string[] => [
+  path.join(engineRoot, 'node_modules/@remotion'),
+  path.join(engineRoot, 'node_modules/remotion'),
+  path.join(engineRoot, 'node_modules/react'),
+  path.join(engineRoot, 'node_modules/react-dom'),
+  path.join(engineRoot, 'node_modules/tsx'),
+  path.join(engineRoot, 'node_modules/typescript'),
+  path.join(engineRoot, '.venv/lib/python3.11/site-packages/librosa'),
+  path.join(engineRoot, '.venv/lib/python3.11/site-packages/numpy'),
+  path.join(engineRoot, '.venv/lib/python3.11/site-packages/numba'),
+  path.join(engineRoot, '.venv/lib/python3.11/site-packages/scipy'),
+  path.join(engineRoot, '.venv/lib/python3.11/site-packages/soundfile.py'),
+];
+
+export const dependencyMaterializationCheck = async (
+  engineRoot: string,
+  options: DependencyMaterializationCheckOptions = {},
+): Promise<DoctorCheck> => {
+  const platform = options.platform ?? process.platform;
+  if (platform !== 'darwin') {
+    return {
+      id: 'dependency-materialization',
+      status: 'pass',
+      message: `macOS dataless dependency placeholders do not apply on ${platform}`,
+    };
+  }
+  const candidates = [...(options.criticalRoots ?? defaultCriticalDependencyRoots(engineRoot))];
+  const roots: string[] = [];
+  for (const candidate of candidates) {
+    try {
+      await access(candidate);
+      roots.push(candidate);
+    } catch {
+      // Dedicated runtime and command checks report missing dependency roots more precisely.
+    }
+  }
+  if (roots.length === 0) {
+    return {
+      id: 'dependency-materialization',
+      status: 'fail',
+      message: 'No critical Remotion or Python dependency roots are installed',
+    };
+  }
+  try {
+    const result = await (options.runProcess ?? runProcess)(
+      '/usr/bin/find',
+      [...roots, '-flags', '+dataless', '-print', '-quit'],
+      {allowFailure: true, timeoutMs: 30_000},
+    );
+    if (result.exitCode !== 0) {
+      return {
+        id: 'dependency-materialization',
+        status: 'fail',
+        message: `Could not inspect dependency materialization: ${result.stderr.trim() || `find exited ${result.exitCode}`}`,
+      };
+    }
+    const firstDatalessPath = result.stdout.trim().split('\n')[0];
+    if (firstDatalessPath) {
+      const relative = path.relative(engineRoot, firstDatalessPath).split(path.sep).join('/');
+      return {
+        id: 'dependency-materialization',
+        status: 'fail',
+        message:
+          `Critical dependency ${relative || firstDatalessPath} is a macOS dataless/offloaded placeholder. ` +
+          'Materialize dependencies in a non-cloud-backed worktree before media work.',
+      };
+    }
+    return {
+      id: 'dependency-materialization',
+      status: 'pass',
+      message: `${roots.length} critical Remotion/Python dependency roots are materialized`,
+    };
+  } catch (error) {
+    return {
+      id: 'dependency-materialization',
+      status: 'fail',
+      message: `Could not inspect dependency materialization: ${(error as Error).message}`,
+    };
+  }
+};
+
+export const storageCapacityCheck = async (
+  engineRoot: string,
+  options: StorageCapacityCheckOptions = {},
+): Promise<DoctorCheck> => {
+  try {
+    const stats = await (options.statfs ?? readStatfs)(engineRoot);
+    const availableGiB =
+      (Number(stats.bavail) * Number(stats.bsize)) / GIBIBYTE;
+    if (!Number.isFinite(availableGiB) || availableGiB < 0) {
+      throw new Error('filesystem returned an invalid available-space value');
+    }
+    const formatted = availableGiB.toFixed(1);
+    if (availableGiB < MINIMUM_RENDER_SPACE_GIB) {
+      return {
+        id: 'storage-capacity',
+        status: 'fail',
+        message: `${formatted} GiB is available; at least ${MINIMUM_RENDER_SPACE_GIB} GiB is required for safe render intermediates`,
+      };
+    }
+    if (availableGiB < RECOMMENDED_RENDER_SPACE_GIB) {
+      return {
+        id: 'storage-capacity',
+        status: 'warn',
+        message: `${formatted} GiB is available; ${RECOMMENDED_RENDER_SPACE_GIB} GiB or more is recommended for repeated ProRes renders`,
+      };
+    }
+    return {
+      id: 'storage-capacity',
+      status: 'pass',
+      message: `${formatted} GiB is available for render intermediates`,
+    };
+  } catch (error) {
+    return {
+      id: 'storage-capacity',
+      status: 'fail',
+      message: `Could not inspect render storage capacity: ${(error as Error).message}`,
+    };
+  }
 };
 
 const REQUIRED_FFMPEG_FILTERS = [
@@ -157,6 +304,8 @@ export const runDoctor = async (engineRoot: string): Promise<DoctorReport> => {
   } catch (error) {
     checks.push({id: 'remotion-versions', status: 'fail', message: (error as Error).message});
   }
+  checks.push(await storageCapacityCheck(engineRoot));
+  checks.push(await dependencyMaterializationCheck(engineRoot));
   const remotionRuntime = await checkRemotionRuntime(engineRoot);
   checks.push({
     id: 'remotion-runtime',
