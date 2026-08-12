@@ -7,8 +7,8 @@ import type {EditClip} from '../../src/contracts/schemas';
 const runFfmpeg = vi.hoisted(() => vi.fn());
 
 vi.mock('../../src/media/ffmpeg', () => ({runFfmpeg}));
-vi.mock('../../src/render/artifacts', () => ({
-  pipelineBuildFingerprint: vi.fn(async () => 'pipeline-build'),
+vi.mock('../../src/core/implementation-fingerprint', () => ({
+  implementationFingerprint: vi.fn(async () => 'pipeline-build'),
 }));
 
 import {preparePreviewStabilizedClip} from '../../src/media/preview-stabilize';
