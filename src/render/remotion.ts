@@ -20,6 +20,11 @@ import {superviseRemotionRender} from './remotion-supervisor';
 import type {RemotionWorkerRequest} from './remotion-protocol';
 import {checkRemotionRuntime} from './remotion-runtime';
 import {
+  rawRenderOutputPath,
+  removePublishedRawRender,
+  withDisposableRenderStage,
+} from './scratch';
+import {
   createSourceIntegrityContext,
   type SourceIntegrityContext,
 } from '../media/source-integrity';
@@ -118,6 +123,7 @@ export const finalizeRawRender = async (
     undefined,
     {integrity: input.integrity},
   );
+  await removePublishedRawRender(input.projectPath, input.rawOutput);
 };
 
 const renderTarget = async (
@@ -143,13 +149,18 @@ const renderTarget = async (
     expectedFingerprint: fingerprint,
     integrity,
   });
-  if (current.fresh) return outputLocation;
+  const rawOutput = rawRenderOutputPath(projectPath, target);
+  if (current.fresh) {
+    await removePublishedRawRender(projectPath, rawOutput);
+    return outputLocation;
+  }
 
   await options.onActivity?.({phase: 'preflighting-remotion', progress: null});
   const remotionRuntime = await checkRemotionRuntime(engineRoot);
   if (!remotionRuntime.ok || !remotionRuntime.runtime) {
     throw new Error(`Remotion runtime preflight failed: ${remotionRuntime.message}`);
   }
+  const workerEnvironment = remotionRuntime.runtime.workerEnvironment;
 
   await options.onActivity?.({
     phase: target === 'preview' ? 'preparing-proxies' : 'grading-selected-clips',
@@ -163,38 +174,35 @@ const renderTarget = async (
         progress,
       }),
   });
-  const settings = await readRenderSettings(projectPath);
-  await mkdir(path.dirname(outputLocation), {recursive: true});
-  const rawDirectory = path.join(projectPath, 'work/render');
-  await mkdir(rawDirectory, {recursive: true});
-  const rawOutput = path.join(
-    rawDirectory,
-    target === 'preview' ? 'preview-remotion.mp4' : 'master-remotion.mov',
-  );
-  const workerRequest: RemotionWorkerRequest = {
-    schemaVersion: '1.0.0',
-    engineRoot,
-    publicDir: stageRoot,
-    target,
-    rawOutput,
-    inputProps: props as unknown as Record<string, unknown>,
-    settings,
-  };
-  await options.onActivity?.({
-    phase: target === 'preview' ? 'rendering-preview' : 'rendering-master',
-    progress: null,
+  return await withDisposableRenderStage(engineRoot, stageRoot, async () => {
+    const settings = await readRenderSettings(projectPath);
+    await mkdir(path.dirname(outputLocation), {recursive: true});
+    await mkdir(path.dirname(rawOutput), {recursive: true});
+    const workerRequest: RemotionWorkerRequest = {
+      schemaVersion: '1.0.0',
+      engineRoot,
+      publicDir: stageRoot,
+      target,
+      rawOutput,
+      inputProps: props as unknown as Record<string, unknown>,
+      settings,
+    };
+    await options.onActivity?.({
+      phase: target === 'preview' ? 'rendering-preview' : 'rendering-master',
+      progress: null,
+    });
+    await finalizeRawRender({
+      projectPath,
+      target,
+      rawOutput,
+      outputLocation,
+      fingerprint,
+      workerRequest,
+      workerEnvironment,
+      integrity,
+    });
+    return outputLocation;
   });
-  await finalizeRawRender({
-    projectPath,
-    target,
-    rawOutput,
-    outputLocation,
-    fingerprint,
-    workerRequest,
-    workerEnvironment: remotionRuntime.runtime.workerEnvironment,
-    integrity,
-  });
-  return outputLocation;
 };
 
 export const renderPreview = async (
