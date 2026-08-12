@@ -1,3 +1,4 @@
+import {access} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {describe, expect, it} from 'vitest';
@@ -10,8 +11,8 @@ describe('synthetic two-clip acceptance render', () => {
     'renders and validates preview, 10-bit ProRes master, and normalized delivery',
     async () => {
       const results = [
-        await runSyntheticE2e(repositoryRoot),
-        await runSyntheticE2e(repositoryRoot, {silent: true}),
+        await runSyntheticE2e(repositoryRoot, {cleanup: true}),
+        await runSyntheticE2e(repositoryRoot, {silent: true, cleanup: true}),
       ];
       for (const result of results) {
         expect(result.qc.preview.failures).toEqual([]);
@@ -22,6 +23,7 @@ describe('synthetic two-clip acceptance render', () => {
         expect(result.outputs.preview).toMatch(/preview\.mp4$/);
         expect(result.outputs.master).toMatch(/master\.mov$/);
         expect(result.outputs.delivery).toMatch(/delivery\.mp4$/);
+        await expect(access(result.projectPath)).rejects.toThrow(/ENOENT/);
       }
       expect(results.map((result) => result.silent)).toEqual([false, true]);
     },

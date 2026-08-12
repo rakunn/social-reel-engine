@@ -1,8 +1,8 @@
-import {access, chmod, mkdir, mkdtemp, readFile, writeFile} from 'node:fs/promises';
+import {access, chmod, mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {beforeAll, describe, expect, it} from 'vitest';
+import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {hashFile} from '../../src/core/hash';
 import {writeJson} from '../../src/core/json';
 import {analyzeSources} from '../../src/media/analyze';
@@ -22,6 +22,7 @@ import {
   recordRenderArtifact,
 } from '../../src/render/artifacts';
 import {prepareRenderProps} from '../../src/render/stage';
+import {pruneRenderStages} from '../../src/render/scratch';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const identityCube = `TITLE "Identity"\nLUT_3D_SIZE 2\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 1 1 1\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n`;
@@ -29,15 +30,23 @@ const identityCube = `TITLE "Identity"\nLUT_3D_SIZE 2\nDOMAIN_MIN 0 0 0\nDOMAIN_
 let projectPath: string;
 let originalClipPath: string;
 let originalClipHash: string;
+let temporaryRoot: string;
+const temporaryRoots = new Set<string>();
+
+const makeTemporaryRoot = async (prefix: string): Promise<string> => {
+  const root = await mkdtemp(path.join(tmpdir(), prefix));
+  temporaryRoots.add(root);
+  return root;
+};
 
 beforeAll(async () => {
-  const root = await mkdtemp(path.join(tmpdir(), String.raw`reel-media-o'\-`));
+  temporaryRoot = await makeTemporaryRoot(String.raw`reel-media-o'\-`);
   projectPath = await createReelProject({
     engineRoot: repositoryRoot,
-    projectsRoot: path.join(root, 'projects'),
+    projectsRoot: path.join(temporaryRoot, 'projects'),
     reelName: 'synthetic-media',
   });
-  originalClipPath = path.join(root, 'DJI_SYNTHETIC.MP4');
+  originalClipPath = path.join(temporaryRoot, 'DJI_SYNTHETIC.MP4');
   await runFfmpeg([
     '-f',
     'lavfi',
@@ -61,7 +70,7 @@ beforeAll(async () => {
   originalClipHash = await hashFile(originalClipPath);
   await ingestFiles(projectPath, [originalClipPath], 'clips');
 
-  const musicPath = path.join(root, 'clicks.wav');
+  const musicPath = path.join(temporaryRoot, 'clicks.wav');
   await runFfmpeg([
     '-f',
     'lavfi',
@@ -73,6 +82,14 @@ beforeAll(async () => {
   ]);
   await ingestFiles(projectPath, [musicPath], 'music');
 }, 30_000);
+
+afterAll(async () => {
+  await pruneRenderStages(repositoryRoot, 'synthetic-media');
+  await Promise.all(
+    [...temporaryRoots].map(async (root) => await rm(root, {recursive: true, force: true})),
+  );
+  temporaryRoots.clear();
+});
 
 const confirmSyntheticColor = async () => {
   const relativeClip = 'input/clips/DJI_SYNTHETIC.MP4';
@@ -172,7 +189,7 @@ describe('source analysis and viewing proxies', () => {
   });
 
   it('samples proxy review images within the video stream when another stream is longer', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'reel-proxy-duration-'));
+    const root = await makeTemporaryRoot('reel-proxy-duration-');
     const durationProject = await createReelProject({
       engineRoot: repositoryRoot,
       projectsRoot: path.join(root, 'projects'),
@@ -482,7 +499,7 @@ describe('music analysis', () => {
   });
 
   it('uses recursive filtered discovery and regenerates malformed cached reports', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'reel-beats-cache-'));
+    const root = await makeTemporaryRoot('reel-beats-cache-');
     const cacheProject = await createReelProject({
       engineRoot: repositoryRoot,
       projectsRoot: path.join(root, 'projects'),

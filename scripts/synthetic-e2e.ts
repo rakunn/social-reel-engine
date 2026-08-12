@@ -1,4 +1,4 @@
-import {mkdtemp, writeFile} from 'node:fs/promises';
+import {mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -219,48 +219,54 @@ export const prepareSyntheticReel = async (
 
 export const runSyntheticE2e = async (
   engineRoot: string,
-  options: {silent?: boolean} = {},
+  options: {silent?: boolean; cleanup?: boolean} = {},
 ) => {
   const prepared = await prepareSyntheticReel(engineRoot, options);
-  const {projectPath, originalFiles, originalHashes} = prepared;
+  try {
+    const {projectPath, originalFiles, originalHashes} = prepared;
 
-  const preview = await renderPreview(projectPath, engineRoot);
-  await approveEdit(projectPath);
-  await generateGradedStills(projectPath);
-  await approveColor(projectPath);
-  const {master, delivery} = await renderMasterAndDelivery(projectPath, engineRoot);
-  const renderIndexPath = path.join(projectPath, 'analysis/render-artifacts.json');
-  const renderIndexBeforeRepeat = await import('node:fs/promises').then(({readFile}) =>
-    readFile(renderIndexPath, 'utf8'),
-  );
-  await renderMasterAndDelivery(projectPath, engineRoot);
-  const renderIndexAfterRepeat = await import('node:fs/promises').then(({readFile}) =>
-    readFile(renderIndexPath, 'utf8'),
-  );
-  const renderArtifactsReused = renderIndexBeforeRepeat === renderIndexAfterRepeat;
-  const previewQc = await runQc(projectPath, 'preview');
-  const masterQc = await runQc(projectPath, 'master');
-  const deliveryQc = await runQc(projectPath, 'delivery');
-  const afterHashes = await Promise.all(originalFiles.map(hashFile));
-  const originalsUnchanged = originalHashes.every((hash, index) => hash === afterHashes[index]);
-  const result = {
-    projectPath,
-    outputs: {preview, master, delivery},
-    qc: {preview: previewQc, master: masterQc, delivery: deliveryQc},
-    originalsUnchanged,
-    renderArtifactsReused,
-    silent: options.silent === true,
-  };
-  if (
-    !originalsUnchanged ||
-    !renderArtifactsReused ||
-    previewQc.failures.length ||
-    masterQc.failures.length ||
-    deliveryQc.failures.length
-  ) {
-    throw new Error(`Synthetic acceptance failed: ${JSON.stringify(result, null, 2)}`);
+    const preview = await renderPreview(projectPath, engineRoot);
+    await approveEdit(projectPath);
+    await generateGradedStills(projectPath);
+    await approveColor(projectPath);
+    const {master, delivery} = await renderMasterAndDelivery(projectPath, engineRoot);
+    const renderIndexPath = path.join(projectPath, 'analysis/render-artifacts.json');
+    const renderIndexBeforeRepeat = await import('node:fs/promises').then(({readFile}) =>
+      readFile(renderIndexPath, 'utf8'),
+    );
+    await renderMasterAndDelivery(projectPath, engineRoot);
+    const renderIndexAfterRepeat = await import('node:fs/promises').then(({readFile}) =>
+      readFile(renderIndexPath, 'utf8'),
+    );
+    const renderArtifactsReused = renderIndexBeforeRepeat === renderIndexAfterRepeat;
+    const previewQc = await runQc(projectPath, 'preview');
+    const masterQc = await runQc(projectPath, 'master');
+    const deliveryQc = await runQc(projectPath, 'delivery');
+    const afterHashes = await Promise.all(originalFiles.map(hashFile));
+    const originalsUnchanged = originalHashes.every((hash, index) => hash === afterHashes[index]);
+    const result = {
+      projectPath,
+      outputs: {preview, master, delivery},
+      qc: {preview: previewQc, master: masterQc, delivery: deliveryQc},
+      originalsUnchanged,
+      renderArtifactsReused,
+      silent: options.silent === true,
+    };
+    if (
+      !originalsUnchanged ||
+      !renderArtifactsReused ||
+      previewQc.failures.length ||
+      masterQc.failures.length ||
+      deliveryQc.failures.length
+    ) {
+      throw new Error(`Synthetic acceptance failed: ${JSON.stringify(result, null, 2)}`);
+    }
+    return result;
+  } finally {
+    if (options.cleanup) {
+      await rm(prepared.temporaryRoot, {recursive: true, force: true});
+    }
   }
-  return result;
 };
 
 const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : '';

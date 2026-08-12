@@ -1,5 +1,6 @@
 import {spawn, type ChildProcess} from 'node:child_process';
 import type {Readable} from 'node:stream';
+import {rm} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {afterEach, describe, expect, it} from 'vitest';
@@ -7,6 +8,7 @@ import {prepareSyntheticReel, runSyntheticE2e} from '../../scripts/synthetic-e2e
 import {writeJson} from '../../src/core/json';
 import {readRenderSettings} from '../../src/render/policy';
 import {stopOwnedProcessGroup} from '../../src/render/process-group';
+import {removeRenderStage} from '../../src/render/scratch';
 import {prepareRenderProps} from '../../src/render/stage';
 import {
   describeProcessInventory,
@@ -19,6 +21,8 @@ import {
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const runners = new Set<ChildProcess>();
 const workerGroups = new Set<number>();
+const temporaryRoots = new Set<string>();
+const renderStages = new Set<string>();
 
 const waitForOutput = async (
   stream: Readable,
@@ -113,11 +117,13 @@ const runForcedCancellation = async (
   baseline: RemotionProcessInventoryEntry[],
 ): Promise<void> => {
   const prepared = await prepareSyntheticReel(repositoryRoot, {silent: true});
+  temporaryRoots.add(prepared.temporaryRoot);
   const {props, stageRoot} = await prepareRenderProps(
     prepared.projectPath,
     repositoryRoot,
     'preview',
   );
+  renderStages.add(stageRoot);
   const settings = await readRenderSettings(prepared.projectPath);
   const requestPath = path.join(
     prepared.projectPath,
@@ -210,6 +216,14 @@ afterEach(async () => {
     await stopOwnedProcessGroup(pgid).catch(() => undefined);
   }
   workerGroups.clear();
+  for (const stageRoot of renderStages) {
+    await removeRenderStage(repositoryRoot, stageRoot).catch(() => undefined);
+  }
+  renderStages.clear();
+  for (const temporaryRoot of temporaryRoots) {
+    await rm(temporaryRoot, {recursive: true, force: true});
+  }
+  temporaryRoots.clear();
 });
 
 describe.runIf(process.platform === 'darwin')('real Remotion process lifecycle', () => {
@@ -217,7 +231,7 @@ describe.runIf(process.platform === 'darwin')('real Remotion process lifecycle',
     'adds no stale process after success, SIGINT, or SIGTERM',
     async () => {
       const baseline = await listRemotionProcessInventory(repositoryRoot);
-      await runSyntheticE2e(repositoryRoot, {silent: true});
+      await runSyntheticE2e(repositoryRoot, {silent: true, cleanup: true});
       const afterSuccess = await listRemotionProcessInventory(repositoryRoot);
       expectNoNewProcesses('Successful render', baseline, afterSuccess);
       await runForcedCancellation('SIGINT', baseline);
