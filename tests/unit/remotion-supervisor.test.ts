@@ -1,6 +1,6 @@
 import {spawn, type ChildProcess} from 'node:child_process';
 import {EventEmitter} from 'node:events';
-import {mkdtemp, readFile, readdir, rm, writeFile} from 'node:fs/promises';
+import {mkdir, mkdtemp, readFile, readdir, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -370,8 +370,9 @@ describe.runIf(process.platform !== 'win32')('Remotion process supervisor', () =
 describe('render artifact lifecycle boundary', () => {
   it('post-processes and records only after worker cleanup succeeds', async () => {
     const root = await makeTemporaryDirectory();
-    const rawOutput = path.join(root, 'raw.mp4');
+    const rawOutput = path.join(root, 'work/render/preview-remotion.mp4');
     const outputLocation = path.join(root, 'preview.mp4');
+    await mkdir(path.dirname(rawOutput), {recursive: true});
     await writeFile(rawOutput, 'raw');
     const calls: string[] = [];
 
@@ -403,6 +404,7 @@ describe('render artifact lifecycle boundary', () => {
     );
 
     expect(calls).toEqual(['worker', 'post-process', 'record']);
+    await expect(readFile(rawOutput, 'utf8')).rejects.toThrow(/ENOENT/);
   });
 
   it('does not post-process or record after cleanup failure', async () => {
@@ -435,8 +437,9 @@ describe('render artifact lifecycle boundary', () => {
 
   it('keeps an existing final output when post-processing fails', async () => {
     const root = await makeTemporaryDirectory();
-    const rawOutput = path.join(root, 'raw.mp4');
+    const rawOutput = path.join(root, 'work/render/preview-remotion.mp4');
     const outputLocation = path.join(root, 'preview.mp4');
+    await mkdir(path.dirname(rawOutput), {recursive: true});
     await writeFile(outputLocation, 'known-good-preview');
     const recordArtifact = vi.fn();
 
@@ -465,8 +468,42 @@ describe('render artifact lifecycle boundary', () => {
     ).rejects.toThrow('post-processing failed');
 
     await expect(readFile(outputLocation, 'utf8')).resolves.toBe('known-good-preview');
-    await expect(readdir(root)).resolves.toEqual(['preview.mp4', 'raw.mp4']);
+    await expect(readFile(rawOutput, 'utf8')).resolves.toBe('raw-render');
     expect(recordArtifact).not.toHaveBeenCalled();
+  });
+
+  it('retains the raw render when artifact publication fails', async () => {
+    const root = await makeTemporaryDirectory();
+    const rawOutput = path.join(root, 'work/render/master-remotion.mov');
+    const outputLocation = path.join(root, 'output/master.mov');
+
+    await expect(
+      finalizeRawRender(
+        {
+          projectPath: root,
+          target: 'master',
+          rawOutput,
+          outputLocation,
+          fingerprint: 'fingerprint',
+          workerRequest: {rawOutput} as never,
+        },
+        {
+          supervise: async (request: RemotionWorkerRequest) => {
+            await writeFile(request.rawOutput, 'raw-render');
+          },
+          runFfmpeg: async (args: readonly string[]) => {
+            await writeFile(args.at(-1)!, 'post-processed');
+            return {command: 'ffmpeg', args: [], stdout: '', stderr: '', exitCode: 0};
+          },
+          probeFile: async () => ({}) as never,
+          recordArtifact: async () => {
+            throw new Error('artifact publication failed');
+          },
+        },
+      ),
+    ).rejects.toThrow('artifact publication failed');
+
+    await expect(readFile(rawOutput, 'utf8')).resolves.toBe('raw-render');
   });
 
   it('maps render interruptions to conventional exit codes', () => {

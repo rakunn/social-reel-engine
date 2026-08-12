@@ -57,7 +57,7 @@ Provide `implementationFingerprint(scope, options?)` for `proxy`, `stabilize`, `
 
 - [x] **Step 4: Replace the global build fingerprint**
 
-Use `proxy` and `grade` scopes in the corresponding media fingerprints. Use `render` for preview/master Remotion artifacts and `delivery` for delivery post-processing. Remove the full-`src` fingerprint implementation after all callers are migrated.
+Use `proxy`, `stabilize`, and `grade` scopes in the corresponding media fingerprints. Use target-specific `preview`, `master`, and `delivery` dependency graphs for rendered artifacts. Remove the full-`src` fingerprint implementation after all callers are migrated.
 
 - [x] **Step 5: Verify focused and affected tests**
 
@@ -65,7 +65,7 @@ Run: `npx vitest run tests/unit/implementation-fingerprint.test.ts tests/unit/pr
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 1**
+- [x] **Step 6: Commit Task 1**
 
 Commit: `fix(cache): scope reel fingerprints by pipeline stage`
 
@@ -80,7 +80,7 @@ Commit: `fix(cache): scope reel fingerprints by pipeline stage`
 - Modify: `src/render/remotion.ts`
 - Modify: `tests/unit/remotion-supervisor.test.ts`
 
-- [ ] **Step 1: Write failing cleanup and path-safety tests**
+- [x] **Step 1: Write failing cleanup and path-safety tests**
 
 Cover:
 
@@ -90,25 +90,25 @@ Cover:
 - the raw Remotion file disappears only after successful artifact publication;
 - publication failure retains the raw file for recovery.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run: `npx vitest run tests/unit/render-scratch.test.ts tests/unit/remotion-supervisor.test.ts`
 
 Expected: FAIL on missing scratch lifecycle behavior.
 
-- [ ] **Step 3: Implement safe stage lifecycle helpers**
+- [x] **Step 3: Implement safe stage lifecycle helpers**
 
 Resolve and validate every deletion target beneath `<engineRoot>/public/jobs/<reel>/`. Prune stale sibling fingerprints before staging and remove the current fingerprint directory in `renderTarget()`'s `finally` block after the supervised worker has settled.
 
-- [ ] **Step 4: Prefer hard links for immutable staged inputs**
+- [x] **Step 4: Prefer hard links for immutable staged inputs**
 
 Create each temporary staged output with `link()`, validate it through the existing atomic-output contract, and fall back to `copyFile()` only for expected cross-device, unsupported, or link-limit errors.
 
-- [ ] **Step 5: Remove published raw render intermediates**
+- [x] **Step 5: Remove published raw render intermediates**
 
 Unlink `work/render/*-remotion.*` after and only after `recordArtifact()` succeeds. Leave it intact when conversion, validation, or artifact publication throws.
 
-- [ ] **Step 6: Verify focused tests**
+- [x] **Step 6: Verify focused tests**
 
 Run: `npx vitest run tests/unit/render-scratch.test.ts tests/unit/remotion-supervisor.test.ts tests/unit/atomic-output.test.ts`
 

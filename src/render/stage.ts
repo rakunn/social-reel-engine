@@ -1,5 +1,5 @@
 import type {Caption} from '@remotion/captions';
-import {access, copyFile, mkdir, readFile} from 'node:fs/promises';
+import {mkdir, readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {
   EditManifestSchema,
@@ -26,43 +26,13 @@ import {
   type SourceIntegrityContext,
 } from '../media/source-integrity';
 import {parseCaptionContent} from '../remotion/captions';
-import {writeAtomically} from '../media/atomic-output';
+import {
+  pruneRenderStages,
+  renderStageRoot,
+  stageImmutableFile,
+} from './scratch';
 
 export type StageTarget = 'preview' | 'master';
-
-const exists = async (filePath: string): Promise<boolean> => {
-  try {
-    await access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const stageFile = async (
-  source: string,
-  stageRoot: string,
-  relativeTarget: string,
-  sourceChecksumSha256?: string,
-): Promise<string> => {
-  const target = resolveInside(stageRoot, relativeTarget);
-  await mkdir(path.dirname(target), {recursive: true});
-  const checksumSha256 = sourceChecksumSha256 ?? (await hashFile(source));
-  if (!(await exists(target)) || (await hashFile(target)) !== checksumSha256) {
-    await writeAtomically(
-      target,
-      async (temporaryOutput) => {
-        await copyFile(source, temporaryOutput);
-      },
-      async (temporaryOutput) => {
-        if ((await hashFile(temporaryOutput)) !== checksumSha256) {
-          throw new Error(`Staged file checksum does not match source: ${relativeTarget}`);
-        }
-      },
-    );
-  }
-  return relativeTarget.split(path.sep).join('/');
-};
 
 const loadCaptions = async (
   projectPath: string,
@@ -108,7 +78,8 @@ export const prepareRenderProps = async (
     media: target === 'preview' ? proxies : graded,
   }).slice(0, 16);
   const publicRelativeRoot = `jobs/${edit.reelName}/${fingerprint}`;
-  const stageRoot = path.join(engineRoot, 'public', publicRelativeRoot);
+  const stageRoot = renderStageRoot(engineRoot, edit.reelName, fingerprint);
+  await pruneRenderStages(engineRoot, edit.reelName, stageRoot);
   await mkdir(stageRoot, {recursive: true});
   const media: Record<string, string> = {};
   const trimBeforeFramesByClip: Record<string, number> = {};
@@ -173,7 +144,7 @@ export const prepareRenderProps = async (
       trimBeforeFramesByClip[clip.id] = 0;
     }
     const extension = path.extname(sourcePath).toLowerCase() || '.mov';
-    const staged = await stageFile(
+    const staged = await stageImmutableFile(
       sourcePath,
       stageRoot,
       `media/${clip.id}${extension}`,
@@ -189,7 +160,7 @@ export const prepareRenderProps = async (
       throw new Error(`Music source ${edit.music.sourceId} is missing`);
     }
     const input = resolveInside(projectPath, musicSource.relativePath);
-    const staged = await stageFile(
+    const staged = await stageImmutableFile(
       input,
       stageRoot,
       `music/${path.basename(input)}`,
@@ -207,7 +178,7 @@ export const prepareRenderProps = async (
     .sort((left, right) => left.relativePath.localeCompare(right.relativePath))[0];
   if (fontSource) {
     const font = resolveInside(projectPath, fontSource.relativePath);
-    const staged = await stageFile(
+    const staged = await stageImmutableFile(
       font,
       stageRoot,
       `fonts/${path.basename(font)}`,
