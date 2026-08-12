@@ -1,5 +1,7 @@
 import {mkdir} from 'node:fs/promises';
 import path from 'node:path';
+import {EditManifestSchema} from '../contracts/schemas';
+import {readJson} from '../core/json';
 import {assertFinalReadiness} from '../edit/approve';
 import {validateEdit} from '../edit/validate';
 import {probeFile, runFfmpeg} from '../media/ffmpeg';
@@ -20,6 +22,7 @@ import {superviseRemotionRender} from './remotion-supervisor';
 import type {RemotionWorkerRequest} from './remotion-protocol';
 import {checkRemotionRuntime} from './remotion-runtime';
 import {
+  pruneRenderStages,
   rawRenderOutputPath,
   removePublishedRawRender,
   withDisposableRenderStage,
@@ -133,7 +136,10 @@ const renderTarget = async (
   options: RenderOperationOptions = {},
 ): Promise<string> => {
   const integrity = options.integrity ?? createSourceIntegrityContext();
-  const validation = await validateEdit(projectPath, undefined, {integrity});
+  const edit = EditManifestSchema.parse(
+    await readJson(path.join(projectPath, 'edits/edit.json')),
+  );
+  const validation = await validateEdit(projectPath, edit, {integrity});
   if (!validation.valid) {
     throw new Error(`Edit is not valid:\n- ${validation.failures.join('\n- ')}`);
   }
@@ -151,7 +157,20 @@ const renderTarget = async (
   });
   const rawOutput = rawRenderOutputPath(projectPath, target);
   if (current.fresh) {
-    await removePublishedRawRender(projectPath, rawOutput);
+    const cleanupResults = await Promise.allSettled([
+      removePublishedRawRender(projectPath, rawOutput),
+      pruneRenderStages(engineRoot, edit.reelName),
+    ]);
+    const cleanupFailures = cleanupResults.flatMap((result) =>
+      result.status === 'rejected' ? [result.reason] : [],
+    );
+    if (cleanupFailures.length === 1) throw cleanupFailures[0];
+    if (cleanupFailures.length > 1) {
+      throw new AggregateError(
+        cleanupFailures,
+        'Fresh render scratch outputs and disposable stages could not be removed',
+      );
+    }
     return outputLocation;
   }
 

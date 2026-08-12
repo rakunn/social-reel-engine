@@ -82,6 +82,9 @@ const makeEngineFixture = async (): Promise<string> => {
     ].join('\n'),
     'src/render/policy.ts': "export const policy = 'v1';\n",
     'src/render/remotion.ts': "import './policy';\nexport const orchestration = 'v1';\n",
+    'src/render/remotion-runtime.ts':
+      "import './runtime-helper';\nexport const runtimeSelection = 'v1';\n",
+    'src/render/runtime-helper.ts': "export const runtimeEnvironment = 'v1';\n",
     'src/remotion/index.ts': "import './Reel';\nexport const entry = 'v1';\n",
     'src/remotion/Reel.tsx': "export const Reel = () => 'reel-v1';\n",
   };
@@ -200,5 +203,24 @@ describe('stage-scoped implementation fingerprints', () => {
     expect(afterResolvedDependencyChange.proxy).toBe(initial.proxy);
     expect(afterResolvedDependencyChange.stabilize).toBe(initial.stabilize);
     expect(afterResolvedDependencyChange.grade).toBe(initial.grade);
+  });
+
+  it('invalidates renderer outputs when compositor runtime selection changes', async () => {
+    const root = await makeEngineFixture();
+    const initial = await fingerprints(root);
+
+    await writeFixtureFile(
+      root,
+      'src/render/runtime-helper.ts',
+      "export const runtimeEnvironment = 'v2';\n",
+    );
+    const afterRuntimeChange = await fingerprints(root);
+
+    expect(afterRuntimeChange.preview).not.toBe(initial.preview);
+    expect(afterRuntimeChange.master).not.toBe(initial.master);
+    expect(afterRuntimeChange.delivery).not.toBe(initial.delivery);
+    expect(afterRuntimeChange.proxy).toBe(initial.proxy);
+    expect(afterRuntimeChange.stabilize).toBe(initial.stabilize);
+    expect(afterRuntimeChange.grade).toBe(initial.grade);
   });
 });
