@@ -28,6 +28,7 @@ import {
 import {parseCaptionContent} from '../remotion/captions';
 import {
   pruneRenderStages,
+  removeRenderStage,
   renderStageRoot,
   stageImmutableFile,
 } from './scratch';
@@ -81,134 +82,146 @@ export const prepareRenderProps = async (
   const stageRoot = renderStageRoot(engineRoot, edit.reelName, fingerprint);
   await pruneRenderStages(engineRoot, edit.reelName, stageRoot);
   await mkdir(stageRoot, {recursive: true});
-  const media: Record<string, string> = {};
-  const trimBeforeFramesByClip: Record<string, number> = {};
-  let hasUnconfirmedPreview = false;
-  let priorPreviewStabilization: PreviewStabilizationReport | null = null;
-  const previewStabilizationItems: PreviewStabilizationReport['items'] = [];
-  if (target === 'preview') {
-    try {
-      priorPreviewStabilization = await readJson<PreviewStabilizationReport>(
-        path.join(projectPath, 'analysis/preview-stabilization.json'),
-      );
-    } catch {
-      priorPreviewStabilization = null;
-    }
-  }
-
-  for (const clip of edit.clips) {
-    let sourcePath: string;
-    let sourceChecksumSha256: string | undefined;
+  try {
+    const media: Record<string, string> = {};
+    const trimBeforeFramesByClip: Record<string, number> = {};
+    let hasUnconfirmedPreview = false;
+    let priorPreviewStabilization: PreviewStabilizationReport | null = null;
+    const previewStabilizationItems: PreviewStabilizationReport['items'] = [];
     if (target === 'preview') {
-      const proxy = proxies?.items.find((item) => item.sourceId === clip.sourceId);
-      if (!proxy) {
-        throw new Error(`No proxy generated for source ${clip.sourceId}`);
+      try {
+        priorPreviewStabilization = await readJson<PreviewStabilizationReport>(
+          path.join(projectPath, 'analysis/preview-stabilization.json'),
+        );
+      } catch {
+        priorPreviewStabilization = null;
       }
-      sourcePath = resolveInside(projectPath, proxy.proxy);
-      const original = sources.sources.find((source) => source.id === clip.sourceId);
-      if (!original || original.mediaType !== 'video') {
-        throw new Error(`No original video source found for ${clip.sourceId}`);
-      }
-      const stabilized = await preparePreviewStabilizedClip(
-        projectPath,
-        clip,
-        sourcePath,
-        resolveInside(projectPath, original.relativePath),
-        buildProxyVideoFilter(
+    }
+
+    for (const clip of edit.clips) {
+      let sourcePath: string;
+      let sourceChecksumSha256: string | undefined;
+      if (target === 'preview') {
+        const proxy = proxies?.items.find((item) => item.sourceId === clip.sourceId);
+        if (!proxy) {
+          throw new Error(`No proxy generated for source ${clip.sourceId}`);
+        }
+        sourcePath = resolveInside(projectPath, proxy.proxy);
+        const original = sources.sources.find((source) => source.id === clip.sourceId);
+        if (!original || original.mediaType !== 'video') {
+          throw new Error(`No original video source found for ${clip.sourceId}`);
+        }
+        const stabilized = await preparePreviewStabilizedClip(
           projectPath,
-          proxy.normalizerFile,
-          proxy.maximumDimension,
-        ),
-        proxy.normalizerFile
-          ? await hashFile(resolveInside(projectPath, proxy.normalizerFile))
-          : null,
-        proxy.normalization !== 'unconfirmed-watermarked',
-        priorPreviewStabilization?.items.find((item) => item.clipId === clip.id),
-        {detectionSourceChecksumSha256: original.checksumSha256},
-      );
-      sourcePath = stabilized.sourcePath;
-      sourceChecksumSha256 = stabilized.item.checksumSha256 ?? undefined;
-      previewStabilizationItems.push(stabilized.item);
-      trimBeforeFramesByClip[clip.id] =
-        stabilized.item.stabilization === 'applied'
-          ? 0
-          : secondsToMediaFrames(clip.inSeconds, edit.output.fps);
-      hasUnconfirmedPreview ||= proxy.normalization === 'unconfirmed-watermarked';
-    } else {
-      const item = graded?.items.find((candidate) => candidate.clipId === clip.id);
-      if (!item) {
-        throw new Error(`No graded intermediate generated for clip ${clip.id}`);
+          clip,
+          sourcePath,
+          resolveInside(projectPath, original.relativePath),
+          buildProxyVideoFilter(
+            projectPath,
+            proxy.normalizerFile,
+            proxy.maximumDimension,
+          ),
+          proxy.normalizerFile
+            ? await hashFile(resolveInside(projectPath, proxy.normalizerFile))
+            : null,
+          proxy.normalization !== 'unconfirmed-watermarked',
+          priorPreviewStabilization?.items.find((item) => item.clipId === clip.id),
+          {detectionSourceChecksumSha256: original.checksumSha256},
+        );
+        sourcePath = stabilized.sourcePath;
+        sourceChecksumSha256 = stabilized.item.checksumSha256 ?? undefined;
+        previewStabilizationItems.push(stabilized.item);
+        trimBeforeFramesByClip[clip.id] =
+          stabilized.item.stabilization === 'applied'
+            ? 0
+            : secondsToMediaFrames(clip.inSeconds, edit.output.fps);
+        hasUnconfirmedPreview ||= proxy.normalization === 'unconfirmed-watermarked';
+      } else {
+        const item = graded?.items.find((candidate) => candidate.clipId === clip.id);
+        if (!item) {
+          throw new Error(`No graded intermediate generated for clip ${clip.id}`);
+        }
+        sourcePath = resolveInside(projectPath, item.path);
+        sourceChecksumSha256 = item.checksumSha256;
+        trimBeforeFramesByClip[clip.id] = 0;
       }
-      sourcePath = resolveInside(projectPath, item.path);
-      sourceChecksumSha256 = item.checksumSha256;
-      trimBeforeFramesByClip[clip.id] = 0;
+      const extension = path.extname(sourcePath).toLowerCase() || '.mov';
+      const staged = await stageImmutableFile(
+        sourcePath,
+        stageRoot,
+        `media/${clip.id}${extension}`,
+        sourceChecksumSha256,
+      );
+      media[clip.id] = staged;
     }
-    const extension = path.extname(sourcePath).toLowerCase() || '.mov';
-    const staged = await stageImmutableFile(
-      sourcePath,
-      stageRoot,
-      `media/${clip.id}${extension}`,
-      sourceChecksumSha256,
-    );
-    media[clip.id] = staged;
-  }
 
-  let music: string | null = null;
-  if (edit.music) {
-    const musicSource = sources.sources.find((source) => source.id === edit.music?.sourceId);
-    if (!musicSource || musicSource.mediaType !== 'audio') {
-      throw new Error(`Music source ${edit.music.sourceId} is missing`);
+    let music: string | null = null;
+    if (edit.music) {
+      const musicSource = sources.sources.find((source) => source.id === edit.music?.sourceId);
+      if (!musicSource || musicSource.mediaType !== 'audio') {
+        throw new Error(`Music source ${edit.music.sourceId} is missing`);
+      }
+      const input = resolveInside(projectPath, musicSource.relativePath);
+      const staged = await stageImmutableFile(
+        input,
+        stageRoot,
+        `music/${path.basename(input)}`,
+        musicSource.checksumSha256,
+      );
+      music = staged;
     }
-    const input = resolveInside(projectPath, musicSource.relativePath);
-    const staged = await stageImmutableFile(
-      input,
-      stageRoot,
-      `music/${path.basename(input)}`,
-      musicSource.checksumSha256,
-    );
-    music = staged;
-  }
 
-  let fontUrl: string | null = null;
-  const fontSource = sources.sources
-    .filter(
-      (source) =>
-        source.mediaType === 'font' && /\.(woff2?|ttf|otf)$/i.test(source.relativePath),
-    )
-    .sort((left, right) => left.relativePath.localeCompare(right.relativePath))[0];
-  if (fontSource) {
-    const font = resolveInside(projectPath, fontSource.relativePath);
-    const staged = await stageImmutableFile(
-      font,
-      stageRoot,
-      `fonts/${path.basename(font)}`,
-      fontSource.checksumSha256,
-    );
-    fontUrl = staged;
-  }
+    let fontUrl: string | null = null;
+    const fontSource = sources.sources
+      .filter(
+        (source) =>
+          source.mediaType === 'font' && /\.(woff2?|ttf|otf)$/i.test(source.relativePath),
+      )
+      .sort((left, right) => left.relativePath.localeCompare(right.relativePath))[0];
+    if (fontSource) {
+      const font = resolveInside(projectPath, fontSource.relativePath);
+      const staged = await stageImmutableFile(
+        font,
+        stageRoot,
+        `fonts/${path.basename(font)}`,
+        fontSource.checksumSha256,
+      );
+      fontUrl = staged;
+    }
 
-  const props: ReelRenderProps = {
-    edit,
-    media,
-    music,
-    captions: await loadCaptions(projectPath, edit),
-    watermark: hasUnconfirmedPreview ? 'UNNORMALIZED LOG PREVIEW - NOT FOR EXPORT' : null,
-    trimBeforeFramesByClip,
-    fontUrl,
-  };
-  if (target === 'preview') {
-    await writeJson(path.join(projectPath, 'analysis/preview-stabilization.json'), {
+    const props: ReelRenderProps = {
+      edit,
+      media,
+      music,
+      captions: await loadCaptions(projectPath, edit),
+      watermark: hasUnconfirmedPreview ? 'UNNORMALIZED LOG PREVIEW - NOT FOR EXPORT' : null,
+      trimBeforeFramesByClip,
+      fontUrl,
+    };
+    if (target === 'preview') {
+      await writeJson(path.join(projectPath, 'analysis/preview-stabilization.json'), {
+        schemaVersion: '1.0.0',
+        generatedAt: new Date().toISOString(),
+        items: previewStabilizationItems,
+      } satisfies PreviewStabilizationReport);
+    }
+    await writeJson(path.join(projectPath, `analysis/render-stage-${target}.json`), {
       schemaVersion: '1.0.0',
       generatedAt: new Date().toISOString(),
-      items: previewStabilizationItems,
-    } satisfies PreviewStabilizationReport);
+      fingerprint,
+      publicRelativeRoot,
+      props,
+    });
+    return {props, stageRoot, fingerprint};
+  } catch (error) {
+    try {
+      await removeRenderStage(engineRoot, stageRoot);
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        'Render-stage preparation failed and its partial stage could not be removed',
+      );
+    }
+    throw error;
   }
-  await writeJson(path.join(projectPath, `analysis/render-stage-${target}.json`), {
-    schemaVersion: '1.0.0',
-    generatedAt: new Date().toISOString(),
-    fingerprint,
-    publicRelativeRoot,
-    props,
-  });
-  return {props, stageRoot, fingerprint};
 };
