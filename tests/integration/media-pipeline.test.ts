@@ -376,10 +376,11 @@ describe('strict color gating', () => {
     });
     const stagedPreview = await prepareRenderProps(projectPath, repositoryRoot, 'preview');
     expect(stagedPreview.props.trimBeforeFramesByClip?.['shot-1']).toBe(0);
-    expect(stagedPreview.props.fontUrl).toMatch(/\/fonts\/NestedDirector\.ttf$/);
+    expect(stagedPreview.props.media['shot-1']).toMatch(/^media\/shot-1\./);
+    expect(stagedPreview.props.fontUrl).toMatch(/^fonts\/NestedDirector\.ttf$/);
     expect(
       await readFile(
-        path.join(repositoryRoot, 'public', stagedPreview.props.fontUrl!),
+        path.join(stagedPreview.stageRoot, stagedPreview.props.fontUrl!),
         'utf8',
       ),
     ).toBe('synthetic nested font');

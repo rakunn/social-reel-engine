@@ -1,26 +1,10 @@
 import {Command, Option} from 'commander';
 import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
-import {runDoctor} from './commands/doctor';
 import {resolveProjectPath} from './core/paths';
-import {analyzeSources} from './media/analyze';
-import {analyzeMusic} from './media/beats';
-import {generateGradedStills, gradeSelectedClips} from './media/grade';
-import {generateProxies} from './media/proxy';
-import {runQc} from './media/qc-report';
-import {approveColor, approveEdit} from './edit/approve';
-import {confirmRights} from './edit/rights';
-import {validateEdit} from './edit/validate';
-import {ingestFiles, INPUT_KINDS, type InputKind} from './project/ingest';
-import {installCatalogLut, readLutCatalog} from './project/library';
-import {assertProjectScaffold, createReelProject, getProjectStatus} from './project/workspace';
-import {
-  runMediaOperation,
-  type MediaOperationCommand,
-  type MediaOperationContext,
-} from './project/operation';
-import {renderMasterAndDelivery, renderPreview} from './render/remotion';
-import {exitCodeForRenderError} from './render/remotion-supervisor';
+import {INPUT_KINDS, type InputKind} from './project/ingest';
+import type {MediaOperationCommand, MediaOperationContext} from './project/operation';
+import {exitCodeForRenderError} from './render/errors';
 
 export const ENGINE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -37,6 +21,8 @@ const runTrackedMediaCommand = async <T>(
   operation: (context: MediaOperationContext) => Promise<T>,
 ): Promise<T> => {
   const projectPath = project(reelName);
+  const {assertProjectScaffold} = await import('./project/workspace');
+  const {runMediaOperation} = await import('./project/operation');
   await assertProjectScaffold(projectPath);
   return await runMediaOperation(projectPath, command, async ({update, assertOwnership}) => {
     await update({phase});
@@ -56,6 +42,7 @@ export const createCli = (): Command => {
     .command('doctor')
     .description('Verify Node, Remotion, FFmpeg, librosa, and the local LUT library')
     .action(async () => {
+      const {runDoctor} = await import('./commands/doctor');
       const report = await runDoctor(ENGINE_ROOT);
       print(report);
       if (!report.ok) process.exitCode = 1;
@@ -67,6 +54,7 @@ export const createCli = (): Command => {
     .option('--title <title>')
     .description('Create a new isolated reel job from the template')
     .action(async (reelName: string, options: {title?: string}) => {
+      const {createReelProject} = await import('./project/workspace');
       const projectPath = await createReelProject({
         engineRoot: ENGINE_ROOT,
         reelName,
@@ -91,6 +79,8 @@ export const createCli = (): Command => {
         files: string[],
         options: {kind: InputKind; library?: string[]; listLibrary?: boolean},
       ) => {
+        const {ingestFiles} = await import('./project/ingest');
+        const {installCatalogLut, readLutCatalog} = await import('./project/library');
         if (options.listLibrary) {
           print(await readLutCatalog(ENGINE_ROOT));
           return;
@@ -111,19 +101,21 @@ export const createCli = (): Command => {
     .command('analyze')
     .argument('<reel-name>')
     .description('Checksum and ffprobe every supplied input')
-    .action(async (reelName: string) =>
+    .action(async (reelName: string) => {
+      const {analyzeSources} = await import('./media/analyze');
       print(
         await runTrackedMediaCommand(reelName, 'analyze', 'checking-inputs', async () =>
           await analyzeSources(project(reelName)),
         ),
-      ),
-    );
+      );
+    });
 
   program
     .command('proxy')
     .argument('<reel-name>')
     .description('Create normalized or visibly watermarked viewing proxies and contact sheets')
-    .action(async (reelName: string) =>
+    .action(async (reelName: string) => {
+      const {generateProxies} = await import('./media/proxy');
       print(
         await runTrackedMediaCommand(reelName, 'proxy', 'preparing-proxies', async ({update}) =>
           await generateProxies(project(reelName), new Date(), {
@@ -132,26 +124,28 @@ export const createCli = (): Command => {
             },
           }),
         ),
-      ),
-    );
+      );
+    });
 
   program
     .command('beats')
     .argument('<reel-name>')
     .description('Analyze supplied music beats and onsets with librosa')
-    .action(async (reelName: string) =>
+    .action(async (reelName: string) => {
+      const {analyzeMusic} = await import('./media/beats');
       print(
         await runTrackedMediaCommand(reelName, 'beats', 'analyzing-beats', async () =>
           await analyzeMusic(project(reelName), ENGINE_ROOT),
         ),
-      ),
-    );
+      );
+    });
 
   program
     .command('validate-edit')
     .argument('<reel-name>')
     .description('Validate edit schema, bounds, rates, transitions, media, and duration')
     .action(async (reelName: string) => {
+      const {validateEdit} = await import('./edit/validate');
       const result = await validateEdit(project(reelName));
       print(result);
       if (!result.valid) process.exitCode = 1;
@@ -161,7 +155,8 @@ export const createCli = (): Command => {
     .command('preview')
     .argument('<reel-name>')
     .description('Render a 540×960 H.264 rough-cut preview')
-    .action(async (reelName: string) =>
+    .action(async (reelName: string) => {
+      const {renderPreview} = await import('./render/remotion');
       print({
         preview: await runTrackedMediaCommand(reelName, 'preview', 'rendering-preview', async ({update}) =>
           await renderPreview(project(reelName), ENGINE_ROOT, {
@@ -170,20 +165,24 @@ export const createCli = (): Command => {
             },
           }),
         ),
-      }),
-    );
+      });
+    });
 
   program
     .command('approve-edit')
     .argument('<reel-name>')
     .description('Approve the exact current editorial hash')
-    .action(async (reelName: string) => print(await approveEdit(project(reelName))));
+    .action(async (reelName: string) => {
+      const {approveEdit} = await import('./edit/approve');
+      print(await approveEdit(project(reelName)));
+    });
 
   program
     .command('grade-stills')
     .argument('<reel-name>')
     .description('Generate hash-bound graded reference PNGs for color review')
-    .action(async (reelName: string) =>
+    .action(async (reelName: string) => {
+      const {generateGradedStills} = await import('./media/grade');
       print(
         await runTrackedMediaCommand(reelName, 'grade-stills', 'generating-reference-stills', async ({update}) =>
           await generateGradedStills(project(reelName), new Date(), {
@@ -192,26 +191,33 @@ export const createCli = (): Command => {
             },
           }),
         ),
-      ),
-    );
+      );
+    });
 
   program
     .command('approve-color')
     .argument('<reel-name>')
     .description('Approve the exact current grade and LUT hash after reviewing reference frames')
-    .action(async (reelName: string) => print(await approveColor(project(reelName))));
+    .action(async (reelName: string) => {
+      const {approveColor} = await import('./edit/approve');
+      print(await approveColor(project(reelName)));
+    });
 
   program
     .command('confirm-rights')
     .argument('<reel-name>')
     .description('Record explicit user rights confirmation for the current used asset checksums')
-    .action(async (reelName: string) => print(await confirmRights(project(reelName))));
+    .action(async (reelName: string) => {
+      const {confirmRights} = await import('./edit/rights');
+      print(await confirmRights(project(reelName)));
+    });
 
   program
     .command('grade')
     .argument('<reel-name>')
     .description('Create approved 10-bit ProRes shot intermediates with optional stabilization')
-    .action(async (reelName: string) =>
+    .action(async (reelName: string) => {
+      const {gradeSelectedClips} = await import('./media/grade');
       print(
         await runTrackedMediaCommand(reelName, 'grade', 'grading-selected-clips', async ({update}) =>
           await gradeSelectedClips(project(reelName), new Date(), {
@@ -220,14 +226,15 @@ export const createCli = (): Command => {
             },
           }),
         ),
-      ),
-    );
+      );
+    });
 
   program
     .command('render')
     .argument('<reel-name>')
     .description('Render the approved ProRes master and normalized H.264 delivery')
-    .action(async (reelName: string) =>
+    .action(async (reelName: string) => {
+      const {renderMasterAndDelivery} = await import('./render/remotion');
       print(
         await runTrackedMediaCommand(reelName, 'render', 'rendering-master', async ({update}) =>
           await renderMasterAndDelivery(project(reelName), ENGINE_ROOT, {
@@ -236,8 +243,8 @@ export const createCli = (): Command => {
             },
           }),
         ),
-      ),
-    );
+      );
+    });
 
   program
     .command('qc')
@@ -249,6 +256,7 @@ export const createCli = (): Command => {
     )
     .description('Write machine-readable and human-readable output QC')
     .action(async (reelName: string, options: {target: 'preview' | 'master' | 'delivery'}) => {
+      const {runQc} = await import('./media/qc-report');
       const report = await runTrackedMediaCommand(
         reelName,
         'qc',
@@ -263,7 +271,10 @@ export const createCli = (): Command => {
     .command('status')
     .argument('<reel-name>')
     .description('Show the current checkpoint and next action')
-    .action(async (reelName: string) => print(await getProjectStatus(project(reelName))));
+    .action(async (reelName: string) => {
+      const {getProjectStatus} = await import('./project/workspace');
+      print(await getProjectStatus(project(reelName)));
+    });
 
   return program;
 };

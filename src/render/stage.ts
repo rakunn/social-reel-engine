@@ -179,7 +179,7 @@ export const prepareRenderProps = async (
       `media/${clip.id}${extension}`,
       sourceChecksumSha256,
     );
-    media[clip.id] = `${publicRelativeRoot}/${staged}`;
+    media[clip.id] = staged;
   }
 
   let music: string | null = null;
@@ -195,7 +195,7 @@ export const prepareRenderProps = async (
       `music/${path.basename(input)}`,
       musicSource.checksumSha256,
     );
-    music = `${publicRelativeRoot}/${staged}`;
+    music = staged;
   }
 
   let fontUrl: string | null = null;
@@ -213,7 +213,7 @@ export const prepareRenderProps = async (
       `fonts/${path.basename(font)}`,
       fontSource.checksumSha256,
     );
-    fontUrl = `${publicRelativeRoot}/${staged}`;
+    fontUrl = staged;
   }
 
   const props: ReelRenderProps = {

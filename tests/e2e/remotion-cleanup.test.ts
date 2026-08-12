@@ -113,7 +113,7 @@ const runForcedCancellation = async (
   baseline: RemotionProcessInventoryEntry[],
 ): Promise<void> => {
   const prepared = await prepareSyntheticReel(repositoryRoot, {silent: true});
-  const {props} = await prepareRenderProps(
+  const {props, stageRoot} = await prepareRenderProps(
     prepared.projectPath,
     repositoryRoot,
     'preview',
@@ -126,6 +126,7 @@ const runForcedCancellation = async (
   await writeJson(requestPath, {
     schemaVersion: '1.0.0',
     engineRoot: repositoryRoot,
+    publicDir: stageRoot,
     target: 'preview',
     rawOutput: path.join(
       prepared.projectPath,

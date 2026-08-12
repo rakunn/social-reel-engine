@@ -36,6 +36,7 @@ const makeTemporaryDirectory = async (): Promise<string> => {
 const makeRequest = (directory: string): RemotionWorkerRequest => ({
   schemaVersion: '1.0.0',
   engineRoot: repositoryRoot,
+  publicDir: path.join(directory, 'public'),
   target: 'preview',
   rawOutput: path.join(directory, 'work/render/preview-remotion.mp4'),
   inputProps: {reelName: 'supervisor-test'},

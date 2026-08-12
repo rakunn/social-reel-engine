@@ -18,6 +18,13 @@ const runIsolatedNode = async (
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({stdout, stderr, timedOut});
+    };
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
@@ -33,12 +40,17 @@ const runIsolatedNode = async (
       } else {
         child.kill('SIGKILL');
       }
+      child.stdout.destroy();
+      child.stderr.destroy();
+      finish();
     }, timeoutMs);
-    child.once('error', reject);
-    child.once('close', () => {
+    child.once('error', (error) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      resolve({stdout, stderr, timedOut});
+      reject(error);
     });
+    child.once('close', finish);
   });
 
 describe('CLI startup isolation', () => {

@@ -11,42 +11,29 @@ import {
 import {chmod, mkdir, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {z} from 'zod';
-import {RenderSettingsSchema} from '../contracts/schemas';
 import {readJson, writeJson} from '../core/json';
 import {renderOptionsFor} from './policy';
+import {
+  RemotionWorkerRequestSchema,
+  RemotionWorkerResultSchema,
+  type BrowserLifecycleFiles,
+  type RemotionWorkerRequest,
+  type RemotionWorkerResult,
+  type WorkerSignal,
+} from './remotion-protocol';
 
-export const RemotionWorkerRequestSchema = z.object({
-  schemaVersion: z.literal('1.0.0'),
-  engineRoot: z.string().min(1),
-  target: z.enum(['preview', 'master']),
-  rawOutput: z.string().min(1),
-  inputProps: z.record(z.string(), z.unknown()),
-  settings: RenderSettingsSchema,
-  browserLifecycle: z
-    .object({
-      launcherPath: z.string().min(1),
-      pgidPath: z.string().min(1),
-    })
-    .optional(),
-});
+export {
+  RemotionWorkerRequestSchema,
+  RemotionWorkerResultSchema,
+  type BrowserLifecycleFiles,
+  type RemotionWorkerRequest,
+  type RemotionWorkerResult,
+  type WorkerSignal,
+} from './remotion-protocol';
 
-export const RemotionWorkerResultSchema = z.discriminatedUnion('ok', [
-  z.object({schemaVersion: z.literal('1.0.0'), ok: z.literal(true)}),
-  z.object({
-    schemaVersion: z.literal('1.0.0'),
-    ok: z.literal(false),
-    signal: z.enum(['SIGINT', 'SIGTERM', 'SIGHUP']).nullable(),
-    error: z.object({message: z.string(), stack: z.string().nullable()}),
-  }),
-]);
-
-export type RemotionWorkerRequest = z.infer<typeof RemotionWorkerRequestSchema>;
-export type RemotionWorkerResult = z.infer<typeof RemotionWorkerResultSchema>;
-export type WorkerSignal = 'SIGINT' | 'SIGTERM' | 'SIGHUP';
-export type BrowserLifecycleFiles = NonNullable<
-  RemotionWorkerRequest['browserLifecycle']
->;
+// Headless Shell is the reliable, non-GUI Remotion runtime on macOS and Linux.
+// Chrome for Testing aborts on this managed macOS desktop before rendering.
+const RENDER_CHROME_MODE = 'headless-shell' as const;
 
 export const DEFAULT_BROWSER_CLOSE_TIMEOUT_MS = 10_000;
 
@@ -104,7 +91,11 @@ export type RemotionWorkerDependencies<
   prepareBrowserLauncher?(lifecycle: BrowserLifecycleFiles): Promise<void>;
   openBrowser(
     browser: 'chrome',
-    options: {logLevel: 'info'; browserExecutable?: string},
+    options: {
+      logLevel: 'info';
+      browserExecutable?: string;
+      chromeMode?: 'chrome-for-testing' | 'headless-shell';
+    },
   ): Promise<Browser>;
   selectComposition(options: SelectCompositionInput<Browser>): Promise<Composition>;
   renderMedia(options: RawRenderInput<Browser, Composition>): Promise<unknown>;
@@ -153,7 +144,7 @@ const defaultDependencies: RemotionWorkerDependencies<DefaultBrowser, DefaultCom
   prepareBrowserLauncher: async (lifecycle) => {
     const status = await ensureBrowser({
       logLevel: 'info',
-      chromeMode: 'headless-shell',
+      chromeMode: RENDER_CHROME_MODE,
     });
     if (!('path' in status)) {
       throw new Error(`Remotion browser is unavailable: ${status.type}`);
@@ -214,7 +205,7 @@ export const runRawRemotionRender = async <
   const request = RemotionWorkerRequestSchema.parse(rawRequest);
   const serveUrl = await dependencies.bundle({
     entryPoint: path.join(request.engineRoot, 'src/remotion/index.ts'),
-    publicDir: path.join(request.engineRoot, 'public'),
+    publicDir: request.publicDir,
     rootDir: request.engineRoot,
     enableCaching: true,
     symlinkPublicDir: true,
@@ -235,7 +226,8 @@ export const runRawRemotionRender = async <
   try {
     browser = await dependencies.openBrowser('chrome', {
       logLevel: 'info',
-      ...(request.browserLifecycle === undefined
+      chromeMode: RENDER_CHROME_MODE,
+      ...(request.browserLifecycle === undefined || process.platform === 'darwin'
         ? {}
         : {browserExecutable: request.browserLifecycle.launcherPath}),
     });
