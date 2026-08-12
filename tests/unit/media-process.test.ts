@@ -1,5 +1,7 @@
 import {spawn, type ChildProcess} from 'node:child_process';
 import {EventEmitter} from 'node:events';
+import {access, mkdtemp, rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {afterEach, describe, expect, it} from 'vitest';
@@ -15,6 +17,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const fixture = path.join(root, 'tests/fixtures/process-runner-tree.ts');
 const leakedPids = new Set<number>();
 const sentinels: ChildProcess[] = [];
+const temporaryDirectories: string[] = [];
 
 const killPidIfPresent = (pid: number): void => {
   try {
@@ -30,12 +33,30 @@ const pidFrom = (output: string, label: 'group' | 'child'): number => {
   return Number(match[1]);
 };
 
-afterEach(() => {
+const waitForPath = async (filePath: string): Promise<void> => {
+  const deadline = Date.now() + 5_000;
+  while (true) {
+    try {
+      await access(filePath);
+      return;
+    } catch (error) {
+      if (Date.now() >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+};
+
+afterEach(async () => {
   for (const pid of leakedPids) killPidIfPresent(pid);
   leakedPids.clear();
   for (const sentinel of sentinels.splice(0)) {
     if (sentinel.pid !== undefined) killPidIfPresent(sentinel.pid);
   }
+  await Promise.all(
+    temporaryDirectories
+      .splice(0)
+      .map(async (directory) => await rm(directory, {recursive: true, force: true})),
+  );
 });
 
 describe.runIf(process.platform !== 'win32')('owned media process execution', () => {
@@ -130,6 +151,29 @@ describe.runIf(process.platform !== 'win32')('owned media process execution', ()
       },
     );
     setTimeout(() => signalTarget.emit('SIGINT'), 40);
+
+    await expect(running).rejects.toEqual(expect.any(RenderInterruptedError));
+    expect(signalTarget.listenerCount('SIGINT')).toBe(0);
+    expect(signalTarget.listenerCount('SIGTERM')).toBe(0);
+    expect(signalTarget.listenerCount('SIGHUP')).toBe(0);
+  });
+
+  it('keeps interruption handlers installed through surviving-descendant cleanup', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'reel-media-process-'));
+    temporaryDirectories.push(directory);
+    const cleanupMarker = path.join(directory, 'cleanup-started');
+    const signalTarget = new EventEmitter();
+    const running = runProcess(
+      process.execPath,
+      ['--import', 'tsx', fixture, 'leave-stubborn-child', cleanupMarker],
+      {
+        signalTarget,
+        cleanupTimeouts: {termMs: 500, killMs: 500, pollMs: 10},
+      },
+    );
+
+    await waitForPath(cleanupMarker);
+    signalTarget.emit('SIGINT');
 
     await expect(running).rejects.toEqual(expect.any(RenderInterruptedError));
     expect(signalTarget.listenerCount('SIGINT')).toBe(0);

@@ -244,13 +244,18 @@ export const runProcess = async (
     reportCleanupFailure = (error) => resolve({kind: 'cleanup-error', error});
   });
 
+  const beginCleanup = (): Promise<void> => {
+    cleanupPromise ??= stopOwned(owned, options.cleanupTimeouts ?? {});
+    void cleanupPromise.catch(reportCleanupFailure);
+    return cleanupPromise;
+  };
+
   const beginTermination = (
     reason: ProcessTermination,
   ): void => {
     if (termination !== null) return;
     termination = reason;
-    cleanupPromise = stopOwned(owned, options.cleanupTimeouts ?? {});
-    void cleanupPromise.catch(reportCleanupFailure);
+    beginCleanup();
   };
 
   const resetIdleTimer = (): void => {
@@ -297,9 +302,6 @@ export const runProcess = async (
     if (wallTimer !== undefined) clearTimeout(wallTimer);
     if (idleTimer !== undefined) clearTimeout(idleTimer);
     options.signal?.removeEventListener('abort', abortListener);
-    for (const [signal, listener] of signalListeners) {
-      signalTarget.off(signal, listener);
-    }
   }
 
   const outcome =
@@ -312,10 +314,14 @@ export const runProcess = async (
     if (cleanupPromise !== null) {
       await cleanupPromise;
     } else if (owned.pgid !== null && processGroupExists(owned.pgid)) {
-      await stopOwned(owned, options.cleanupTimeouts ?? {});
+      await beginCleanup();
     }
   } catch (error) {
     cleanupError ??= error;
+  } finally {
+    for (const [signal, listener] of signalListeners) {
+      signalTarget.off(signal, listener);
+    }
   }
 
   const result = resultFor(command, args, stdout, stderr, outcome.exitCode);
