@@ -70,17 +70,19 @@ export const spawnOwnedProcess = ({
     detached,
     stdio: 'pipe',
   });
-  const pid = child.pid;
-  if (pid === undefined) {
-    throw new Error(`Failed to spawn owned process: ${command}`);
-  }
-
   const closed = new Promise<{exitCode: number | null; signal: NodeJS.Signals | null}>(
     (resolve, reject) => {
       child.once('error', reject);
       child.once('close', (exitCode, signal) => resolve({exitCode, signal}));
     },
   );
+  const pid = child.pid;
+  if (pid === undefined) {
+    // A failed spawn reports its detailed ENOENT/EACCES error asynchronously. Consume that
+    // event before returning the synchronous ownership error so it cannot crash the caller.
+    void closed.catch(() => undefined);
+    throw new Error(`Failed to spawn owned process: ${command}`);
+  }
 
   return {
     child,
@@ -176,27 +178,59 @@ const signalProcessGroup = (pgid: number, signal: NodeJS.Signals): boolean => {
   }
 };
 
+export const processGroupExists = (pgid: number): boolean => {
+  assertPgid(pgid);
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    if ((error as NodeJS.ErrnoException).code === 'EPERM') return true;
+    throw error;
+  }
+};
+
+const waitForProcessGroupGone = async (
+  pgid: number,
+  timeoutMs: number,
+  pollMs: number,
+): Promise<boolean> => {
+  const deadline = Date.now() + Math.max(0, timeoutMs);
+  const interval = Math.max(1, pollMs);
+  while (processGroupExists(pgid)) {
+    if (Date.now() >= deadline) return false;
+    await wait(Math.min(interval, Math.max(1, deadline - Date.now())));
+  }
+  return true;
+};
+
 export const stopOwnedProcessGroup = async (
   pgid: number,
   timeouts: Partial<CleanupTimeouts> = {},
 ): Promise<void> => {
   assertPgid(pgid);
   const resolved = {...DEFAULT_CLEANUP_TIMEOUTS, ...timeouts};
-  const initialMembers = await listProcessGroupMembers(pgid);
-  if (initialMembers.length === 0 || !signalProcessGroup(pgid, 'SIGTERM')) {
+  if (!processGroupExists(pgid) || !signalProcessGroup(pgid, 'SIGTERM')) {
     return;
   }
 
-  let members = await waitForProcessGroupExit(pgid, resolved.termMs, resolved.pollMs);
-  if (members.length === 0) {
+  if (await waitForProcessGroupGone(pgid, resolved.termMs, resolved.pollMs)) {
     return;
   }
   if (!signalProcessGroup(pgid, 'SIGKILL')) {
     return;
   }
 
-  members = await waitForProcessGroupExit(pgid, resolved.killMs, resolved.pollMs);
-  if (members.length > 0) {
+  if (!(await waitForProcessGroupGone(pgid, resolved.killMs, resolved.pollMs))) {
+    let members: ProcessGroupMember[];
+    try {
+      members = await listProcessGroupMembers(pgid);
+    } catch (error) {
+      throw new Error(
+        `Process group ${pgid} did not exit and its members could not be inspected: ${error instanceof Error ? error.message : String(error)}`,
+        {cause: error},
+      );
+    }
     throw new OwnedProcessCleanupError(pgid, members);
   }
 };

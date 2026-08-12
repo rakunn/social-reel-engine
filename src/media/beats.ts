@@ -97,6 +97,7 @@ export const analyzeMusic = async (
       NUMBA_CACHE_DIR: numbaCache,
       XDG_CACHE_HOME: cacheRoot,
     },
+    timeoutMs: 5 * 60_000,
   });
   const parsed = JSON.parse(processResult.stdout) as Record<string, unknown>;
   const result = BeatAnalysisSchema.parse({

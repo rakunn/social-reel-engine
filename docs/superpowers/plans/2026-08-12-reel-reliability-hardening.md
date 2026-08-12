@@ -114,7 +114,7 @@ Run: `npx vitest run tests/unit/render-scratch.test.ts tests/unit/remotion-super
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Task 2**
+- [x] **Step 7: Commit Task 2**
 
 Commit: `fix(render): clean disposable render scratch files`
 
@@ -130,27 +130,27 @@ Commit: `fix(render): clean disposable render scratch files`
 - Modify: `src/commands/doctor.ts`
 - Modify: Python/music command callers where applicable
 
-- [ ] **Step 1: Write failing lifecycle tests**
+- [x] **Step 1: Write failing lifecycle tests**
 
 Exercise a successful command, a non-zero command, an idle timeout, an explicit abort, and a parent that exits while leaving a descendant in its process group. Assert the exact owned group is empty after every terminal path and an unrelated sentinel is alive.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `npx vitest run tests/unit/media-process.test.ts`
 
 Expected: FAIL because `runProcess()` has no timeout, abort, or owned-group contract.
 
-- [ ] **Step 3: Implement bounded execution on the existing process-group primitives**
+- [x] **Step 3: Implement bounded execution on the existing process-group primitives**
 
 Extend `runProcess()` with `timeoutMs`, `idleTimeoutMs`, `signal`, and bounded captured output. Reset the idle timer for either output stream. On timeout, abort, spawn error, or surviving descendants, stop only the owned PGID and await cleanup before rejecting. Preserve command, exit code/signal, and a bounded stdout/stderr tail in errors.
 
-- [ ] **Step 4: Migrate critical callers with appropriate policies**
+- [x] **Step 4: Migrate critical callers with appropriate policies**
 
 Use explicit wall-clock limits for FFprobe and Doctor checks, an idle limit for FFmpeg, and a bounded wall-clock limit for Python/librosa analysis. Keep long render supervision on its existing specialized worker protocol.
 
-- [ ] **Step 5: Verify focused tests and interruption behavior**
+- [x] **Step 5: Verify focused tests and interruption behavior**
 
-Run: `npx vitest run tests/unit/media-process.test.ts tests/unit/ffmpeg.test.ts tests/unit/doctor.test.ts tests/unit/process-group.test.ts`
+Run: `npx vitest run tests/unit/media-process.test.ts tests/unit/ffmpeg-process-policy.test.ts tests/unit/process-group.test.ts tests/unit/remotion-supervisor.test.ts tests/integration/doctor.test.ts tests/integration/media-pipeline.test.ts`
 
 Expected: PASS with no owned descendants left behind.
 

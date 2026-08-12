@@ -28,7 +28,7 @@ export type CheckRemotionRuntimeOptions = {
   runProcess?: (
     command: string,
     args: readonly string[],
-    options: {allowFailure: boolean; env: NodeJS.ProcessEnv},
+    options: {allowFailure: boolean; env: NodeJS.ProcessEnv; timeoutMs: number},
   ) => Promise<ProcessResult>;
 };
 
@@ -130,7 +130,7 @@ export const checkRemotionRuntime = async (
         const result = await processRunner(
           runtime.ffprobePath,
           ['-hide_banner', '-version'],
-          {allowFailure: true, env: runtime.workerEnvironment},
+          {allowFailure: true, env: runtime.workerEnvironment, timeoutMs: 30_000},
         );
         const output = `${result.stdout}\n${result.stderr}`.trim();
         if (result.exitCode !== 0 || !/ffprobe version/i.test(output)) {
