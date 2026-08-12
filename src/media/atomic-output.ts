@@ -66,7 +66,14 @@ export const writeAtomically = async <T>(
     await rename(temporaryPath, outputPath);
     return result;
   } catch (error) {
-    await unlinkIfPresent(temporaryPath);
+    try {
+      await unlinkIfPresent(temporaryPath);
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        'Atomic output failed and its partial file could not be removed',
+      );
+    }
     throw error;
   }
 };

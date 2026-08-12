@@ -1,4 +1,4 @@
-import {mkdtemp, readdir, readFile, rm, writeFile} from 'node:fs/promises';
+import {mkdir, mkdtemp, readdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
@@ -7,6 +7,7 @@ import {
   runWithPublicationGuard,
 } from '../../src/core/publication-guard';
 import {writeAtomically} from '../../src/media/atomic-output';
+import {exitCodeForRenderError, RenderInterruptedError} from '../../src/render/errors';
 
 const temporaryDirectories: string[] = [];
 
@@ -35,6 +36,26 @@ describe('atomic media output', () => {
 
     await expect(readFile(output, 'utf8')).resolves.toBe('known-good-proxy');
     await expect(readdir(directory)).resolves.toEqual(['proxy.mp4']);
+  });
+
+  it('preserves an interrupt when partial-output cleanup also fails', async () => {
+    const directory = await makeDirectory();
+    const output = path.join(directory, 'proxy.mp4');
+    const interruption = new RenderInterruptedError('SIGTERM');
+
+    let thrown: unknown;
+    try {
+      await writeAtomically(output, async (temporary) => {
+        await mkdir(temporary);
+        throw interruption;
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AggregateError);
+    expect((thrown as AggregateError).errors[0]).toBe(interruption);
+    expect(exitCodeForRenderError(thrown)).toBe(143);
   });
 
   it('validates a completed temporary output before publishing it', async () => {
