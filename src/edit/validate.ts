@@ -5,9 +5,11 @@ import {
   ReelBriefSchema,
   type SourceManifest,
   type EditManifest,
+  type ReelBrief,
 } from '../contracts/schemas';
 import {readJson} from '../core/json';
 import {
+  clipDurationSeconds,
   secondsToFrames,
   timelineDurationSeconds,
   timelineDurationFrames,
@@ -50,6 +52,41 @@ export type ValidateEditOptions = {
   integrity?: SourceIntegrityContext;
 };
 
+const CAROUSEL_CARD_MIN_SECONDS = 4;
+const CAROUSEL_CARD_MAX_SECONDS = 5;
+
+export const carouselContractFailures = (
+  edit: EditManifest,
+  brief: ReelBrief,
+): string[] => {
+  if (brief.projectType !== 'carousel') return [];
+  const failures: string[] = [];
+  if (edit.clips.length < 2) {
+    failures.push('A carousel requires at least two cards');
+  }
+  if (edit.titles.length > 0) {
+    failures.push('Carousel cards cannot use timeline-global titles');
+  }
+  if (edit.music) {
+    failures.push('Carousel cards cannot use timeline-global music');
+  }
+  if (edit.captions) {
+    failures.push('Carousel cards cannot use timeline-global captions');
+  }
+  for (const clip of edit.clips) {
+    const duration = clipDurationSeconds(clip);
+    if (duration < CAROUSEL_CARD_MIN_SECONDS || duration > CAROUSEL_CARD_MAX_SECONDS) {
+      failures.push(
+        `${clip.id}: card duration must be ${CAROUSEL_CARD_MIN_SECONDS}–${CAROUSEL_CARD_MAX_SECONDS} seconds; observed ${duration.toFixed(3)} seconds`,
+      );
+    }
+    if (clip.transitionAfter.type !== 'none' || clip.transitionAfter.durationSeconds !== 0) {
+      failures.push(`${clip.id}: carousel cards cannot have a transition after them`);
+    }
+  }
+  return failures;
+};
+
 export const validateEdit = async (
   projectPath: string,
   input?: unknown,
@@ -59,12 +96,22 @@ export const validateEdit = async (
     input ?? (await readJson(path.join(projectPath, 'edits/edit.json'))),
   );
   const brief = ReelBriefSchema.parse(await readJson(path.join(projectPath, 'brief.json')));
-  const failures = validateTransitionDurations(edit);
+  const failures = [
+    ...validateTransitionDurations(edit),
+    ...carouselContractFailures(edit, brief),
+  ];
   const warnings: string[] = [];
   if (edit.reelName !== brief.identity.reelName) {
     failures.push(
       `Edit reel identity ${edit.reelName} does not match project brief identity ${brief.identity.reelName}`,
     );
+  }
+  if (
+    edit.output.width !== brief.output.width ||
+    edit.output.height !== brief.output.height ||
+    edit.output.fps !== brief.output.fps
+  ) {
+    failures.push('Edit output dimensions and frame rate do not match the project brief');
   }
   const durationFrames = timelineDurationFrames(edit);
   if (!brief.options.music && edit.music) {
@@ -222,8 +269,11 @@ export const validateEdit = async (
 
   const durationSeconds = timelineDurationSeconds(edit);
   if (
+    brief.projectType === 'reel' &&
+    (
     durationSeconds < brief.target.minSeconds ||
     durationSeconds > brief.target.maxSeconds
+    )
   ) {
     warnings.push(
       `Timeline is ${durationSeconds.toFixed(2)}s; the project target is ${brief.target.minSeconds}–${brief.target.maxSeconds}s`,

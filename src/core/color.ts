@@ -1,4 +1,5 @@
 import {
+  GradeTreatmentSchema,
   LutDefinitionSchema,
   type LutDefinition,
 } from '../contracts/schemas';
@@ -13,6 +14,7 @@ export type ColorOperation =
   | {type: 'technical-lut'; lut: LutDefinition; mix: 1}
   | {type: 'creative-lut'; lut: LutDefinition; mix: number}
   | {type: 'combined-lut'; lut: LutDefinition; mix: 1}
+  | {type: 'land-haze'; strength: number}
   | {type: 'rec709-output'; primaries: 'bt709'; transfer: 'bt709'; matrix: 'bt709'};
 
 export type ColorChainInput = {
@@ -23,6 +25,7 @@ export type ColorChainInput = {
   creative?: unknown;
   combined?: unknown;
   creativeMix?: number;
+  treatment?: unknown;
 };
 
 export const buildColorChain = (
@@ -31,6 +34,7 @@ export const buildColorChain = (
   const technical = input.technical ? LutDefinitionSchema.parse(input.technical) : null;
   const creative = input.creative ? LutDefinitionSchema.parse(input.creative) : null;
   const combined = input.combined ? LutDefinitionSchema.parse(input.combined) : null;
+  const treatment = input.treatment ? GradeTreatmentSchema.parse(input.treatment) : null;
 
   if (technical && technical.kind !== 'technical') {
     throw new Error('technical must refer to a technical LUT');
@@ -71,6 +75,10 @@ export const buildColorChain = (
       }
       operations.push({type: 'creative-lut', lut: creative, mix});
     }
+  }
+
+  if (treatment) {
+    operations.push({type: treatment.kind, strength: treatment.strength});
   }
 
   operations.push({

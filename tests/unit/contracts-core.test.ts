@@ -3,8 +3,10 @@ import {
   ApprovalStateSchema,
   EditManifestSchema,
   LutDefinitionSchema,
+  PhotoConfigSchema,
   QcReportSchema,
   ReelBriefSchema,
+  RenderSettingsSchema,
   SourceManifestSchema,
 } from '../../src/contracts/schemas';
 import {assertSafeReelName, resolveProjectPath} from '../../src/core/paths';
@@ -81,11 +83,104 @@ const edit = {
 } as const;
 
 describe('versioned public contracts', () => {
+  it('accepts opt-in photo output profiles and rejects unsupported profile or count', () => {
+    expect(
+      PhotoConfigSchema.parse({
+        schemaVersion: '1.0.0',
+        enabled: true,
+        profiles: ['9:16', '4:5', '16:9'],
+        count: 5,
+        jpegQuality: 95,
+      }),
+    ).toEqual({
+      schemaVersion: '1.0.0',
+      enabled: true,
+      profiles: ['9:16', '4:5', '16:9'],
+      count: 5,
+      jpegQuality: 95,
+    });
+    expect(() =>
+      PhotoConfigSchema.parse({
+        schemaVersion: '1.0.0',
+        enabled: true,
+        profiles: ['3:2'],
+        count: 5,
+        jpegQuality: 95,
+      }),
+    ).toThrow(/profile|aspect/i);
+    expect(() =>
+      PhotoConfigSchema.parse({
+        schemaVersion: '1.0.0',
+        enabled: true,
+        profiles: ['9:16'],
+        count: 0,
+        jpegQuality: 95,
+      }),
+    ).toThrow(/count/i);
+  });
+
   it('accepts a canonical reel brief and rejects non-vertical output', () => {
     expect(ReelBriefSchema.parse(brief).target.idealSeconds).toBe(25);
     expect(() =>
       ReelBriefSchema.parse({...brief, output: {...brief.output, width: 1920}}),
     ).toThrow();
+  });
+
+  it('accepts the exact 1.91:1 carousel video contract and rejects arbitrary dimensions', () => {
+    const carouselBrief = {
+      ...brief,
+      projectType: 'carousel',
+      target: {minSeconds: 4, idealSeconds: 4.5, maxSeconds: 5},
+      output: {width: 1910, height: 1000, fps: 30},
+      options: {music: false, captions: false, cameraAudio: false},
+    } as const;
+    expect(ReelBriefSchema.parse(carouselBrief)).toEqual(
+      expect.objectContaining({
+        projectType: 'carousel',
+        output: {width: 1910, height: 1000, fps: 30},
+      }),
+    );
+    expect(
+      EditManifestSchema.parse({
+        ...edit,
+        output: {width: 1910, height: 1000, fps: 30},
+      }).output,
+    ).toEqual({width: 1910, height: 1000, fps: 30});
+    expect(() =>
+      ReelBriefSchema.parse({
+        ...carouselBrief,
+        output: {width: 1920, height: 1080, fps: 30},
+      }),
+    ).toThrow(/output|width|height|ratio/i);
+  });
+
+  it('accepts matching 1.91:1 preview and master render settings', () => {
+    expect(
+      RenderSettingsSchema.parse({
+        schemaVersion: '1.0.0',
+        proxy: {width: 960, height: 540, crf: 23},
+        preview: {width: 764, height: 400, crf: 20, audioBitrate: '192k'},
+        master: {
+          width: 1910,
+          height: 1000,
+          fps: 30,
+          videoCodec: 'prores_ks',
+          profile: 3,
+          pixelFormat: 'yuv422p10le',
+          audioCodec: 'pcm_s16le',
+          audioSampleRate: 48_000,
+        },
+        delivery: {
+          videoCodec: 'libx264',
+          pixelFormat: 'yuv420p',
+          crf: 17,
+          audioCodec: 'aac',
+          audioBitrate: '256k',
+          integratedLufs: -14,
+          truePeakDbtp: -1.5,
+        },
+      }).master,
+    ).toEqual(expect.objectContaining({width: 1910, height: 1000}));
   });
 
   it('allows unconfirmed source profiles but requires an ID when confirmed', () => {
@@ -208,8 +303,8 @@ describe('versioned public contracts', () => {
         checks: [],
         warnings: [],
         failures: [],
-      }).readable,
-    ).toBe(true);
+      }),
+    ).toEqual(expect.objectContaining({readable: true, renderArtifact: null}));
   });
 
   it('rejects a combined LUT stacked with a creative LUT', () => {
@@ -250,6 +345,27 @@ describe('versioned public contracts', () => {
 
     expect(parsed.clips[0].grade.creativeLutId).toBe('warm-film');
     expect(parsed.clips[0].grade.creativeMix).toBeUndefined();
+  });
+
+  it('accepts a bounded reusable land-haze treatment and binds it to the color hash', () => {
+    const parsed = EditManifestSchema.parse({
+      ...edit,
+      clips: [
+        {
+          ...edit.clips[0],
+          grade: {
+            ...edit.clips[0].grade,
+            treatment: {kind: 'land-haze', strength: 0.5},
+          },
+        },
+        ...edit.clips.slice(1),
+      ],
+    });
+
+    expect(parsed.clips[0].grade.treatment).toEqual({kind: 'land-haze', strength: 0.5});
+    expect(createColorHash(parsed, [])).not.toBe(
+      createColorHash(EditManifestSchema.parse(edit), []),
+    );
   });
 
   it('rejects clip selections that round to zero output frames', () => {

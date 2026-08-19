@@ -9,7 +9,7 @@ Only an explicit user decision after seeing the exact current artifact authorize
 1. Validate the current edit.
 2. Render and inspect `previews/preview.mp4`.
 3. Run preview QC.
-4. Inspect the full 9:16 motion at each cut and at the first stable frame, midpoint, and final stable frame of every shot. Compare the subject/count and composition contract: required subjects must remain visible with margin, centering must be natural where requested, intentional off-center framing must be preserved, and crop translation must not feel like continuous subject-chasing.
+4. Inspect the full motion in the project format at each cut/card boundary and at the first stable frame, midpoint, and final stable frame of every shot. Compare the subject/count and composition contract: required subjects must remain visible with margin, centering must be natural where requested, intentional off-center framing must be preserved, and crop translation must not feel like continuous subject-chasing. For a carousel, confirm that each 4–5 second card stands alone and that the displayed order has the intended hero and closing card.
 5. Present the absolute preview path and summarize the current edit decisions, including the subject/composition result for every shot.
 6. Stop and wait.
 7. After the user explicitly approves that version, run `approve-edit`.

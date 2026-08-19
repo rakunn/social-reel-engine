@@ -26,6 +26,8 @@ describe('doctor', () => {
         expect.objectContaining({id: 'remotion-runtime', status: 'pass'}),
         expect.objectContaining({id: 'ffmpeg', status: 'pass'}),
         expect.objectContaining({id: 'ffprobe', status: 'pass'}),
+        expect.objectContaining({id: 'sips', status: 'pass'}),
+        expect.objectContaining({id: 'srgb-profile', status: 'pass'}),
         expect.objectContaining({id: 'librosa', status: 'pass'}),
         expect.objectContaining({
           id: 'lut-library',
@@ -102,6 +104,103 @@ describe('doctor', () => {
     const report = JSON.parse(stdout);
     expect(report.checks).toContainEqual(
       expect.objectContaining({id: 'ffmpeg-encoders', status: 'fail'}),
+    );
+  }, 30_000);
+
+  it('requires every FFmpeg filter used by photo grading and scoring', async () => {
+    const filters = [
+      'blackdetect',
+      'blend',
+      'blurdetect',
+      'boxblur',
+      'colorbalance',
+      'colortemperature',
+      'drawbox',
+      'drawtext',
+      'eq',
+      'exposure',
+      'format',
+      'fps',
+      'freezedetect',
+      'geq',
+      'loudnorm',
+      'lut3d',
+      'maskedmerge',
+      'metadata',
+      'scale',
+      'setparams',
+      'signalstats',
+      'split',
+      'tile',
+      'vidstabdetect',
+      'vidstabtransform',
+      'zscale',
+    ];
+    for (const omitted of ['eq', 'signalstats', 'blurdetect', 'metadata']) {
+      const root = await mkdtemp(path.join(tmpdir(), `reel-doctor-${omitted}-`));
+      const fakeFfmpeg = path.join(root, 'ffmpeg');
+      await writeFile(
+        fakeFfmpeg,
+        '#!/bin/sh\n' +
+          'case "$*" in\n' +
+          `  *-filters*) printf "%s\\n" "${filters.filter((filter) => filter !== omitted).join(' ')}" ;;\n` +
+          '  *-encoders*) printf "%s\\n" "aac libx264 pcm_s16le png prores_ks" ;;\n' +
+          '  *) printf "%s\\n" "ffmpeg version synthetic" "ffprobe version synthetic" ;;\n' +
+          'esac\n',
+      );
+      await chmod(fakeFfmpeg, 0o755);
+      const code =
+        `const {runDoctor} = await import('./src/commands/doctor.ts');` +
+        `const report = await runDoctor(${JSON.stringify(repositoryRoot)});` +
+        `process.stdout.write(JSON.stringify(report));`;
+      const {stdout} = await execFileAsync(
+        process.execPath,
+        ['--import', 'tsx', '--input-type=module', '--eval', code],
+        {
+          cwd: repositoryRoot,
+          env: {
+            ...process.env,
+            REEL_FFMPEG_PATH: fakeFfmpeg,
+            REEL_FFPROBE_PATH: fakeFfmpeg,
+          },
+        },
+      );
+      const report = JSON.parse(stdout);
+      expect(report.checks, `doctor should reject FFmpeg without ${omitted}`).toContainEqual(
+        expect.objectContaining({id: 'ffmpeg-filters', status: 'fail'}),
+      );
+    }
+  }, 60_000);
+
+  it.each([
+    ['sips', 'missing sips executable'],
+    ['srgb-profile', 'missing sRGB profile'],
+  ])('fails preflight for a %s photo conversion dependency', async (expectedId, label) => {
+    const root = await mkdtemp(path.join(tmpdir(), 'reel-doctor-photo-conversion-'));
+    const code =
+      `const {runDoctor} = await import('./src/commands/doctor.ts');` +
+      `const report = await runDoctor(${JSON.stringify(repositoryRoot)});` +
+      `process.stdout.write(JSON.stringify(report));`;
+    const {stdout} = await execFileAsync(
+      process.execPath,
+      ['--import', 'tsx', '--input-type=module', '--eval', code],
+      {
+        cwd: repositoryRoot,
+        env: {
+          ...process.env,
+          REEL_SIPS_PATH: expectedId === 'sips' ? path.join(root, 'missing-sips') : 'sips',
+          REEL_SRGB_PROFILE_PATH:
+            expectedId === 'srgb-profile'
+              ? path.join(root, 'missing-srgb.icc')
+              : '/System/Library/ColorSync/Profiles/sRGB Profile.icc',
+        },
+      },
+    );
+    const report = JSON.parse(stdout);
+
+    expect(report.ok, label).toBe(false);
+    expect(report.checks, label).toContainEqual(
+      expect.objectContaining({id: expectedId, status: 'fail'}),
     );
   }, 30_000);
 });

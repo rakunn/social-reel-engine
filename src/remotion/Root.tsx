@@ -2,6 +2,7 @@ import React from 'react';
 import {Composition} from 'remotion';
 import {SocialReel} from './Reel';
 import {calculateReelMetadata, type ReelRenderProps} from './model';
+import {calculatePhotoMetadata, SharePhoto, type SharePhotoProps} from './Photo';
 
 const defaultProps: ReelRenderProps = {
   edit: {
@@ -45,15 +46,35 @@ const defaultProps: ReelRenderProps = {
   fontUrl: null,
 };
 
+const defaultPhotoProps: SharePhotoProps = {
+  media: 'jobs/placeholder.mp4',
+  trimBeforeFrames: 0,
+  crop: {x: 0.5, y: 0.5, scale: 1},
+  width: 1080,
+  height: 1920,
+};
+
 export const RemotionRoot: React.FC = () => (
-  <Composition
-    id="SocialReel"
-    component={SocialReel}
-    width={1080}
-    height={1920}
-    fps={30}
-    durationInFrames={30}
-    defaultProps={defaultProps}
-    calculateMetadata={({props}) => calculateReelMetadata(props as ReelRenderProps)}
-  />
+  <>
+    <Composition
+      id="SocialReel"
+      component={SocialReel}
+      width={1080}
+      height={1920}
+      fps={30}
+      durationInFrames={30}
+      defaultProps={defaultProps}
+      calculateMetadata={({props}) => calculateReelMetadata(props as ReelRenderProps)}
+    />
+    <Composition
+      id="SharePhoto"
+      component={SharePhoto}
+      width={1080}
+      height={1920}
+      fps={30}
+      durationInFrames={1}
+      defaultProps={defaultPhotoProps}
+      calculateMetadata={({props}) => calculatePhotoMetadata(props as SharePhotoProps)}
+    />
+  </>
 );

@@ -25,6 +25,7 @@ export const buildFfmpegColorGraph = (
     (operation) => operation.type === 'technical-lut' || operation.type === 'combined-lut',
   );
   const creative = operations.find((operation) => operation.type === 'creative-lut');
+  const landHaze = operations.find((operation) => operation.type === 'land-haze');
   if (!pre || !normalizer) {
     throw new Error('FFmpeg color graph requires pre-transform and normalization operations');
   }
@@ -49,6 +50,30 @@ export const buildFfmpegColorGraph = (
       `[creative_base][creative_look]blend=all_expr='A*(1-${mix})+B*${mix}'[creative_blend]`,
     );
     outputInput = 'creative_blend';
+  }
+
+  if (landHaze?.type === 'land-haze') {
+    const strength = Number(landHaze.strength.toFixed(4));
+    const contrast = Number((1 + strength * 0.1).toFixed(4));
+    const brightness = Number((-strength * 0.01).toFixed(4));
+    const saturation = Number((1 - strength * 0.02).toFixed(4));
+    const maskExpression =
+      'if(gt(g(X,Y),b(X,Y)+18)+gt(r(X,Y),b(X,Y)+10)*gt(g(X,Y),b(X,Y)+4),200,0)';
+    segments.push(
+      `[${outputInput}]format=gbrp16le,split=3[land_base][land_look][land_mask_base]`,
+    );
+    segments.push(
+      `[land_look]eq=contrast=${contrast}:brightness=${brightness}:saturation=${saturation}[land_looked]`,
+    );
+    segments.push(
+      `[land_mask_base]format=rgb24,` +
+        `geq=r='${maskExpression}':g='${maskExpression}':b='${maskExpression}',` +
+        'format=gray,boxblur=8:2[land_mask]',
+    );
+    segments.push(
+      '[land_base][land_looked][land_mask]maskedmerge,format=gbrp16le[land_treated]',
+    );
+    outputInput = 'land_treated';
   }
 
   segments.push(

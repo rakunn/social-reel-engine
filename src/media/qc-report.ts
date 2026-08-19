@@ -16,7 +16,11 @@ import {
   targetExpectations,
   type OutputTarget,
 } from '../render/policy';
-import {readRenderArtifactFreshness} from '../render/artifacts';
+import {
+  readRenderArtifactFreshness,
+  readRenderArtifactRecord,
+  type RenderArtifactRecord,
+} from '../render/artifacts';
 import {
   assertVerifiedInputSnapshotUnchanged,
   createSourceIntegrityContext,
@@ -54,6 +58,7 @@ export type QcEvaluationInput = {
   now: Date;
   readable: boolean;
   renderFresh: boolean;
+  renderArtifact?: Pick<RenderArtifactRecord, 'fingerprint' | 'checksumSha256' | 'sizeBytes'> | null;
   silenceAllowed: boolean;
   observedSilent: boolean;
   approvals: ApprovalStatus;
@@ -264,6 +269,7 @@ export const evaluateQc = (input: QcEvaluationInput): QcReport => {
       edit: input.approvals.editApproved,
       color: input.approvals.colorApproved,
     },
+    renderArtifact: input.renderArtifact ?? null,
     expected,
     observed: {
       ...input.observed,
@@ -342,10 +348,21 @@ export const runQc = async (
   let loudness: Loudness | null = null;
   let observedSilent = false;
   let renderFresh = false;
+  let renderArtifact: Pick<RenderArtifactRecord, 'fingerprint' | 'checksumSha256' | 'sizeBytes'> | null = null;
   try {
     renderFresh = (
       await readRenderArtifactFreshness(projectPath, target, {integrity})
     ).fresh;
+    if (renderFresh) {
+      const record = await readRenderArtifactRecord(projectPath, target);
+      renderArtifact = record
+        ? {
+            fingerprint: record.fingerprint,
+            checksumSha256: record.checksumSha256,
+            sizeBytes: record.sizeBytes,
+          }
+        : null;
+    }
   } catch {
     renderFresh = false;
   }
@@ -393,6 +410,7 @@ export const runQc = async (
     now,
     readable,
     renderFresh,
+    renderArtifact,
     silenceAllowed: !edit.music && edit.clips.every((clip) => clip.audio.muted),
     observedSilent,
     approvals,

@@ -106,10 +106,10 @@ describe.runIf(process.platform !== 'win32')('owned media process execution', ()
         process.execPath,
         [
           '-e',
-          "const timer = setInterval(() => process.stdout.write('.'), 10); setTimeout(() => { clearInterval(timer); }, 500)",
+          "process.stdout.write('.'); const timer = setInterval(() => process.stdout.write('.'), 10); setTimeout(() => { clearInterval(timer); }, 2_000)",
         ],
         {
-          timeoutMs: 50,
+          timeoutMs: 500,
           cleanupTimeouts: {termMs: 100, killMs: 500, pollMs: 10},
         },
       ),

@@ -20,9 +20,12 @@ describe('synthetic two-clip acceptance render', () => {
         expect(result.qc.delivery.failures).toEqual([]);
         expect(result.originalsUnchanged).toBe(true);
         expect(result.renderArtifactsReused).toBe(true);
+        expect(result.cachedPhotoQcRecovered).toBe(true);
+        expect(result.stalePhotoOutputsPruned).toBe(true);
         expect(result.outputs.preview).toMatch(/preview\.mp4$/);
         expect(result.outputs.master).toMatch(/master\.mov$/);
         expect(result.outputs.delivery).toMatch(/delivery\.mp4$/);
+        expect((result.outputs as typeof result.outputs & {photos?: string[]}).photos).toHaveLength(10);
         await expect(access(result.projectPath)).rejects.toThrow(/ENOENT/);
       }
       expect(results.map((result) => result.silent)).toEqual([false, true]);

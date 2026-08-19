@@ -13,7 +13,11 @@ export const COMMAND_NAMES = [
   'confirm-rights',
   'grade',
   'render',
+  'render-carousel',
   'qc',
+  'qc-carousel',
+  'photos',
+  'approve-photos',
   'status',
 ] as const;
 

@@ -1,4 +1,4 @@
-import {access, statfs as readStatfs} from 'node:fs/promises';
+import {access, stat, statfs as readStatfs} from 'node:fs/promises';
 import path from 'node:path';
 import {hashFile} from '../core/hash';
 import {readJson} from '../core/json';
@@ -11,6 +11,7 @@ import {
 import {LutDefinitionSchema} from '../contracts/schemas';
 import {checkRemotionRuntime} from '../render/remotion-runtime';
 import {findRenderInterruption} from '../render/errors';
+import {SIPS, SRGB_PROFILE} from '../media/photo-conversion';
 
 export type DoctorCheck = {
   id: string;
@@ -204,18 +205,25 @@ export const storageCapacityCheck = async (
 const REQUIRED_FFMPEG_FILTERS = [
   'blackdetect',
   'blend',
+  'blurdetect',
+  'boxblur',
   'colorbalance',
   'colortemperature',
   'drawbox',
   'drawtext',
+  'eq',
   'exposure',
   'format',
   'fps',
   'freezedetect',
+  'geq',
   'loudnorm',
   'lut3d',
+  'maskedmerge',
+  'metadata',
   'scale',
   'setparams',
+  'signalstats',
   'split',
   'tile',
   'vidstabdetect',
@@ -255,6 +263,29 @@ const checkCommand = async (
   } catch (error) {
     if (findRenderInterruption(error)) throw error;
     return {id, status: 'fail', message: `${command} is unavailable: ${(error as Error).message}`};
+  }
+};
+
+const srgbProfileCheck = async (): Promise<DoctorCheck> => {
+  try {
+    const profile = await stat(SRGB_PROFILE);
+    return profile.isFile() && profile.size > 0
+      ? {
+          id: 'srgb-profile',
+          status: 'pass',
+          message: `sRGB conversion profile is available at ${SRGB_PROFILE}`,
+        }
+      : {
+          id: 'srgb-profile',
+          status: 'fail',
+          message: `sRGB conversion profile is not a readable file: ${SRGB_PROFILE}`,
+        };
+  } catch (error) {
+    return {
+      id: 'srgb-profile',
+      status: 'fail',
+      message: `sRGB conversion profile is unavailable at ${SRGB_PROFILE}: ${(error as Error).message}`,
+    };
   }
 };
 
@@ -366,6 +397,16 @@ export const runDoctor = async (
   checks.push(
     await checkCommand('ffprobe', FFPROBE, ['-hide_banner', '-version'], (output) => /ffprobe version/i.test(output), 'ffprobe is available'),
   );
+  checks.push(
+    await checkCommand(
+      'sips',
+      SIPS,
+      ['--version'],
+      (output) => /sips-\d+/i.test(output),
+      'sips image conversion is available',
+    ),
+  );
+  checks.push(await srgbProfileCheck());
   checks.push(
     await checkCommand(
       'ffmpeg-filters',

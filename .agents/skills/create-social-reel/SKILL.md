@@ -1,11 +1,11 @@
 ---
 name: create-social-reel
-description: Use when creating, editing, grading, previewing, rendering, or validating local social reels with the repository's FFmpeg, Remotion, and librosa engine, including MP4/MOV footage, DJI D-Log M, Sony S-Log3, log or HDR profiles, technical or creative LUTs, music, captions, stabilization, vertical crops, approval-gated renders, and social-video QC.
+description: Use when creating, editing, grading, previewing, rendering, or validating local social reels and 1.91:1 video carousel packages with the repository's FFmpeg, Remotion, and librosa engine, including MP4/MOV footage, DJI D-Log M, Sony S-Log3, log or HDR profiles, technical or creative LUTs, music, captions, stabilization, approval-gated renders, and social-video QC.
 ---
 
 # Create Social Reel
 
-Create one isolated `projects/<reel-name>` job and drive it through the engine's checksum-bound workflow. Keep the user in control of editorial and color choices, preserve every original, and never infer a technical color transform.
+Create one isolated `projects/<reel-name>` job and drive it through the engine's checksum-bound reel or carousel workflow. Keep the user in control of editorial and color choices, preserve every original, and never infer a technical color transform.
 
 ## Autonomous interaction contract
 
@@ -24,7 +24,7 @@ Treat this skill as the complete orchestration workflow for routine reel product
 3. Treat camera model, gamma, gamut, LUT kind, LUT input/output spaces, and combined-transform semantics as facts that require user confirmation or reliable supplied metadata. Filename appearance and visual appearance are not confirmation.
 4. Allow an unconfirmed source only in the visibly watermarked rough preview. Do not run `grade-stills`, `approve-color`, `grade`, or `render` until every selected source has an explicitly confirmed profile and exactly one matching technical or combined transform.
 5. A combined normalization-and-look LUT replaces both the technical and creative stages. Never double-normalize or stack creative LUTs.
-6. Never run either approval command on the user's behalf merely because an artifact looks plausible. Approval means the user reviewed the exact current artifact and explicitly accepted it.
+6. Never run an approval command on the user's behalf merely because an artifact looks plausible. Approval means the user reviewed the exact current artifact and explicitly accepted it.
 7. Use these mandatory artifact gates:
    - after presenting the current rough-cut preview, before `approve-edit`;
    - after presenting the current graded reference frames, before `approve-color`.
@@ -45,7 +45,7 @@ Treat this skill as the complete orchestration workflow for routine reel product
 
 ### 1. Preflight and create the job
 
-Run `npm run reel -- doctor`. Its `dependency-materialization` and `remotion-runtime` checks must pass before an expensive preview or final render, and a failing `storage-capacity` check must be resolved; these are technical preflights, not additional user approval gates. Treat a storage warning as a concrete capacity risk when planning repeated ProRes renders. Resolve a safe kebab-case reel name, then create the job with `npm run reel -- new <reel-name> --title "<title>"`.
+Run `npm run reel -- doctor`. Its `dependency-materialization` and `remotion-runtime` checks must pass before an expensive preview or final render, and a failing `storage-capacity` check must be resolved; these are technical preflights, not additional user approval gates. Treat a storage warning as a concrete capacity risk when planning repeated ProRes renders. Resolve a safe kebab-case reel name. Create a vertical reel with `npm run reel -- new <reel-name> --title "<title>"`; create an ordered landscape video carousel with `npm run reel -- new <reel-name> --title "<title>" --format carousel-1.91:1`.
 
 Inventory every supplied file and the user's stated facts. Ingest each asset into its typed destination. Use the local LUT catalog only when its declared camera/profile and semantics match the user's confirmation. Record confirmations in `config/sources.json` and LUT declarations in `config/luts.json`; run `analyze` again after either changes.
 
@@ -55,7 +55,7 @@ After the exact current used asset inventory is known, run `confirm-rights` if t
 
 Run `analyze`, `proxy`, and, when one music file is supplied, `beats`. Inspect the ffprobe metadata, contact sheets, representative frames, proxy watermark state, and beat/onset report. Author `edits/edit.json` from verified source IDs and follow [editing.md](references/editing.md).
 
-Run `validate-edit`, then `preview` and `qc --target preview`. Inspect the rendered preview itself. Report the exact shot order, duration, crops, speed changes, transitions, titles, caption state, music/camera-audio choices, stabilization choices, warnings, and any unsafe unknowns.
+Run `validate-edit`, then `preview` and `qc --target preview`. Inspect the rendered preview itself. Report the exact shot/card order, duration, crops, speed changes, transitions, titles, caption state, music/camera-audio choices, stabilization choices, warnings, and any unsafe unknowns. In a carousel project, each ordered clip is one independently publishable card, every card must be 4–5 seconds, and the combined preview is the exact package-order review artifact; transitions and timeline-global music, titles, or captions are forbidden.
 
 **STOP — rough-cut approval.** Present a clickable absolute path to `previews/preview.mp4` and ask the user to approve this exact rough cut or request changes. For a proxy-only job, include every previously disclosed unresolved source/profile or transform fact in this same response. End the task without running `approve-edit`.
 
@@ -73,9 +73,15 @@ Set exposure, white balance, and tint before the exact normalizer; set one optio
 
 Only after explicit approval of the displayed reference frames, run `approve-color`, then `status`. Do not ask about rights again when status shows that the user's checksum-bound confirmation remains current. If status reports `awaiting-rights-confirmation`, run `confirm-rights` immediately when an explicit user statement already covers the exact current used set; otherwise stop and request only the missing confirmation, then run `confirm-rights` after the user answers.
 
-Run `grade` and inspect `analysis/graded-clips.json`. Any stabilization fallback must match the per-shot fallback decision approved with the rough cut; otherwise stop and return to editorial approval. Then run `render`, wait for it to exit and release the media operation, run QC for `master` to completion, run QC for `delivery` to completion, and finally run `status`. Never parallelize render or either QC command.
+Run `grade` and inspect `analysis/graded-clips.json`. Any stabilization fallback must match the per-shot fallback decision approved with the rough cut; otherwise stop and return to editorial approval.
 
-Do not claim completion when QC has a failure, a render fingerprint is stale, an output is unreadable, or a warning has not been reviewed. Deliver absolute paths to the ProRes master, H.264 delivery, and both human-readable QC reports, plus a concise note about warnings and stabilization outcomes.
+For a vertical reel, run `render`, wait for it to exit and release the media operation, run QC for `master` to completion, run QC for `delivery` to completion, and finally run `status`. Never parallelize render or either QC command.
+
+For a carousel project, run `render-carousel`, wait for every ordered MP4 card to finish and release the media operation, then run `qc-carousel` to completion and finally run `status`. Inspect `analysis/qc-carousel.md` and every exact file recorded in `analysis/carousel.json`. Do not substitute the combined timeline delivery for the independently encoded card files, and do not run standard `render` or photo export for a carousel project.
+
+If a vertical-reel prompt explicitly requests a photo package, continue only after both final QC reports are current and failure-free. Run `photos <reel> --aspect <profiles...> --count <count>`; omit the options only when an already configured requested package should be resumed. `9:16` stills reuse the approved moving crop and can publish automatically. For `4:5`, `1:1`, or `16:9`, present clickable absolute paths to every contact sheet under `previews/photo-candidates/`, state that each is an anchored proposed reframe, and **STOP — photo reframe approval.** Do not run `approve-photos` until the user explicitly approves the exact current candidate sheets. After approval, run `approve-photos`, rerun `photos`, and inspect `analysis/photo-qc.md`. Any edit, grade, crop, stabilization, source, LUT, requested profile, count, or final-render change makes photo output and non-9:16 reframe approval stale.
+
+Do not claim completion when QC has a failure, a render/package fingerprint is stale, an output is unreadable, or a warning has not been reviewed. For a reel, deliver absolute paths to the ProRes master, H.264 delivery, and both human-readable QC reports. For a carousel, deliver the ordered absolute MP4 paths from `analysis/carousel.json` and `analysis/qc-carousel.md`. In both cases include a concise note about warnings and stabilization outcomes. When requested for a reel, also deliver final `output/photos/<profile>/` files and `analysis/photo-qc.md`.
 
 ## Active media work and recovery
 
