@@ -1,4 +1,14 @@
-import {copyFile, mkdir, readdir, rm, stat, writeFile} from 'node:fs/promises';
+import {
+  copyFile,
+  lstat,
+  mkdir,
+  readdir,
+  realpath,
+  rm,
+  rmdir,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import path from 'node:path';
 import {z} from 'zod';
 import {
@@ -379,6 +389,32 @@ const photoMetricScore = async (gradedPath: string, sourceSeconds: number): Prom
   return (luma === null ? 0 : 1_000 - Math.abs(luma - 128) * 4) - (blur ?? 0) * 100;
 };
 
+const PHOTO_SCORE_CONCURRENCY = 4;
+
+export const scorePhotoCandidates = async (
+  projectPath: string,
+  candidates: readonly Pick<PhotoCandidate, 'id' | 'clipId' | 'sourceSeconds'>[],
+  gradedByClip: ReadonlyMap<string, string>,
+  scoreCandidate: (gradedPath: string, sourceSeconds: number) => Promise<number> = photoMetricScore,
+): Promise<Record<string, number>> => {
+  const scores: Record<string, number> = {};
+  let nextIndex = 0;
+  const workerCount = Math.min(PHOTO_SCORE_CONCURRENCY, candidates.length);
+  await Promise.all(
+    Array.from({length: workerCount}, async () => {
+      while (nextIndex < candidates.length) {
+        const candidate = candidates[nextIndex];
+        nextIndex += 1;
+        const gradedPath = gradedByClip.get(candidate.clipId);
+        scores[candidate.id] = gradedPath
+          ? await scoreCandidate(resolveInside(projectPath, gradedPath), candidate.sourceSeconds)
+          : Number.NEGATIVE_INFINITY;
+      }
+    }),
+  );
+  return scores;
+};
+
 const copyAtomically = async (source: string, destination: string): Promise<void> => {
   await writeAtomically(
     destination,
@@ -555,25 +591,73 @@ export const prunePublishedPhotoOutputs = async (
       return absolute;
     }),
   );
-  const pruneDirectory = async (directory: string): Promise<void> => {
-    let entries;
-    try {
-      entries = await readdir(directory, {withFileTypes: true});
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
-      throw error;
+  let outputStats;
+  try {
+    outputStats = await lstat(outputRoot);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  if (!outputStats.isDirectory() || outputStats.isSymbolicLink()) {
+    throw new Error(`Photo output boundary is not a real directory: ${outputRoot}`);
+  }
+  const [realProjectRoot, realOutputRoot] = await Promise.all([
+    realpath(projectPath),
+    realpath(outputRoot),
+  ]);
+  if (realOutputRoot !== path.join(realProjectRoot, 'output/photos')) {
+    throw new Error(`Photo output boundary resolves outside the project: ${outputRoot}`);
+  }
+
+  const staleFiles: string[] = [];
+  const directories: string[] = [];
+  const scanDirectory = async (directory: string): Promise<void> => {
+    const directoryStats = await lstat(directory);
+    const realDirectory = await realpath(directory);
+    const relativeDirectory = path.relative(realOutputRoot, realDirectory);
+    if (
+      !directoryStats.isDirectory() ||
+      directoryStats.isSymbolicLink() ||
+      relativeDirectory === '..' ||
+      relativeDirectory.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(relativeDirectory)
+    ) {
+      throw new Error(`Photo output directory crosses its verified boundary: ${directory}`);
     }
+    const entries = await readdir(directory, {withFileTypes: true});
     for (const entry of entries) {
       const absolute = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        await pruneDirectory(absolute);
-        if ((await readdir(absolute)).length === 0) await rm(absolute, {recursive: true, force: true});
+      const entryStats = await lstat(absolute);
+      if (entryStats.isSymbolicLink()) {
+        throw new Error(`Photo output contains a symlink: ${absolute}`);
+      }
+      const realEntry = await realpath(absolute);
+      const relativeEntry = path.relative(realOutputRoot, realEntry);
+      if (
+        relativeEntry === '..' ||
+        relativeEntry.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(relativeEntry)
+      ) {
+        throw new Error(`Photo output entry resolves outside its verified boundary: ${absolute}`);
+      }
+      if (entryStats.isDirectory()) {
+        await scanDirectory(absolute);
+        directories.push(absolute);
       } else if (!intended.has(absolute)) {
-        await rm(absolute, {force: true});
+        staleFiles.push(absolute);
       }
     }
   };
-  await pruneDirectory(outputRoot);
+  await scanDirectory(outputRoot);
+  for (const file of staleFiles) await rm(file, {force: true});
+  for (const directory of directories) {
+    try {
+      await rmdir(directory);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT' && code !== 'ENOTEMPTY') throw error;
+    }
+  }
 };
 
 const publishProfile = async (
@@ -816,15 +900,7 @@ export const generatePhotos = async (
   const edit = EditManifestSchema.parse(await readJson(path.join(projectPath, 'edits/edit.json')));
   const candidates = buildPhotoCandidatesForCount(edit, config.count);
   const gradedByClip = new Map(graded.items.map((item) => [item.clipId, item.path]));
-  const scores: Record<string, number> = {};
-  await Promise.all(
-    candidates.map(async (candidate) => {
-      const gradedPath = gradedByClip.get(candidate.clipId);
-      scores[candidate.id] = gradedPath
-        ? await photoMetricScore(resolveInside(projectPath, gradedPath), candidate.sourceSeconds)
-        : Number.NEGATIVE_INFINITY;
-    }),
-  );
+  const scores = await scorePhotoCandidates(projectPath, candidates, gradedByClip);
   const selectedIds = selectPhotoCandidates(candidates, config.count, scores);
   if (selectedIds.length < config.count) {
     throw new Error(`Only ${selectedIds.length} safe photo candidates are available; requested ${config.count}`);

@@ -1,6 +1,6 @@
 import {mkdir} from 'node:fs/promises';
 import path from 'node:path';
-import {EditManifestSchema} from '../contracts/schemas';
+import {EditManifestSchema, ReelBriefSchema} from '../contracts/schemas';
 import {readJson} from '../core/json';
 import {assertFinalReadiness} from '../edit/approve';
 import {validateEdit} from '../edit/validate';
@@ -235,6 +235,12 @@ export const renderMasterAndDelivery = async (
   engineRoot: string,
   options: RenderOperationOptions = {},
 ): Promise<{master: string; delivery: string}> => {
+  const brief = await readJson(path.join(projectPath, 'brief.json'), ReelBriefSchema);
+  if (brief.projectType !== 'reel') {
+    throw new Error(
+      'Standard render is available only for reel projects; use render-carousel for carousel projects',
+    );
+  }
   const integrity = options.integrity ?? createSourceIntegrityContext();
   const master = await renderTarget(projectPath, engineRoot, 'master', {...options, integrity});
   const delivery = path.join(projectPath, 'output/delivery.mp4');

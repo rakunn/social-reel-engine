@@ -1,4 +1,12 @@
-import {access, mkdir, mkdtemp, rm, writeFile} from 'node:fs/promises';
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {describe, expect, it} from 'vitest';
@@ -122,6 +130,36 @@ describe('photo candidate policy', () => {
     ).toEqual(['a-1', 'b-1', 'a-2']);
   });
 
+  it('bounds concurrent photo metric scoring', async () => {
+    const photos = await import('../../src/media/photos');
+    const scorePhotoCandidates = Reflect.get(photos, 'scorePhotoCandidates');
+    const candidates = Array.from({length: 12}, (_, index) => ({
+      id: `opening-f${index}`,
+      clipId: 'opening',
+      sourceSeconds: index,
+    }));
+    let active = 0;
+    let maximumActive = 0;
+
+    expect(scorePhotoCandidates).toEqual(expect.any(Function));
+    if (typeof scorePhotoCandidates !== 'function') return;
+    const scores = await scorePhotoCandidates(
+      '/synthetic-project',
+      candidates,
+      new Map([['opening', 'work/graded/opening.mov']]),
+      async () => {
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        active -= 1;
+        return 100;
+      },
+    );
+
+    expect(maximumActive).toBeLessThanOrEqual(4);
+    expect(Object.keys(scores)).toHaveLength(12);
+  });
+
   it('binds photo freshness to stable graded intermediates rather than volatile report metadata', () => {
     const items = [
       {
@@ -206,6 +244,29 @@ describe('photo candidate policy', () => {
       await expect(access(staleProfile)).rejects.toThrow();
     } finally {
       await rm(projectPath, {recursive: true, force: true});
+    }
+  });
+
+  it('refuses a symlinked photo output root without deleting its target', async () => {
+    const photos = await import('../../src/media/photos');
+    const prunePublishedPhotoOutputs = Reflect.get(photos, 'prunePublishedPhotoOutputs');
+    const root = await mkdtemp(path.join(tmpdir(), 'reel-photo-prune-symlink-'));
+    const projectPath = path.join(root, 'project');
+    const outside = path.join(root, 'outside');
+    const sentinel = path.join(outside, 'sentinel.txt');
+    try {
+      await mkdir(path.join(projectPath, 'output'), {recursive: true});
+      await mkdir(outside, {recursive: true});
+      await writeFile(sentinel, 'keep');
+      await symlink(outside, path.join(projectPath, 'output/photos'), 'dir');
+
+      expect(prunePublishedPhotoOutputs).toEqual(expect.any(Function));
+      await expect(prunePublishedPhotoOutputs(projectPath, [])).rejects.toThrow(
+        /symlink|outside|boundary|real directory/i,
+      );
+      await expect(readFile(sentinel, 'utf8')).resolves.toBe('keep');
+    } finally {
+      await rm(root, {recursive: true, force: true});
     }
   });
 });

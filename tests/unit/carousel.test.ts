@@ -22,6 +22,7 @@ import {
   type CarouselPackageRecord,
 } from '../../src/render/carousel';
 import {summarizeCarouselQc} from '../../src/media/carousel-qc';
+import {renderMasterAndDelivery} from '../../src/render/remotion';
 
 const clip = (id: string, durationSeconds = 4.5) => ({
   id,
@@ -280,6 +281,15 @@ describe('carousel card rendering model', () => {
 
     await expect(renderCarouselPackage(projectPath, projectPath)).rejects.toThrow(
       /carousel project/i,
+    );
+  });
+
+  it('refuses to publish a combined standard render from a carousel project', async () => {
+    const projectPath = await mkdtemp(path.join(tmpdir(), 'carousel-standard-render-'));
+    await writeJson(path.join(projectPath, 'brief.json'), brief);
+
+    await expect(renderMasterAndDelivery(projectPath, projectPath)).rejects.toThrow(
+      /standard render.*reel project|carousel.*render-carousel/i,
     );
   });
 
