@@ -343,7 +343,14 @@ export const createCli = (): Command => {
     .description('Approve the exact current non-9:16 photo reframe contact sheets')
     .action(async (reelName: string) => {
       const {approvePhotoReframes} = await import('./media/photos');
-      print(await approvePhotoReframes(project(reelName)));
+      print(
+        await runTrackedMediaCommand(
+          reelName,
+          'approve-photos',
+          'approving-photo-reframes',
+          async () => await approvePhotoReframes(project(reelName)),
+        ),
+      );
     });
 
   program

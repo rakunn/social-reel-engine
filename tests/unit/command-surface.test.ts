@@ -86,4 +86,26 @@ describe('stable command interface', () => {
       await rm(projectPath, {recursive: true, force: true});
     }
   });
+
+  it('does not approve photo reframes while another media operation holds the lock', async () => {
+    const reelName = `photo-approval-lock-${randomUUID().replaceAll('-', '')}`;
+    const projectPath = await createReelProject({
+      engineRoot: repositoryRoot,
+      reelName,
+      title: 'Photo Approval Lock Test',
+    });
+    const approvalPath = path.join(projectPath, 'analysis/photo-approval.json');
+    const active = await beginMediaOperation(projectPath, 'photos', {
+      phase: 'creating-photo-candidates',
+    });
+    try {
+      await expect(
+        createCli().parseAsync(['node', 'reel', 'approve-photos', reelName]),
+      ).rejects.toThrow(/media operation.*active|active.*media operation/i);
+      await expect(access(approvalPath)).rejects.toThrow();
+    } finally {
+      if (active.id) await completeMediaOperation(projectPath, active.id);
+      await rm(projectPath, {recursive: true, force: true});
+    }
+  });
 });

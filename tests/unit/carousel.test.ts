@@ -1,5 +1,5 @@
-import {describe, expect, it} from 'vitest';
-import {mkdir, mkdtemp, readFile, stat, writeFile} from 'node:fs/promises';
+import {describe, expect, it, vi} from 'vitest';
+import {mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {hashFile} from '../../src/core/hash';
@@ -65,6 +65,41 @@ const validEdit = EditManifestSchema.parse({
   captions: null,
 });
 
+const settings = RenderSettingsSchema.parse({
+  schemaVersion: '1.0.0',
+  proxy: {width: 960, height: 540, crf: 23},
+  preview: {width: 764, height: 400, crf: 20, audioBitrate: '192k'},
+  master: {
+    width: 1910,
+    height: 1000,
+    fps: 30,
+    videoCodec: 'prores_ks',
+    profile: 3,
+    pixelFormat: 'yuv422p10le',
+    audioCodec: 'pcm_s16le',
+    audioSampleRate: 48_000,
+  },
+  delivery: {
+    videoCodec: 'libx264',
+    pixelFormat: 'yuv420p',
+    crf: 17,
+    audioCodec: 'aac',
+    audioBitrate: '256k',
+    integratedLufs: -14,
+    truePeakDbtp: -1.5,
+  },
+});
+
+const carouselProps = {
+  edit: validEdit,
+  media: {hero: 'media/hero.mov', closer: 'media/closer.mov'},
+  music: null,
+  captions: [],
+  watermark: null,
+  trimBeforeFramesByClip: {hero: 0, closer: 0},
+  fontUrl: null,
+};
+
 describe('carousel edit contract', () => {
   it('accepts independently publishable 4–5 second cards', () => {
     expect(carouselContractFailures(validEdit, brief)).toEqual([]);
@@ -95,6 +130,24 @@ describe('carousel edit contract', () => {
     });
     expect(carouselContractFailures(invalid, brief)).toContainEqual(
       expect.stringMatching(/first.*transition/i),
+    );
+  });
+
+  it('keeps the 4–5 second card contract when the brief target is widened', () => {
+    const widenedBrief = ReelBriefSchema.parse({
+      ...brief,
+      target: {minSeconds: 1, idealSeconds: 6, maxSeconds: 12},
+    });
+    const invalid = EditManifestSchema.parse({
+      ...validEdit,
+      clips: [clip('hero', 10), clip('closer', 10)],
+    });
+
+    expect(carouselContractFailures(invalid, widenedBrief)).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/hero.*4.*5.*seconds/i),
+        expect.stringMatching(/closer.*4.*5.*seconds/i),
+      ]),
     );
   });
 });
@@ -157,45 +210,13 @@ describe('carousel card rendering model', () => {
 
   it('publishes one independently encoded MP4 for each ordered card', async () => {
     const projectPath = await mkdtemp(path.join(tmpdir(), 'carousel-publish-'));
-    const settings = RenderSettingsSchema.parse({
-      schemaVersion: '1.0.0',
-      proxy: {width: 960, height: 540, crf: 23},
-      preview: {width: 764, height: 400, crf: 20, audioBitrate: '192k'},
-      master: {
-        width: 1910,
-        height: 1000,
-        fps: 30,
-        videoCodec: 'prores_ks',
-        profile: 3,
-        pixelFormat: 'yuv422p10le',
-        audioCodec: 'pcm_s16le',
-        audioSampleRate: 48_000,
-      },
-      delivery: {
-        videoCodec: 'libx264',
-        pixelFormat: 'yuv420p',
-        crf: 17,
-        audioCodec: 'aac',
-        audioBitrate: '256k',
-        integratedLufs: -14,
-        truePeakDbtp: -1.5,
-      },
-    });
     const result = await publishCarouselCards(
       {
         projectPath,
         engineRoot: projectPath,
         publicDir: projectPath,
         fingerprint: 'a'.repeat(64),
-        props: {
-          edit: validEdit,
-          media: {hero: 'media/hero.mov', closer: 'media/closer.mov'},
-          music: null,
-          captions: [],
-          watermark: null,
-          trimBeforeFramesByClip: {hero: 0, closer: 0},
-          fontUrl: null,
-        },
+        props: carouselProps,
         settings,
       },
       {
@@ -226,6 +247,66 @@ describe('carousel card rendering model', () => {
       await expect(readFile(path.join(projectPath, card.file), 'utf8')).resolves.toBe(
         'encoded-card',
       );
+    }
+  });
+
+  it.each([
+    {
+      label: 'carousel output root',
+      link: 'output/carousel',
+      escapedCard: 'aaaaaaaaaaaaaaaa/01-hero.mp4',
+    },
+    {
+      label: 'carousel fingerprint directory',
+      link: 'output/carousel/aaaaaaaaaaaaaaaa',
+      escapedCard: '01-hero.mp4',
+    },
+  ])('refuses a symlinked $label before rendering or publishing', async ({link, escapedCard}) => {
+    const root = await mkdtemp(path.join(tmpdir(), 'carousel-publish-symlink-'));
+    const projectPath = path.join(root, 'project');
+    const outside = path.join(root, 'outside');
+    const sentinel = path.join(outside, 'sentinel.txt');
+    const supervise = vi.fn(async (request) => {
+      await writeFile(request.rawOutput, 'master');
+    });
+    try {
+      await mkdir(path.dirname(path.join(projectPath, link)), {recursive: true});
+      await mkdir(outside, {recursive: true});
+      await writeFile(sentinel, 'keep');
+      await symlink(outside, path.join(projectPath, link), 'dir');
+
+      await expect(
+        publishCarouselCards(
+          {
+            projectPath,
+            engineRoot: projectPath,
+            publicDir: projectPath,
+            fingerprint: 'a'.repeat(64),
+            props: carouselProps,
+            settings,
+          },
+          {
+            supervise,
+            runFfmpeg: async (args) => {
+              const output = args.at(-1)!;
+              if (output !== '-') await writeFile(output, 'encoded-card');
+              return {
+                command: 'ffmpeg',
+                args: [...args],
+                stdout: '',
+                stderr: output === '-' ? '{"input_i":"-inf","input_tp":"-inf"}' : '',
+                exitCode: 0,
+              };
+            },
+            probeFile: async () => ({format: {duration: '4.5'}, streams: []}),
+          },
+        ),
+      ).rejects.toThrow(/symlink|outside|boundary|real directory/i);
+      expect(supervise).not.toHaveBeenCalled();
+      await expect(readFile(sentinel, 'utf8')).resolves.toBe('keep');
+      await expect(stat(path.join(outside, escapedCard))).rejects.toThrow();
+    } finally {
+      await rm(root, {recursive: true, force: true});
     }
   });
 

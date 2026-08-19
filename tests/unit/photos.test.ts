@@ -333,4 +333,31 @@ describe('photo candidate policy', () => {
       await rm(root, {recursive: true, force: true});
     }
   });
+
+  it.each([
+    ['candidate preview root', 'previews/photo-candidates'],
+    ['photo staging root', 'work/photo-staging'],
+  ])('refuses a symlinked %s before clearing generated files', async (_label, relativeRoot) => {
+    const photos = await import('../../src/media/photos');
+    const preparePhotoRenderDirectories = Reflect.get(photos, 'preparePhotoRenderDirectories');
+    const root = await mkdtemp(path.join(tmpdir(), 'reel-photo-render-symlink-'));
+    const projectPath = path.join(root, 'project');
+    const outside = path.join(root, 'outside');
+    const sentinel = path.join(outside, 'sentinel.txt');
+    try {
+      await mkdir(projectPath, {recursive: true});
+      await mkdir(path.dirname(path.join(projectPath, relativeRoot)), {recursive: true});
+      await mkdir(outside, {recursive: true});
+      await writeFile(sentinel, 'keep');
+      await symlink(outside, path.join(projectPath, relativeRoot), 'dir');
+
+      expect(preparePhotoRenderDirectories).toEqual(expect.any(Function));
+      await expect(
+        preparePhotoRenderDirectories(projectPath, '9:16', 'a'.repeat(64)),
+      ).rejects.toThrow(/symlink|outside|boundary|real directory/i);
+      await expect(readFile(sentinel, 'utf8')).resolves.toBe('keep');
+    } finally {
+      await rm(root, {recursive: true, force: true});
+    }
+  });
 });

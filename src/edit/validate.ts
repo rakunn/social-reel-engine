@@ -52,6 +52,9 @@ export type ValidateEditOptions = {
   integrity?: SourceIntegrityContext;
 };
 
+const CAROUSEL_CARD_MIN_SECONDS = 4;
+const CAROUSEL_CARD_MAX_SECONDS = 5;
+
 export const carouselContractFailures = (
   edit: EditManifest,
   brief: ReelBrief,
@@ -72,9 +75,9 @@ export const carouselContractFailures = (
   }
   for (const clip of edit.clips) {
     const duration = clipDurationSeconds(clip);
-    if (duration < brief.target.minSeconds || duration > brief.target.maxSeconds) {
+    if (duration < CAROUSEL_CARD_MIN_SECONDS || duration > CAROUSEL_CARD_MAX_SECONDS) {
       failures.push(
-        `${clip.id}: card duration must be ${brief.target.minSeconds}–${brief.target.maxSeconds} seconds; observed ${duration.toFixed(3)} seconds`,
+        `${clip.id}: card duration must be ${CAROUSEL_CARD_MIN_SECONDS}–${CAROUSEL_CARD_MAX_SECONDS} seconds; observed ${duration.toFixed(3)} seconds`,
       );
     }
     if (clip.transitionAfter.type !== 'none' || clip.transitionAfter.durationSeconds !== 0) {

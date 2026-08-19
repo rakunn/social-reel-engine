@@ -1,4 +1,4 @@
-import {rm, stat} from 'node:fs/promises';
+import {lstat, mkdir, realpath, rm, stat} from 'node:fs/promises';
 import path from 'node:path';
 import {
   EditManifestSchema,
@@ -211,13 +211,63 @@ const defaultPublishDependencies: CarouselPublishDependencies = {
   probeFile,
 };
 
+const ensureRealCarouselDirectory = async (
+  directory: string,
+  expectedRealPath: string,
+): Promise<string> => {
+  try {
+    await mkdir(directory);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
+  const stats = await lstat(directory);
+  if (!stats.isDirectory() || stats.isSymbolicLink()) {
+    throw new Error(`Carousel publication boundary is not a real directory: ${directory}`);
+  }
+  const observedRealPath = await realpath(directory);
+  if (observedRealPath !== expectedRealPath) {
+    throw new Error(`Carousel publication boundary resolves outside the project: ${directory}`);
+  }
+  return observedRealPath;
+};
+
+const prepareCarouselOutputDirectory = async (
+  projectPath: string,
+  fingerprint: string,
+): Promise<string> => {
+  if (!/^[a-f0-9]{64}$/.test(fingerprint)) {
+    throw new Error('Carousel fingerprint must be a SHA-256 checksum');
+  }
+  const resolvedProjectRoot = path.resolve(projectPath);
+  const realProjectRoot = await realpath(resolvedProjectRoot);
+  const outputRoot = path.join(resolvedProjectRoot, 'output');
+  const realOutputRoot = await ensureRealCarouselDirectory(
+    outputRoot,
+    path.join(realProjectRoot, 'output'),
+  );
+  const carouselRoot = path.join(outputRoot, 'carousel');
+  const realCarouselRoot = await ensureRealCarouselDirectory(
+    carouselRoot,
+    path.join(realOutputRoot, 'carousel'),
+  );
+  const fingerprintDirectory = fingerprint.slice(0, 16);
+  await ensureRealCarouselDirectory(
+    path.join(carouselRoot, fingerprintDirectory),
+    path.join(realCarouselRoot, fingerprintDirectory),
+  );
+  return fingerprintDirectory;
+};
+
 export const publishCarouselCards = async (
   input: PublishCarouselCardsInput,
   dependencyOverrides: Partial<CarouselPublishDependencies> = {},
   now = new Date(),
 ): Promise<CarouselPackageRecord> => {
   const dependencies = {...defaultPublishDependencies, ...dependencyOverrides};
-  const fingerprintDirectory = input.fingerprint.slice(0, 16);
+  const fingerprintDirectory = await prepareCarouselOutputDirectory(
+    input.projectPath,
+    input.fingerprint,
+  );
   const cards: CarouselPackageRecord['cards'] = [];
   for (const [index, clip] of input.props.edit.clips.entries()) {
     await input.onProgress?.({

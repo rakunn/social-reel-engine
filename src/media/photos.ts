@@ -681,6 +681,90 @@ const ensureRealPhotoDirectory = async (
   return observedRealPath;
 };
 
+const resetRealPhotoDirectory = async (
+  directory: string,
+  expectedRealPath: string,
+): Promise<string> => {
+  await ensureRealPhotoDirectory(directory, expectedRealPath);
+  await rm(directory, {recursive: true, force: true});
+  return await ensureRealPhotoDirectory(directory, expectedRealPath);
+};
+
+const removeRealPhotoDirectory = async (
+  directory: string,
+  expectedRealPath: string,
+): Promise<void> => {
+  const stats = await lstat(directory);
+  if (!stats.isDirectory() || stats.isSymbolicLink()) {
+    throw new Error(`Photo render boundary is not a real directory: ${directory}`);
+  }
+  const observedRealPath = await realpath(directory);
+  if (observedRealPath !== expectedRealPath) {
+    throw new Error(`Photo render boundary resolves outside the project: ${directory}`);
+  }
+  await rm(directory, {recursive: true, force: true});
+};
+
+export const preparePhotoRenderDirectories = async (
+  projectPath: string,
+  profile: PhotoProfile,
+  fingerprint: string,
+): Promise<{
+  stagingDirectory: string;
+  publicDirectory: string;
+  realStagingDirectory: string;
+}> => {
+  if (!/^[a-f0-9]{64}$/.test(fingerprint)) {
+    throw new Error('Photo staging fingerprint must be a SHA-256 checksum');
+  }
+  const resolvedProjectRoot = path.resolve(projectPath);
+  const realProjectRoot = await realpath(resolvedProjectRoot);
+  const profileName = profileDirectory(profile);
+
+  const previewsRoot = path.join(resolvedProjectRoot, 'previews');
+  const realPreviewsRoot = await ensureRealPhotoDirectory(
+    previewsRoot,
+    path.join(realProjectRoot, 'previews'),
+  );
+  const candidatesRoot = path.join(previewsRoot, 'photo-candidates');
+  const realCandidatesRoot = await ensureRealPhotoDirectory(
+    candidatesRoot,
+    path.join(realPreviewsRoot, 'photo-candidates'),
+  );
+  const candidateProfileDirectory = path.join(candidatesRoot, profileName);
+  await resetRealPhotoDirectory(
+    candidateProfileDirectory,
+    path.join(realCandidatesRoot, profileName),
+  );
+
+  const workRoot = path.join(resolvedProjectRoot, 'work');
+  const realWorkRoot = await ensureRealPhotoDirectory(
+    workRoot,
+    path.join(realProjectRoot, 'work'),
+  );
+  const stagingRoot = path.join(workRoot, 'photo-staging');
+  const realStagingRoot = await ensureRealPhotoDirectory(
+    stagingRoot,
+    path.join(realWorkRoot, 'photo-staging'),
+  );
+  const stagingProfileDirectory = path.join(stagingRoot, profileName);
+  const realStagingProfileDirectory = await ensureRealPhotoDirectory(
+    stagingProfileDirectory,
+    path.join(realStagingRoot, profileName),
+  );
+  const stagingDirectory = path.join(stagingProfileDirectory, fingerprint.slice(0, 16));
+  const realStagingDirectory = await resetRealPhotoDirectory(
+    stagingDirectory,
+    path.join(realStagingProfileDirectory, fingerprint.slice(0, 16)),
+  );
+  const publicDirectory = path.join(stagingDirectory, 'public');
+  await ensureRealPhotoDirectory(
+    publicDirectory,
+    path.join(realStagingDirectory, 'public'),
+  );
+  return {stagingDirectory, publicDirectory, realStagingDirectory};
+};
+
 const preparePhotoOutputProfile = async (
   projectPath: string,
   profile: PhotoProfile,
@@ -798,20 +882,16 @@ const renderCandidateFiles = async (
 ): Promise<z.infer<typeof PhotoOutputSchema>> => {
   const files = candidateFilesFor(profile, selected.length);
   const details = photoProfile(profile);
-  const stagingDirectory = path.join(
+  const renderDirectories = await preparePhotoRenderDirectories(
     projectPath,
-    'work/photo-staging',
-    profileDirectory(profile),
-    hashValue(selected).slice(0, 16),
+    profile,
+    hashValue(selected),
   );
+  const {stagingDirectory, publicDirectory, realStagingDirectory} = renderDirectories;
   const stagedFiles = selected.map((candidate, index) =>
     path.join(stagingDirectory, `${String(index + 1).padStart(2, '0')}.jpg`),
   );
-  const publicDirectory = path.join(stagingDirectory, 'public');
   try {
-    await rm(path.dirname(resolveInside(projectPath, files[0])), {recursive: true, force: true});
-    await rm(stagingDirectory, {recursive: true, force: true});
-    await mkdir(publicDirectory, {recursive: true});
     const mediaByClip = new Map<string, string>();
     for (const candidate of selected) {
       if (mediaByClip.has(candidate.clipId)) continue;
@@ -858,7 +938,7 @@ const renderCandidateFiles = async (
       await writeSrgbJpegAtomically(stagedFile, resolveInside(projectPath, files[index]), jpegQuality);
     }
   } finally {
-    await rm(stagingDirectory, {recursive: true, force: true});
+    await removeRealPhotoDirectory(stagingDirectory, realStagingDirectory);
   }
   const candidateChecksums = Object.fromEntries(
     await Promise.all(
