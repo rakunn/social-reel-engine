@@ -293,6 +293,48 @@ describe('carousel card rendering model', () => {
     );
   });
 
+  it('rejects standard render settings that do not match the reel edit output', async () => {
+    const projectPath = await mkdtemp(path.join(tmpdir(), 'reel-mismatched-render-settings-'));
+    await writeJson(path.join(projectPath, 'brief.json'), {
+      ...brief,
+      projectType: 'reel',
+      target: {minSeconds: 20, idealSeconds: 25, maxSeconds: 30},
+      output: {width: 1080, height: 1920, fps: 30},
+    });
+    await writeJson(path.join(projectPath, 'edits/edit.json'), {
+      ...validEdit,
+      output: {width: 1080, height: 1920, fps: 30},
+    });
+    await writeJson(path.join(projectPath, 'config/settings.json'), {
+      schemaVersion: '1.0.0',
+      proxy: {width: 960, height: 540, crf: 23},
+      preview: {width: 764, height: 400, crf: 20, audioBitrate: '192k'},
+      master: {
+        width: 1910,
+        height: 1000,
+        fps: 30,
+        videoCodec: 'prores_ks',
+        profile: 3,
+        pixelFormat: 'yuv422p10le',
+        audioCodec: 'pcm_s16le',
+        audioSampleRate: 48_000,
+      },
+      delivery: {
+        videoCodec: 'libx264',
+        pixelFormat: 'yuv420p',
+        crf: 17,
+        audioCodec: 'aac',
+        audioBitrate: '256k',
+        integratedLufs: -14,
+        truePeakDbtp: -1.5,
+      },
+    });
+
+    await expect(renderMasterAndDelivery(projectPath, projectPath)).rejects.toThrow(
+      /render settings.*edit output|edit output.*render settings/i,
+    );
+  });
+
   it('requires current QC before reporting a carousel package as rendered', () => {
     const evaluateWithCardBinding = evaluateCarouselOutputStatus as (
       packageFresh: boolean,

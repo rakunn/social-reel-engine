@@ -136,9 +136,17 @@ const renderTarget = async (
   options: RenderOperationOptions = {},
 ): Promise<string> => {
   const integrity = options.integrity ?? createSourceIntegrityContext();
-  const edit = EditManifestSchema.parse(
-    await readJson(path.join(projectPath, 'edits/edit.json')),
-  );
+  const [edit, settings] = await Promise.all([
+    readJson(path.join(projectPath, 'edits/edit.json'), EditManifestSchema),
+    readRenderSettings(projectPath),
+  ]);
+  if (
+    settings.master.width !== edit.output.width ||
+    settings.master.height !== edit.output.height ||
+    settings.master.fps !== edit.output.fps
+  ) {
+    throw new Error('Render settings do not match the approved edit output');
+  }
   const validation = await validateEdit(projectPath, edit, {integrity});
   if (!validation.valid) {
     throw new Error(`Edit is not valid:\n- ${validation.failures.join('\n- ')}`);
@@ -194,7 +202,6 @@ const renderTarget = async (
       }),
   });
   return await withDisposableRenderStage(engineRoot, stageRoot, async () => {
-    const settings = await readRenderSettings(projectPath);
     await mkdir(path.dirname(outputLocation), {recursive: true});
     await mkdir(path.dirname(rawOutput), {recursive: true});
     const workerRequest: RemotionWorkerRequest = {

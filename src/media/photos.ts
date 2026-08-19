@@ -260,7 +260,8 @@ const readPhotoApproval = async (projectPath: string) => {
 export const readPhotoConfig = async (projectPath: string): Promise<PhotoConfig> => {
   try {
     return await readJson(photoConfigPath(projectPath), PhotoConfigSchema);
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     return DEFAULT_PHOTO_CONFIG;
   }
 };
@@ -660,11 +661,55 @@ export const prunePublishedPhotoOutputs = async (
   }
 };
 
-const publishProfile = async (
+const ensureRealPhotoDirectory = async (
+  directory: string,
+  expectedRealPath: string,
+): Promise<string> => {
+  try {
+    await mkdir(directory);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
+  const stats = await lstat(directory);
+  if (!stats.isDirectory() || stats.isSymbolicLink()) {
+    throw new Error(`Photo publication boundary is not a real directory: ${directory}`);
+  }
+  const observedRealPath = await realpath(directory);
+  if (observedRealPath !== expectedRealPath) {
+    throw new Error(`Photo publication boundary resolves outside the project: ${directory}`);
+  }
+  return observedRealPath;
+};
+
+const preparePhotoOutputProfile = async (
+  projectPath: string,
+  profile: PhotoProfile,
+): Promise<void> => {
+  const resolvedProjectRoot = path.resolve(projectPath);
+  const realProjectRoot = await realpath(resolvedProjectRoot);
+  const outputRoot = resolveInside(projectPath, 'output');
+  const realOutputRoot = await ensureRealPhotoDirectory(
+    outputRoot,
+    path.join(realProjectRoot, 'output'),
+  );
+  const photosRoot = path.join(outputRoot, 'photos');
+  const realPhotosRoot = await ensureRealPhotoDirectory(
+    photosRoot,
+    path.join(realOutputRoot, 'photos'),
+  );
+  const profileName = profileDirectory(profile);
+  await ensureRealPhotoDirectory(
+    path.join(photosRoot, profileName),
+    path.join(realPhotosRoot, profileName),
+  );
+};
+
+export const publishProfile = async (
   projectPath: string,
   output: z.infer<typeof PhotoOutputSchema>,
 ): Promise<z.infer<typeof PhotoOutputSchema>> => {
   const outputFiles = outputFilesFor(output.profile, output.candidateFiles.length);
+  await preparePhotoOutputProfile(projectPath, output.profile);
   const outputChecksums: Record<string, string> = {};
   for (const [index, candidateFile] of output.candidateFiles.entries()) {
     const destination = resolveInside(projectPath, outputFiles[index]);

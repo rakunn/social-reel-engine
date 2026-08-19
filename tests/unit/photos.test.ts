@@ -196,6 +196,34 @@ describe('photo candidate policy', () => {
     expect(() => assertPhotoProjectType({projectType: 'carousel'})).toThrow(/reel projects/i);
   });
 
+  it.each([
+    ['malformed JSON', '{'],
+    [
+      'schema-invalid JSON',
+      JSON.stringify({
+        schemaVersion: '1.0.0',
+        enabled: 'yes',
+        profiles: ['9:16'],
+        count: 5,
+        jpegQuality: 95,
+      }),
+    ],
+  ])('surfaces an existing %s photo configuration', async (_label, contents) => {
+    const photos = await import('../../src/media/photos');
+    const readPhotoConfig = Reflect.get(photos, 'readPhotoConfig');
+    const projectPath = await mkdtemp(path.join(tmpdir(), 'reel-invalid-photo-config-'));
+    try {
+      await mkdir(path.join(projectPath, 'config'), {recursive: true});
+      await writeFile(path.join(projectPath, 'config/photos.json'), contents);
+
+      expect(readPhotoConfig).toEqual(expect.any(Function));
+      if (typeof readPhotoConfig !== 'function') return;
+      await expect(readPhotoConfig(projectPath)).rejects.toThrow();
+    } finally {
+      await rm(projectPath, {recursive: true, force: true});
+    }
+  });
+
   it('treats photo QC as current only when it passes for every published output', async () => {
     const photos = await import('../../src/media/photos');
     const photoQcReportIsCurrent = Reflect.get(photos, 'photoQcReportIsCurrent');
@@ -264,6 +292,42 @@ describe('photo candidate policy', () => {
       await expect(prunePublishedPhotoOutputs(projectPath, [])).rejects.toThrow(
         /symlink|outside|boundary|real directory/i,
       );
+      await expect(readFile(sentinel, 'utf8')).resolves.toBe('keep');
+    } finally {
+      await rm(root, {recursive: true, force: true});
+    }
+  });
+
+  it('refuses a symlinked profile directory before publishing any photo', async () => {
+    const photos = await import('../../src/media/photos');
+    const publishProfile = Reflect.get(photos, 'publishProfile');
+    const root = await mkdtemp(path.join(tmpdir(), 'reel-photo-publish-symlink-'));
+    const projectPath = path.join(root, 'project');
+    const candidate = path.join(projectPath, 'previews/photo-candidates/9x16/01.jpg');
+    const outside = path.join(root, 'outside');
+    const sentinel = path.join(outside, 'sentinel.txt');
+    try {
+      await mkdir(path.dirname(candidate), {recursive: true});
+      await mkdir(path.join(projectPath, 'output/photos'), {recursive: true});
+      await mkdir(outside, {recursive: true});
+      await writeFile(candidate, 'candidate');
+      await writeFile(sentinel, 'keep');
+      await symlink(outside, path.join(projectPath, 'output/photos/9x16'), 'dir');
+
+      expect(publishProfile).toEqual(expect.any(Function));
+      if (typeof publishProfile !== 'function') return;
+      await expect(
+        publishProfile(projectPath, {
+          profile: '9:16',
+          candidateFiles: ['previews/photo-candidates/9x16/01.jpg'],
+          candidateChecksums: {},
+          contactSheet: null,
+          contactSheetChecksum: null,
+          outputFiles: [],
+          outputChecksums: {},
+        }),
+      ).rejects.toThrow(/symlink|outside|boundary|real directory/i);
+      await expect(access(path.join(outside, '01.jpg'))).rejects.toThrow();
       await expect(readFile(sentinel, 'utf8')).resolves.toBe('keep');
     } finally {
       await rm(root, {recursive: true, force: true});
