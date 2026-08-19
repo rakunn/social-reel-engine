@@ -136,4 +136,21 @@ describe('render policy', () => {
       expect.objectContaining({audioBitRate: 192_000, integratedLufs: -16, truePeakDbtp: -2}),
     );
   });
+
+  it('derives exact 1.91:1 preview, master, and delivery dimensions from carousel settings', () => {
+    const carouselSettings = {
+      ...settings,
+      preview: {...settings.preview, width: 764, height: 400},
+      master: {...settings.master, width: 1910, height: 1000},
+    } as const;
+    expect(renderOptionsFor('preview', carouselSettings)).toEqual(
+      expect.objectContaining({width: 764, height: 400, scale: 0.4}),
+    );
+    expect(renderOptionsFor('master', carouselSettings)).toEqual(
+      expect.objectContaining({width: 1910, height: 1000, scale: 1}),
+    );
+    expect(targetExpectations('delivery', carouselSettings)).toEqual(
+      expect.objectContaining({width: 1910, height: 1000, fps: 30}),
+    );
+  });
 });

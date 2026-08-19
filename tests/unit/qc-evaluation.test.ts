@@ -49,6 +49,11 @@ describe('QC evaluation', () => {
       now: new Date('2026-08-10T00:00:00.000Z'),
       readable: true,
       renderFresh: true,
+      renderArtifact: {
+        fingerprint: 'a'.repeat(64),
+        checksumSha256: 'b'.repeat(64),
+        sizeBytes: 123,
+      },
       silenceAllowed: false,
       observedSilent: false,
       approvals: {editApproved: true, colorApproved: true},
@@ -75,6 +80,11 @@ describe('QC evaluation', () => {
       loudness: {integratedLufs: -14.2, truePeakDbtp: -1.6, loudnessRangeLu: 5},
     });
     expect(report.failures).toEqual([]);
+    expect(report.renderArtifact).toEqual({
+      fingerprint: 'a'.repeat(64),
+      checksumSha256: 'b'.repeat(64),
+      sizeBytes: 123,
+    });
     expect(report.checks.every((check) => check.status !== 'fail')).toBe(true);
   });
 

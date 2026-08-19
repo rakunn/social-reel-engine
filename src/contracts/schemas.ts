@@ -20,9 +20,23 @@ const RightsConfirmationSchema = z
   })
   .strict();
 
+export const VideoOutputSchema = z.union([
+  z.object({
+    width: z.literal(1080),
+    height: z.literal(1920),
+    fps: z.literal(30),
+  }),
+  z.object({
+    width: z.literal(1910),
+    height: z.literal(1000),
+    fps: z.literal(30),
+  }),
+]);
+
 export const ReelBriefSchema = z
   .object({
     schemaVersion: SchemaVersion,
+    projectType: z.enum(['reel', 'carousel']).optional().default('reel'),
     identity: z.object({
       reelName: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
       title: z.string().min(1).max(160),
@@ -42,11 +56,7 @@ export const ReelBriefSchema = z
           });
         }
       }),
-    output: z.object({
-      width: z.literal(1080),
-      height: z.literal(1920),
-      fps: z.literal(30),
-    }),
+    output: VideoOutputSchema,
     style: z.literal('cinematic-minimal'),
     options: z.object({
       music: z.boolean(),
@@ -57,7 +67,24 @@ export const ReelBriefSchema = z
     rightsConfirmation: RightsConfirmationSchema.nullable().optional().default(null),
     notes: z.string().max(10_000).optional().default(''),
   })
-  .strict();
+  .strict()
+  .superRefine((brief, context) => {
+    const landscape = brief.output.width === 1910 && brief.output.height === 1000;
+    if (brief.projectType === 'carousel' && !landscape) {
+      context.addIssue({
+        code: 'custom',
+        path: ['output'],
+        message: 'Carousel projects require the exact 1.91:1 output contract',
+      });
+    }
+    if (brief.projectType === 'reel' && landscape) {
+      context.addIssue({
+        code: 'custom',
+        path: ['output'],
+        message: 'Reel projects require the 9:16 output contract',
+      });
+    }
+  });
 
 type EncoderBitrateValue = `${number}k` | `${number}K` | `${number}M`;
 
@@ -78,16 +105,16 @@ export const RenderSettingsSchema = z
       .strict(),
     preview: z
       .object({
-        width: z.literal(540),
-        height: z.literal(960),
+        width: z.union([z.literal(540), z.literal(764)]),
+        height: z.union([z.literal(960), z.literal(400)]),
         crf: z.number().int().min(0).max(51),
         audioBitrate: EncoderBitrate.default('192k'),
       })
       .strict(),
     master: z
       .object({
-        width: z.literal(1080),
-        height: z.literal(1920),
+        width: z.union([z.literal(1080), z.literal(1910)]),
+        height: z.union([z.literal(1920), z.literal(1000)]),
         fps: z.literal(30),
         videoCodec: z.literal('prores_ks'),
         profile: z.literal(3),
@@ -108,7 +135,26 @@ export const RenderSettingsSchema = z
       })
       .strict(),
   })
-  .strict();
+  .strict()
+  .superRefine((settings, context) => {
+    const vertical =
+      settings.preview.width === 540 &&
+      settings.preview.height === 960 &&
+      settings.master.width === 1080 &&
+      settings.master.height === 1920;
+    const carousel =
+      settings.preview.width === 764 &&
+      settings.preview.height === 400 &&
+      settings.master.width === 1910 &&
+      settings.master.height === 1000;
+    if (!vertical && !carousel) {
+      context.addIssue({
+        code: 'custom',
+        path: ['master'],
+        message: 'Preview and master dimensions must use one matching supported video profile',
+      });
+    }
+  });
 
 const FfprobeSchema = z.object({
   format: z.record(z.string(), z.unknown()).optional().default({}),
@@ -257,6 +303,15 @@ const CropPointSchema = z.object({
   scale: z.number().min(1).max(4),
 });
 
+export const GradeTreatmentSchema = z
+  .object({
+    kind: z.literal('land-haze'),
+    strength: z.number().min(0).max(1),
+  })
+  .strict();
+
+export type GradeTreatment = z.infer<typeof GradeTreatmentSchema>;
+
 export const AnimatedCropSchema = z.object({
   start: CropPointSchema,
   end: CropPointSchema,
@@ -283,6 +338,7 @@ export const EditClipSchema = z
       creativeLutId: z.string().min(1).nullable().optional().default(null),
       combinedLutId: z.string().min(1).nullable().optional().default(null),
       creativeMix: z.number().min(0).max(1).optional(),
+      treatment: GradeTreatmentSchema.nullable().optional(),
     }),
     audio: z.object({
       muted: z.boolean(),
@@ -365,11 +421,7 @@ export const EditManifestSchema = z
   .object({
     schemaVersion: SchemaVersion,
     reelName: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-    output: z.object({
-      width: z.literal(1080),
-      height: z.literal(1920),
-      fps: z.literal(30),
-    }),
+    output: VideoOutputSchema,
     clips: z.array(EditClipSchema).min(1),
     titles: z.array(TitleSchema).default([]),
     music: z
@@ -440,6 +492,15 @@ export const QcReportSchema = z
     target: z.enum(['preview', 'master', 'delivery']),
     readable: z.boolean(),
     approvals: z.object({edit: z.boolean(), color: z.boolean()}),
+    renderArtifact: z
+      .object({
+        fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+        checksumSha256: z.string().regex(/^[a-f0-9]{64}$/),
+        sizeBytes: z.number().int().nonnegative(),
+      })
+      .nullable()
+      .optional()
+      .default(null),
     expected: z.record(z.string(), z.unknown()),
     observed: z.record(z.string(), z.unknown()),
     checks: z.array(QcCheckSchema),
@@ -450,6 +511,38 @@ export const QcReportSchema = z
 
 export type ReelBrief = z.infer<typeof ReelBriefSchema>;
 export type RenderSettings = z.infer<typeof RenderSettingsSchema>;
+export const PhotoProfileSchema = z.enum(['9:16', '4:5', '1:1', '16:9']);
+
+export const PhotoConfigSchema = z
+  .object({
+    schemaVersion: SchemaVersion,
+    enabled: z.boolean(),
+    profiles: z.array(PhotoProfileSchema),
+    count: z.number().int().min(1).max(20),
+    jpegQuality: z.number().int().min(1).max(100),
+  })
+  .strict()
+  .superRefine((config, context) => {
+    if (config.enabled && config.profiles.length === 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['profiles'],
+        message: 'Enabled photo output requires at least one profile',
+      });
+    }
+    const seen = new Set<string>();
+    for (const [index, profile] of config.profiles.entries()) {
+      if (seen.has(profile)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['profiles', index],
+          message: `Duplicate photo profile: ${profile}`,
+        });
+      }
+      seen.add(profile);
+    }
+  });
+
 export type SourceEntry = z.infer<typeof SourceEntrySchema>;
 export type SourceManifest = z.infer<typeof SourceManifestSchema>;
 export type LutDefinition = z.infer<typeof LutDefinitionSchema>;
@@ -458,3 +551,5 @@ export type EditClip = z.infer<typeof EditClipSchema>;
 export type EditManifest = z.infer<typeof EditManifestSchema>;
 export type ApprovalState = z.infer<typeof ApprovalStateSchema>;
 export type QcReport = z.infer<typeof QcReportSchema>;
+export type PhotoProfile = z.infer<typeof PhotoProfileSchema>;
+export type PhotoConfig = z.infer<typeof PhotoConfigSchema>;

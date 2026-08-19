@@ -24,3 +24,7 @@ That is too ambiguous for the engine contract introduced in Phase 1: a failed/st
 ## Subject-preservation regression baseline
 
 The first production run of the Coron/Ngey Ngey reel exposed a crop failure that the pre-update guidance did not prevent: the boat in the second selected shot drifted toward the edge of the 9:16 crop, and the third selected shot did not establish the visible group of three huts as the composition's subject. The existing wording to review the moving image and avoid blind center-crops was too soft to encode subject identity, required count, safe margin, or a default “establish-and-hold” policy. The regression case `subject-preserving-composition` makes those requirements explicit.
+
+## Landscape video carousel baseline
+
+Before the carousel extension, the engine's video contract was fixed to 1080×1920 and the skill routed every moving-image request through the single vertical-reel render. The only package-style alternative created still photos. A prompt requesting independent 1.91:1 videos therefore could not produce a correctly fingerprinted ordered package, per-card QC, or a carousel-specific delivery record regardless of how precisely the aspect ratio and duration were described. The `landscape-video-carousel` case requires the new project format and command path instead of treating a prompt as a substitute for engine support.

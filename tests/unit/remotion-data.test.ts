@@ -6,6 +6,7 @@ import {
   calculateReelMetadata,
   captionFrameRange,
   cropTransform,
+  photoCropStyle,
   secondsToMediaFrames,
   type ReelRenderProps,
 } from '../../src/remotion/model';
@@ -100,6 +101,14 @@ describe('data-driven Remotion model', () => {
       transform: 'scale(1)',
       transformOrigin: '25% 50%',
       objectPosition: '25% 50%',
+    });
+  });
+
+  it('uses the selected approved crop for a clean photo still', () => {
+    expect(photoCropStyle({x: 0.4, y: 0.65, scale: 1.25})).toEqual({
+      transform: 'scale(1.25)',
+      transformOrigin: '40% 65%',
+      objectPosition: '40% 65%',
     });
   });
 

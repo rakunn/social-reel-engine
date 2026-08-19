@@ -204,6 +204,7 @@ export const storageCapacityCheck = async (
 const REQUIRED_FFMPEG_FILTERS = [
   'blackdetect',
   'blend',
+  'boxblur',
   'colorbalance',
   'colortemperature',
   'drawbox',
@@ -212,8 +213,10 @@ const REQUIRED_FFMPEG_FILTERS = [
   'format',
   'fps',
   'freezedetect',
+  'geq',
   'loudnorm',
   'lut3d',
+  'maskedmerge',
   'scale',
   'setparams',
   'split',

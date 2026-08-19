@@ -4,6 +4,7 @@ import {access, mkdir} from 'node:fs/promises';
 import path from 'node:path';
 import {
   EditManifestSchema,
+  type GradeTreatment,
   LutDefinitionsSchema,
   type LutDefinition,
   type SourceEntry,
@@ -47,6 +48,7 @@ type GradeSelection = {
   creativeLutId?: string | null;
   combinedLutId?: string | null;
   creativeMix?: number;
+  treatment?: GradeTreatment | null;
 };
 
 const fileSha256Sync = (filePath: string): string =>
@@ -112,6 +114,7 @@ export const resolveClipColor = (
     creative,
     combined,
     creativeMix: grade.creativeMix,
+    treatment: grade.treatment,
   };
   return buildColorChain(input);
 };

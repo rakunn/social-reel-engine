@@ -1,5 +1,6 @@
 {
   "schemaVersion": "1.0.0",
+  "projectType": "reel",
   "identity": {
     "reelName": "reel-name",
     "title": "Untitled Reel",

@@ -4,6 +4,7 @@ import {
   makeCancelSignal,
   openBrowser,
   renderMedia,
+  renderStill,
   selectComposition,
   type CancelSignal,
   type RenderMediaOptions,
@@ -83,6 +84,20 @@ type RawRenderInput<Browser extends BrowserResource, Composition> = {
   sampleRate?: number;
 };
 
+type RawStillInput<Browser extends BrowserResource, Composition> = {
+  serveUrl: string;
+  composition: Composition;
+  inputProps: Record<string, unknown>;
+  output: string;
+  imageFormat: 'jpeg';
+  jpegQuality: number;
+  overwrite: true;
+  logLevel: 'info';
+  timeoutInMilliseconds: number;
+  puppeteerInstance: Browser;
+  cancelSignal: CancelSignal;
+};
+
 export type RemotionWorkerDependencies<
   Browser extends BrowserResource = BrowserResource,
   Composition = unknown,
@@ -99,6 +114,7 @@ export type RemotionWorkerDependencies<
   ): Promise<Browser>;
   selectComposition(options: SelectCompositionInput<Browser>): Promise<Composition>;
   renderMedia(options: RawRenderInput<Browser, Composition>): Promise<unknown>;
+  renderStill?(options: RawStillInput<Browser, Composition>): Promise<unknown>;
 };
 
 type DefaultBrowser = Awaited<ReturnType<typeof openBrowser>>;
@@ -155,6 +171,7 @@ const defaultDependencies: RemotionWorkerDependencies<DefaultBrowser, DefaultCom
   selectComposition: async (options) => await selectComposition(options),
   renderMedia: async (options) =>
     await renderMedia(options as RenderMediaOptions),
+  renderStill: async (options) => await renderStill(options as never),
 };
 
 export type RemotionCancellation = {
@@ -207,7 +224,9 @@ export const runRawRemotionRender = async <
     entryPoint: path.join(request.engineRoot, 'src/remotion/index.ts'),
     publicDir: request.publicDir,
     rootDir: request.engineRoot,
-    enableCaching: true,
+    // Bundler caching does not distinguish disposable public directories. Photo renders use
+    // namespaced staged media, so rebuild their bundle while retaining the stable public root.
+    enableCaching: request.target !== 'photo',
     symlinkPublicDir: true,
   });
   cancellationCheckpoint(cancellation, 'before browser launch');
@@ -232,36 +251,65 @@ export const runRawRemotionRender = async <
         : {browserExecutable: request.browserLifecycle.launcherPath}),
     });
     cancellationCheckpoint(cancellation, 'before composition selection');
-    const composition = await dependencies.selectComposition({
-      serveUrl,
-      id: 'SocialReel',
-      inputProps: request.inputProps,
-      timeoutInMilliseconds: 120_000,
-      puppeteerInstance: browser,
-    });
-    cancellationCheckpoint(cancellation, 'before media rendering');
-    const options = renderOptionsFor(request.target, request.settings);
-    await dependencies.renderMedia({
-      serveUrl,
-      composition,
-      inputProps: request.inputProps,
-      outputLocation: request.rawOutput,
-      codec: options.codec,
-      pixelFormat: options.pixelFormat,
-      imageFormat: options.imageFormat,
-      audioCodec: options.audioCodec,
-      colorSpace: options.colorSpace,
-      scale: options.scale,
-      overwrite: true,
-      enforceAudioTrack: true,
-      logLevel: 'info',
-      timeoutInMilliseconds: 120_000,
-      puppeteerInstance: browser,
-      cancelSignal: cancellation.cancelSignal,
-      ...(request.target === 'preview'
-        ? {crf: options.crf, audioBitrate: options.audioBitrate}
-        : {proResProfile: options.proResProfile, sampleRate: options.sampleRate}),
-    });
+    if (request.target === 'photo') {
+      if (dependencies.renderStill === undefined) {
+        throw new Error('Photo rendering is unavailable in this Remotion worker');
+      }
+      for (const photo of request.photoOutputs ?? []) {
+        const composition = await dependencies.selectComposition({
+          serveUrl,
+          id: 'SharePhoto',
+          inputProps: photo.inputProps,
+          timeoutInMilliseconds: 120_000,
+          puppeteerInstance: browser,
+        });
+        cancellationCheckpoint(cancellation, 'before photo rendering');
+        await dependencies.renderStill({
+          serveUrl,
+          composition,
+          inputProps: photo.inputProps,
+          output: photo.output,
+          imageFormat: 'jpeg',
+          jpegQuality: photo.jpegQuality,
+          overwrite: true,
+          logLevel: 'info',
+          timeoutInMilliseconds: 120_000,
+          puppeteerInstance: browser,
+          cancelSignal: cancellation.cancelSignal,
+        });
+      }
+    } else {
+      const composition = await dependencies.selectComposition({
+        serveUrl,
+        id: 'SocialReel',
+        inputProps: request.inputProps,
+        timeoutInMilliseconds: 120_000,
+        puppeteerInstance: browser,
+      });
+      cancellationCheckpoint(cancellation, 'before media rendering');
+      const options = renderOptionsFor(request.target, request.settings);
+      await dependencies.renderMedia({
+        serveUrl,
+        composition,
+        inputProps: request.inputProps,
+        outputLocation: request.rawOutput,
+        codec: options.codec,
+        pixelFormat: options.pixelFormat,
+        imageFormat: options.imageFormat,
+        audioCodec: options.audioCodec,
+        colorSpace: options.colorSpace,
+        scale: options.scale,
+        overwrite: true,
+        enforceAudioTrack: true,
+        logLevel: 'info',
+        timeoutInMilliseconds: 120_000,
+        puppeteerInstance: browser,
+        cancelSignal: cancellation.cancelSignal,
+        ...(request.target === 'preview'
+          ? {crf: options.crf, audioBitrate: options.audioBitrate}
+          : {proResProfile: options.proResProfile, sampleRate: options.sampleRate}),
+      });
+    }
   } catch (error) {
     renderFailed = true;
     renderError = error;

@@ -34,7 +34,7 @@ export const createCli = (): Command => {
   const program = new Command();
   program
     .name('reel')
-    .description('Local FFmpeg + Remotion social reel engine')
+    .description('Local FFmpeg + Remotion social video engine')
     .version('1.0.0')
     .showHelpAfterError();
 
@@ -52,13 +52,22 @@ export const createCli = (): Command => {
     .command('new')
     .argument('<reel-name>')
     .option('--title <title>')
-    .description('Create a new isolated reel job from the template')
-    .action(async (reelName: string, options: {title?: string}) => {
+    .addOption(
+      new Option('--format <format>', 'Video project format')
+        .choices(['reel-9:16', 'carousel-1.91:1'])
+        .default('reel-9:16'),
+    )
+    .description('Create a new isolated reel or carousel job from the template')
+    .action(async (
+      reelName: string,
+      options: {title?: string; format: 'reel-9:16' | 'carousel-1.91:1'},
+    ) => {
       const {createReelProject} = await import('./project/workspace');
       const projectPath = await createReelProject({
         engineRoot: ENGINE_ROOT,
         reelName,
         title: options.title,
+        format: options.format,
       });
       print({created: projectPath});
     });
@@ -154,7 +163,7 @@ export const createCli = (): Command => {
   program
     .command('preview')
     .argument('<reel-name>')
-    .description('Render a 540×960 H.264 rough-cut preview')
+    .description('Render an H.264 rough-cut preview in the project format')
     .action(async (reelName: string) => {
       const {renderPreview} = await import('./render/remotion');
       print({
@@ -247,6 +256,27 @@ export const createCli = (): Command => {
     });
 
   program
+    .command('render-carousel')
+    .argument('<reel-name>')
+    .description('Render approved 1.91:1 carousel cards as ordered H.264 MP4 files')
+    .action(async (reelName: string) => {
+      const {renderCarouselPackage} = await import('./render/carousel');
+      print(
+        await runTrackedMediaCommand(
+          reelName,
+          'render-carousel',
+          'rendering-carousel-cards',
+          async ({update}) =>
+            await renderCarouselPackage(project(reelName), ENGINE_ROOT, {
+              onActivity: async ({phase, progress = null}) => {
+                await update({phase, progress});
+              },
+            }),
+        ),
+      );
+    });
+
+  program
     .command('qc')
     .argument('<reel-name>')
     .addOption(
@@ -265,6 +295,57 @@ export const createCli = (): Command => {
       );
       print(report);
       if (report.failures.length) process.exitCode = 1;
+    });
+
+  program
+    .command('qc-carousel')
+    .argument('<reel-name>')
+    .description('Write consolidated machine-readable and human-readable QC for every carousel card')
+    .action(async (reelName: string) => {
+      const {runCarouselQc} = await import('./media/carousel-qc');
+      const report = await runTrackedMediaCommand(
+        reelName,
+        'qc-carousel',
+        'checking-carousel-cards',
+        async () => await runCarouselQc(project(reelName)),
+      );
+      print(report);
+      if (report.failures.length) process.exitCode = 1;
+    });
+
+  program
+    .command('photos')
+    .argument('<reel-name>')
+    .option('--aspect <profiles...>', 'One or more photo profiles: 9:16, 4:5, 1:1, 16:9')
+    .option('--count <count>', 'Number of photos per requested profile', Number.parseInt)
+    .description('Create checksum-bound shareable JPEG stills after final video QC')
+    .action(async (reelName: string, options: {aspect?: string[]; count?: number}) => {
+      const {configurePhotoOutput, generatePhotos, readPhotoConfig} = await import('./media/photos');
+      const projectPath = project(reelName);
+      const {assertProjectScaffold} = await import('./project/workspace');
+      await assertProjectScaffold(projectPath);
+      const current = await readPhotoConfig(projectPath);
+      const profiles = (options.aspect ?? (current.enabled ? current.profiles : ['9:16'])) as Array<
+        '9:16' | '4:5' | '1:1' | '16:9'
+      >;
+      const config = await configurePhotoOutput(projectPath, {
+        profiles,
+        count: options.count ?? current.count,
+      });
+      const result = await runTrackedMediaCommand(reelName, 'photos', 'creating-photo-candidates', async ({update}) => {
+          await update({phase: 'rendering-photo-stills'});
+          return await generatePhotos(projectPath, ENGINE_ROOT);
+        });
+      print({photoConfig: config, ...result});
+    });
+
+  program
+    .command('approve-photos')
+    .argument('<reel-name>')
+    .description('Approve the exact current non-9:16 photo reframe contact sheets')
+    .action(async (reelName: string) => {
+      const {approvePhotoReframes} = await import('./media/photos');
+      print(await approvePhotoReframes(project(reelName)));
     });
 
   program

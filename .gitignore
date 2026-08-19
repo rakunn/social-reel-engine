@@ -7,6 +7,14 @@ __pycache__/
 coverage/
 dist/
 
+# One-off local exports and scratch media. Runtime project artifacts are covered below.
+/output/
+/work/
+/jobs/
+/videos/
+/previews/
+/renders/
+
 # Runtime reel jobs are entirely local. The reusable scaffold lives in templates/reel/.
 projects/**
 !projects/.gitkeep

@@ -25,10 +25,21 @@ describe('stable command interface', () => {
       'confirm-rights',
       'grade',
       'render',
+      'render-carousel',
       'qc',
+      'qc-carousel',
+      'photos',
+      'approve-photos',
       'status',
     ]);
     expect(createCli().commands.map((command) => command.name())).toEqual(COMMAND_NAMES);
+  });
+
+  it('offers an explicit 1.91:1 carousel project format', () => {
+    const command = createCli().commands.find((candidate) => candidate.name() === 'new');
+    const format = command?.options.find((option) => option.long === '--format');
+    expect(format?.argChoices).toEqual(['reel-9:16', 'carousel-1.91:1']);
+    expect(format?.defaultValue).toBe('reel-9:16');
   });
 
   it('rejects an unknown project before a tracked command creates operation state', async () => {

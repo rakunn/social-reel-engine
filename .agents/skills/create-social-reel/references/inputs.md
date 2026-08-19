@@ -4,7 +4,7 @@
 
 Collect or discover what is available without forcing the user to repeat facts already supplied:
 
-- project/reel identity and desired title;
+- project identity, desired title, and output type: `reel-9:16` or `carousel-1.91:1`;
 - local paths for MP4/MOV clips and optional music, SRT/Remotion Caption JSON, LUTs, fonts, and brand assets;
 - camera model plus recorded gamma and gamut for every clip or homogeneous clip group;
 - intended technical LUT and its declared input/output color spaces;
@@ -21,6 +21,7 @@ Every runtime `projects/<reel-name>` job is local-only and ignored by Git, inclu
 
 ```text
 npm run reel -- new <name> --title "<title>"
+npm run reel -- new <name> --title "<title>" --format carousel-1.91:1
 npm run reel -- ingest <name> <clip-paths...> --kind clips
 npm run reel -- ingest <name> <music-path> --kind music
 npm run reel -- ingest <name> <caption-path> --kind captions

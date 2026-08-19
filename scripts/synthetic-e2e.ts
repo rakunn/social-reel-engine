@@ -9,24 +9,41 @@ import {writeJson} from '../src/core/json';
 import {analyzeSources} from '../src/media/analyze';
 import {runFfmpeg} from '../src/media/ffmpeg';
 import {generateGradedStills} from '../src/media/grade';
+import {
+  approvePhotoReframes,
+  configurePhotoOutput,
+  generatePhotos,
+  readPhotoOutputStatus,
+} from '../src/media/photos';
 import {runQc} from '../src/media/qc-report';
+import {runCarouselQc} from '../src/media/carousel-qc';
 import {ingestFiles} from '../src/project/ingest';
-import {createReelProject} from '../src/project/workspace';
+import {createReelProject, getProjectStatus} from '../src/project/workspace';
 import {renderMasterAndDelivery, renderPreview} from '../src/render/remotion';
+import {renderCarouselPackage} from '../src/render/carousel';
 
 const IDENTITY_CUBE = `TITLE "Synthetic Identity"\nLUT_3D_SIZE 2\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 1 1 1\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n`;
 
 const prepareSyntheticReelAtRoot = async (
   engineRoot: string,
   temporaryRoot: string,
-  options: {silent?: boolean} = {},
+  options: {silent?: boolean; carousel?: boolean} = {},
 ) => {
-  const reelName = options.silent ? 'synthetic-silent-acceptance' : 'synthetic-acceptance';
+  const reelName = options.carousel
+    ? 'synthetic-carousel-acceptance'
+    : options.silent
+      ? 'synthetic-silent-acceptance'
+      : 'synthetic-acceptance';
   const projectPath = await createReelProject({
     engineRoot,
     projectsRoot: path.join(temporaryRoot, 'projects'),
     reelName,
-    title: options.silent ? 'Synthetic Silent Acceptance Reel' : 'Synthetic Acceptance Reel',
+    title: options.carousel
+      ? 'Synthetic Carousel Acceptance'
+      : options.silent
+        ? 'Synthetic Silent Acceptance Reel'
+        : 'Synthetic Acceptance Reel',
+    format: options.carousel ? 'carousel-1.91:1' : 'reel-9:16',
   });
   const sourceDirectory = path.join(temporaryRoot, 'originals');
   await import('node:fs/promises').then(({mkdir}) => mkdir(sourceDirectory, {recursive: true}));
@@ -34,16 +51,17 @@ const prepareSyntheticReelAtRoot = async (
   const clipTwo = path.join(sourceDirectory, 'SYNTHETIC_B.MP4');
   const music = path.join(sourceDirectory, 'SYNTHETIC_MUSIC.wav');
   const lut = path.join(sourceDirectory, 'SYNTHETIC_IDENTITY.cube');
+  const clipDuration = options.carousel ? '4.8' : '2.4';
 
   await runFfmpeg([
     '-f',
     'lavfi',
     '-i',
-    'testsrc2=size=480x270:rate=30:duration=2.4',
+    `testsrc2=size=480x270:rate=30:duration=${clipDuration}`,
     '-f',
     'lavfi',
     '-i',
-    'sine=frequency=330:sample_rate=48000:duration=2.4',
+    `sine=frequency=330:sample_rate=48000:duration=${clipDuration}`,
     '-shortest',
     '-c:v',
     'libx264',
@@ -63,9 +81,9 @@ const prepareSyntheticReelAtRoot = async (
     '-f',
     'lavfi',
     '-i',
-    'sine=frequency=550:sample_rate=48000:duration=2.4',
+    `sine=frequency=550:sample_rate=48000:duration=${clipDuration}`,
     '-t',
-    '2.4',
+    clipDuration,
     '-c:v',
     'libx264',
     '-preset',
@@ -139,17 +157,23 @@ const prepareSyntheticReelAtRoot = async (
   await writeJson(path.join(projectPath, 'edits/edit.json'), {
     schemaVersion: '1.0.0',
     reelName,
-    output: {width: 1080, height: 1920, fps: 30},
+    output: options.carousel
+      ? {width: 1910, height: 1000, fps: 30}
+      : {width: 1080, height: 1920, fps: 30},
     clips: [
       {
         id: 'synthetic-a',
         sourceId: sourceOne.id,
-        inSeconds: 0.3,
-        outSeconds: 2.3,
+        inSeconds: options.carousel ? 0.2 : 0.3,
+        outSeconds: options.carousel ? 4.7 : 2.3,
         playbackRate: 1,
         crop: {
-          start: {x: 0.35, y: 0.5, scale: 1},
-          end: {x: 0.65, y: 0.5, scale: 1.12},
+          start: options.carousel
+            ? {x: 0.5, y: 0.5, scale: 1}
+            : {x: 0.35, y: 0.5, scale: 1},
+          end: options.carousel
+            ? {x: 0.5, y: 0.5, scale: 1}
+            : {x: 0.65, y: 0.5, scale: 1.12},
         },
         stabilization: {enabled: false, strength: 0, fallbackToUnstabilized: true},
         grade: {
@@ -162,17 +186,23 @@ const prepareSyntheticReelAtRoot = async (
           creativeMix: 0,
         },
         audio: {muted: true, gainDb: 0},
-        transitionAfter: {type: 'fade', durationSeconds: 0.3},
+        transitionAfter: options.carousel
+          ? {type: 'none', durationSeconds: 0}
+          : {type: 'fade', durationSeconds: 0.3},
       },
       {
         id: 'synthetic-b',
         sourceId: sourceTwo.id,
         inSeconds: 0.2,
-        outSeconds: 2.2,
+        outSeconds: options.carousel ? 4.7 : 2.2,
         playbackRate: 1,
         crop: {
-          start: {x: 0.5, y: 0.45, scale: 1.05},
-          end: {x: 0.5, y: 0.55, scale: 1.15},
+          start: options.carousel
+            ? {x: 0.5, y: 0.5, scale: 1}
+            : {x: 0.5, y: 0.45, scale: 1.05},
+          end: options.carousel
+            ? {x: 0.5, y: 0.5, scale: 1}
+            : {x: 0.5, y: 0.55, scale: 1.15},
         },
         stabilization: {enabled: false, strength: 0, fallbackToUnstabilized: true},
         grade: {
@@ -188,15 +218,17 @@ const prepareSyntheticReelAtRoot = async (
         transitionAfter: {type: 'none', durationSeconds: 0},
       },
     ],
-    titles: [
-      {
-        text: 'SYNTHETIC / REEL',
-        startSeconds: 0.2,
-        durationSeconds: 1.4,
-        position: 'center',
-      },
-    ],
-    music: options.silent
+    titles: options.carousel
+      ? []
+      : [
+          {
+            text: 'SYNTHETIC / REEL',
+            startSeconds: 0.2,
+            durationSeconds: 1.4,
+            position: 'center',
+          },
+        ],
+    music: options.silent || options.carousel
       ? null
       : {sourceId: musicSource.id, startSeconds: 0.25, gainDb: -6},
     captions: null,
@@ -281,14 +313,27 @@ export const runSyntheticE2e = async (
     const previewQc = await runQc(projectPath, 'preview');
     const masterQc = await runQc(projectPath, 'master');
     const deliveryQc = await runQc(projectPath, 'delivery');
+    await configurePhotoOutput(projectPath, {profiles: ['9:16', '4:5'], count: 5});
+    const photoCandidates = await generatePhotos(projectPath, engineRoot);
+    if (
+      !photoCandidates.awaitingApproval ||
+      photoCandidates.completed ||
+      photoCandidates.outputs.length !== 5
+    ) {
+      throw new Error('Synthetic photo candidates did not wait for 4:5 reframe approval');
+    }
+    await approvePhotoReframes(projectPath);
+    const photos = await generatePhotos(projectPath, engineRoot);
+    const photoStatus = await readPhotoOutputStatus(projectPath);
     const afterHashes = await Promise.all(originalFiles.map(hashFile));
     const originalsUnchanged = originalHashes.every((hash, index) => hash === afterHashes[index]);
     const result = {
       projectPath,
-      outputs: {preview, master, delivery},
+      outputs: {preview, master, delivery, photos: photos.outputs},
       qc: {preview: previewQc, master: masterQc, delivery: deliveryQc},
       originalsUnchanged,
       renderArtifactsReused,
+      photoStatus,
       silent: options.silent === true,
     };
     if (
@@ -296,9 +341,64 @@ export const runSyntheticE2e = async (
       !renderArtifactsReused ||
       previewQc.failures.length ||
       masterQc.failures.length ||
-      deliveryQc.failures.length
+      deliveryQc.failures.length ||
+      !photos.completed ||
+      photos.outputs.length !== 10 ||
+      photoStatus !== 'rendered'
     ) {
       throw new Error(`Synthetic acceptance failed: ${JSON.stringify(result, null, 2)}`);
+    }
+    return result;
+  });
+
+export const runSyntheticCarouselE2e = async (
+  engineRoot: string,
+  options: {cleanup?: boolean} = {},
+) =>
+  await withSyntheticTemporaryRoot(options.cleanup === true, async (temporaryRoot) => {
+    const prepared = await prepareSyntheticReelAtRoot(engineRoot, temporaryRoot, {
+      carousel: true,
+    });
+    const {projectPath, originalFiles, originalHashes} = prepared;
+
+    await renderPreview(projectPath, engineRoot);
+    await approveEdit(projectPath);
+    await generateGradedStills(projectPath);
+    await approveColor(projectPath);
+    const packageRecord = await renderCarouselPackage(projectPath, engineRoot);
+    const packagePath = path.join(projectPath, 'analysis/carousel.json');
+    const packageBeforeRepeat = await import('node:fs/promises').then(({readFile}) =>
+      readFile(packagePath, 'utf8'),
+    );
+    await renderCarouselPackage(projectPath, engineRoot);
+    const packageAfterRepeat = await import('node:fs/promises').then(({readFile}) =>
+      readFile(packagePath, 'utf8'),
+    );
+    const packageReused = packageBeforeRepeat === packageAfterRepeat;
+    const qc = await runCarouselQc(projectPath);
+    const status = await getProjectStatus(projectPath);
+    const afterHashes = await Promise.all(originalFiles.map(hashFile));
+    const originalsUnchanged = originalHashes.every((hash, index) => hash === afterHashes[index]);
+    const cards = packageRecord.cards.map((card) => ({
+      ...card,
+      absolutePath: path.join(projectPath, ...card.file.split('/')),
+    }));
+    const result = {
+      projectPath,
+      cards,
+      qc,
+      status,
+      originalsUnchanged,
+      packageReused,
+    };
+    if (
+      !originalsUnchanged ||
+      !packageReused ||
+      qc.failures.length > 0 ||
+      cards.length !== 2 ||
+      status.stage !== 'carousel-rendered'
+    ) {
+      throw new Error(`Synthetic carousel acceptance failed: ${JSON.stringify(result, null, 2)}`);
     }
     return result;
   });

@@ -11,7 +11,9 @@ export type ImplementationFingerprintScope =
   | 'grade'
   | 'preview'
   | 'master'
-  | 'delivery';
+  | 'delivery'
+  | 'carousel'
+  | 'photos';
 
 export type ImplementationFingerprintOptions = {
   engineRoot?: string;
@@ -80,6 +82,25 @@ const scopeDefinitions: Record<ImplementationFingerprintScope, ScopeDefinition> 
       'src/media/proxy.ts',
       'src/media/preview-stabilize.ts',
     ],
+  },
+  carousel: {
+    recursiveEntrypoints: [
+      'src/render/carousel.ts',
+      'src/media/grade.ts',
+      'src/render/stage.ts',
+      ...rendererEntrypoints,
+    ],
+    shallowFiles: renderShallowFiles,
+    excludedModules: ['src/media/proxy.ts', 'src/media/preview-stabilize.ts'],
+  },
+  photos: {
+    recursiveEntrypoints: [
+      'src/media/photos.ts',
+      'src/render/stage.ts',
+      ...rendererEntrypoints,
+    ],
+    shallowFiles: renderShallowFiles,
+    excludedModules: ['src/media/proxy.ts', 'src/media/preview-stabilize.ts'],
   },
 };
 

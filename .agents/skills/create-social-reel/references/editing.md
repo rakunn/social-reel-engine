@@ -6,9 +6,11 @@ Run `analyze` and `proxy` for every job; run `beats` when music is present. Insp
 
 ## Author the edit manifest
 
-Use `analysis/sources.json` IDs. For every ordered clip, set verified in/out seconds, a frame-safe playback rate, animated 9:16 crop start/end, explicit stabilization settings, grade settings, camera-audio gain/mute, and the following transition. Define titles, supplied music offset/gain, and imported caption path/format at the manifest level.
+Use `analysis/sources.json` IDs. For every ordered clip, set verified in/out seconds, a frame-safe playback rate, animated crop start/end for the project's output profile, explicit stabilization settings, grade settings, camera-audio gain/mute, and the following transition. Define titles, supplied music offset/gain, and imported caption path/format at the manifest level for vertical reels.
 
 Target 20–30 seconds and normally aim near 25 seconds. Favor a clear opening hook, readable visual progression, and restrained transitions. Snap cuts to useful musical events only when that improves the scene; do not sacrifice narrative or motion continuity to hit every beat.
+
+For a `carousel-1.91:1` project, each ordered clip is one standalone card and must last 4–5 seconds after playback-rate adjustment. Use at least two cards, set every `transitionAfter` to `none`, and leave timeline-global titles, music, and captions empty. The first card is the hero/hook; the final card must provide visual closure. The combined preview exists to review the exact card order, composition, and boundaries, while `render-carousel` publishes one MP4 per card.
 
 ## Subject and composition contract
 
@@ -28,7 +30,7 @@ If a required subject or count cannot stay visible with a stable, natural crop, 
 
 Use representative frames and the moving image to locate the subject, subject count, and horizon. Do not blindly center-crop landscape footage. Keep important text and required subjects within platform-safe areas and review the entire animated crop at the first stable moment, 25%, 50%, 75%, and the final stable moment—not only the endpoints. Verify that a required group, such as three huts, remains a group and is not reduced to one visible member.
 
-For each shot, compare the intended composition to the rendered 9:16 crop. A centered subject is a preference, not a universal target; preserve good off-center framing when it is visually stronger. Any crop motion must be slow, minimal, and visibly motivated by subject safety or narrative—not a continuous attempt to make the subject look locked to screen center.
+For each shot, compare the intended composition to the rendered project crop: 9:16 for reels or 1.91:1 for landscape carousel cards. A centered subject is a preference, not a universal target; preserve good off-center framing when it is visually stronger. Any crop motion must be slow, minimal, and visibly motivated by subject safety or narrative—not a continuous attempt to make the subject look locked to screen center.
 
 Playback rates are limited to 0.5–2.0. Do not request a rate that needs synthetic frames at 30 fps; the engine intentionally does not provide optical-flow slow motion. Preserve natural motion and check source frame rate before slowing footage.
 

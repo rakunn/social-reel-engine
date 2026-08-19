@@ -116,6 +116,20 @@
         "a stale or failed operation record means rerun the exact recorded command",
         "do not manually trust or reuse interrupted partial media or artifact records"
       ]
+    },
+    {
+      "id": "landscape-video-carousel",
+      "prompt": "I supplied six DJI Mini 4 Pro D-Log M clips. Create ready-to-share 1.91:1 landscape carousel assets, one 4–5 second video per clip, choose the hero and closer, keep them silent, and choose a restrained LUT. I explicitly confirm that I have rights to the clips and LUTs. Explain the exact workflow, approval gates, output commands, and final checks.",
+      "mustCover": [
+        "create the project with --format carousel-1.91:1",
+        "make one ordered independently publishable 4–5 second card per clip",
+        "review the combined rough preview and card order before approve-edit",
+        "technically normalize D-Log M before comparing creative looks on actual normalized frames",
+        "review graded stills before approve-color",
+        "bind confirm-rights to the exact used clips and selected LUTs",
+        "run grade then render-carousel then qc-carousel",
+        "deliver ordered MP4 paths plus analysis/qc-carousel.md and do not use the standard reel or photo-package render commands"
+      ]
     }
   ]
 }

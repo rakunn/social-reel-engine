@@ -126,6 +126,54 @@ describe('Remotion worker lifecycle', () => {
     expect(close).toHaveBeenCalledWith({silent: true});
   });
 
+  it('renders clean photo JPEGs through the same owned browser lifecycle', async () => {
+    const close = vi.fn(async () => undefined);
+    const renderStill = vi.fn(async (_options: unknown) => undefined);
+    const bundle = vi.fn(async () => '/bundle');
+    const photoRequest = {
+      ...request,
+      target: 'photo',
+      rawOutput: '/project/work/photos/photo-render.marker',
+      inputProps: {media: 'jobs/reel/clip.mov'},
+      photoOutputs: [
+        {
+          output: '/project/work/photos/01.jpg',
+          inputProps: {media: 'jobs/reel/clip.mov', width: 1080, height: 1350},
+          jpegQuality: 95,
+        },
+      ],
+    } as unknown as RemotionWorkerRequest;
+
+    await runRawRemotionRender(photoRequest, {
+      bundle,
+      openBrowser: vi.fn(async () => ({close})),
+      selectComposition: vi.fn(async () => ({id: 'SharePhoto'})),
+      renderMedia: vi.fn(async () => undefined),
+      renderStill,
+    } as never);
+
+    expect(bundle).toHaveBeenCalledWith({
+      entryPoint: '/engine/src/remotion/index.ts',
+      publicDir: '/project/public',
+      rootDir: '/engine',
+      enableCaching: false,
+      symlinkPublicDir: true,
+    });
+    expect(renderStill).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serveUrl: '/bundle',
+        output: '/project/work/photos/01.jpg',
+        imageFormat: 'jpeg',
+        jpegQuality: 95,
+        inputProps: {media: 'jobs/reel/clip.mov', width: 1080, height: 1350},
+        overwrite: true,
+        logLevel: 'info',
+        timeoutInMilliseconds: 120_000,
+      }),
+    );
+    expect(close).toHaveBeenCalledWith({silent: true});
+  });
+
   it('prepares and passes an owned browser launcher to Remotion', async () => {
     const prepareBrowserLauncher = vi.fn(async () => undefined);
     const openBrowser = vi.fn(async () => ({close: vi.fn(async () => undefined)}));

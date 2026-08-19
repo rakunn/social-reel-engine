@@ -17,7 +17,10 @@ export const MEDIA_OPERATION_COMMANDS = [
   'grade',
   'preview',
   'render',
+  'render-carousel',
   'qc',
+  'qc-carousel',
+  'photos',
 ] as const;
 
 export type MediaOperationCommand = (typeof MEDIA_OPERATION_COMMANDS)[number];

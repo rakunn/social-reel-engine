@@ -69,6 +69,15 @@ describe('reel project workspace', () => {
     expect(
       JSON.parse(await readFile(path.join(projectPath, 'analysis/approvals.json'), 'utf8')),
     ).toEqual({schemaVersion: '1.0.0', edit: null, color: null});
+    expect(
+      JSON.parse(await readFile(path.join(projectPath, 'config/photos.json'), 'utf8')),
+    ).toEqual({
+      schemaVersion: '1.0.0',
+      enabled: false,
+      profiles: [],
+      count: 5,
+      jpegQuality: 95,
+    });
 
     await expect(
       createReelProject({
@@ -77,6 +86,40 @@ describe('reel project workspace', () => {
         reelName: 'island-sunrise',
       }),
     ).rejects.toThrow(/already exists/i);
+  });
+
+  it('creates a 1.91:1 carousel project with per-card duration targets', async () => {
+    const projectsRoot = await makeProjectsRoot();
+    const projectPath = await createReelProject({
+      engineRoot: repositoryRoot,
+      projectsRoot,
+      reelName: 'loboc-carousel',
+      title: 'Loboc River',
+      format: 'carousel-1.91:1',
+      now: new Date('2026-08-18T00:00:00.000Z'),
+    });
+
+    const brief = JSON.parse(await readFile(path.join(projectPath, 'brief.json'), 'utf8'));
+    const edit = JSON.parse(await readFile(path.join(projectPath, 'edits/edit.json'), 'utf8'));
+    const settings = JSON.parse(
+      await readFile(path.join(projectPath, 'config/settings.json'), 'utf8'),
+    );
+
+    expect(brief).toEqual(
+      expect.objectContaining({
+        projectType: 'carousel',
+        target: {minSeconds: 4, idealSeconds: 4.5, maxSeconds: 5},
+        output: {width: 1910, height: 1000, fps: 30},
+        options: {music: false, captions: false, cameraAudio: false},
+      }),
+    );
+    expect(edit.output).toEqual({width: 1910, height: 1000, fps: 30});
+    expect(settings.preview).toEqual(
+      expect.objectContaining({width: 764, height: 400}),
+    );
+    expect(settings.master).toEqual(
+      expect.objectContaining({width: 1910, height: 1000}),
+    );
   });
 
   it('reports actionable stage readiness', async () => {

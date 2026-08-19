@@ -92,6 +92,18 @@ export const cropTransform = (
   };
 };
 
+export const photoCropStyle = (
+  crop: {x: number; y: number; scale: number},
+): {transform: string; transformOrigin: string; objectPosition: string} => {
+  const xPercent = Number((crop.x * 100).toFixed(4));
+  const yPercent = Number((crop.y * 100).toFixed(4));
+  return {
+    transform: `scale(${Number(crop.scale.toFixed(4))})`,
+    transformOrigin: `${xPercent}% ${yPercent}%`,
+    objectPosition: `${xPercent}% ${yPercent}%`,
+  };
+};
+
 export const captionFrameRange = (
   caption: Caption,
   fps: number,
