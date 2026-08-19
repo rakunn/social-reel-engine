@@ -360,4 +360,26 @@ describe('photo candidate policy', () => {
       await rm(root, {recursive: true, force: true});
     }
   });
+
+  it('prunes candidate directories for profiles absent from the current package', async () => {
+    const photos = await import('../../src/media/photos');
+    const prunePhotoCandidateProfiles = Reflect.get(photos, 'prunePhotoCandidateProfiles');
+    const projectPath = await mkdtemp(path.join(tmpdir(), 'reel-photo-candidate-prune-'));
+    const keptCandidate = path.join(projectPath, 'previews/photo-candidates/9x16/01.jpg');
+    const staleCandidate = path.join(projectPath, 'previews/photo-candidates/4x5/01.jpg');
+    try {
+      await mkdir(path.dirname(keptCandidate), {recursive: true});
+      await mkdir(path.dirname(staleCandidate), {recursive: true});
+      await writeFile(keptCandidate, 'keep');
+      await writeFile(staleCandidate, 'stale');
+
+      expect(prunePhotoCandidateProfiles).toEqual(expect.any(Function));
+      await prunePhotoCandidateProfiles(projectPath, ['9:16']);
+
+      await expect(readFile(keptCandidate, 'utf8')).resolves.toBe('keep');
+      await expect(access(path.dirname(staleCandidate))).rejects.toThrow();
+    } finally {
+      await rm(projectPath, {recursive: true, force: true});
+    }
+  });
 });

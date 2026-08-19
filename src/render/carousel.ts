@@ -231,7 +231,7 @@ const ensureRealCarouselDirectory = async (
   return observedRealPath;
 };
 
-const prepareCarouselOutputDirectory = async (
+const prepareCarouselDirectories = async (
   projectPath: string,
   fingerprint: string,
 ): Promise<string> => {
@@ -255,6 +255,21 @@ const prepareCarouselOutputDirectory = async (
     path.join(carouselRoot, fingerprintDirectory),
     path.join(realCarouselRoot, fingerprintDirectory),
   );
+
+  const workRoot = path.join(resolvedProjectRoot, 'work');
+  const realWorkRoot = await ensureRealCarouselDirectory(
+    workRoot,
+    path.join(realProjectRoot, 'work'),
+  );
+  const stagingRoot = path.join(workRoot, 'carousel');
+  const realStagingRoot = await ensureRealCarouselDirectory(
+    stagingRoot,
+    path.join(realWorkRoot, 'carousel'),
+  );
+  await ensureRealCarouselDirectory(
+    path.join(stagingRoot, fingerprintDirectory),
+    path.join(realStagingRoot, fingerprintDirectory),
+  );
   return fingerprintDirectory;
 };
 
@@ -264,7 +279,7 @@ export const publishCarouselCards = async (
   now = new Date(),
 ): Promise<CarouselPackageRecord> => {
   const dependencies = {...defaultPublishDependencies, ...dependencyOverrides};
-  const fingerprintDirectory = await prepareCarouselOutputDirectory(
+  const fingerprintDirectory = await prepareCarouselDirectories(
     input.projectPath,
     input.fingerprint,
   );

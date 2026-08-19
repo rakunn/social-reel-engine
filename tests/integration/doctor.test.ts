@@ -26,6 +26,8 @@ describe('doctor', () => {
         expect.objectContaining({id: 'remotion-runtime', status: 'pass'}),
         expect.objectContaining({id: 'ffmpeg', status: 'pass'}),
         expect.objectContaining({id: 'ffprobe', status: 'pass'}),
+        expect.objectContaining({id: 'sips', status: 'pass'}),
+        expect.objectContaining({id: 'srgb-profile', status: 'pass'}),
         expect.objectContaining({id: 'librosa', status: 'pass'}),
         expect.objectContaining({
           id: 'lut-library',
@@ -169,4 +171,36 @@ describe('doctor', () => {
       );
     }
   }, 60_000);
+
+  it.each([
+    ['sips', 'missing sips executable'],
+    ['srgb-profile', 'missing sRGB profile'],
+  ])('fails preflight for a %s photo conversion dependency', async (expectedId, label) => {
+    const root = await mkdtemp(path.join(tmpdir(), 'reel-doctor-photo-conversion-'));
+    const code =
+      `const {runDoctor} = await import('./src/commands/doctor.ts');` +
+      `const report = await runDoctor(${JSON.stringify(repositoryRoot)});` +
+      `process.stdout.write(JSON.stringify(report));`;
+    const {stdout} = await execFileAsync(
+      process.execPath,
+      ['--import', 'tsx', '--input-type=module', '--eval', code],
+      {
+        cwd: repositoryRoot,
+        env: {
+          ...process.env,
+          REEL_SIPS_PATH: expectedId === 'sips' ? path.join(root, 'missing-sips') : 'sips',
+          REEL_SRGB_PROFILE_PATH:
+            expectedId === 'srgb-profile'
+              ? path.join(root, 'missing-srgb.icc')
+              : '/System/Library/ColorSync/Profiles/sRGB Profile.icc',
+        },
+      },
+    );
+    const report = JSON.parse(stdout);
+
+    expect(report.ok, label).toBe(false);
+    expect(report.checks, label).toContainEqual(
+      expect.objectContaining({id: expectedId, status: 'fail'}),
+    );
+  }, 30_000);
 });

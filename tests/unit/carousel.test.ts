@@ -261,6 +261,16 @@ describe('carousel card rendering model', () => {
       link: 'output/carousel/aaaaaaaaaaaaaaaa',
       escapedCard: '01-hero.mp4',
     },
+    {
+      label: 'carousel staging root',
+      link: 'work/carousel',
+      escapedCard: 'aaaaaaaaaaaaaaaa/01-hero.mov',
+    },
+    {
+      label: 'carousel staging fingerprint directory',
+      link: 'work/carousel/aaaaaaaaaaaaaaaa',
+      escapedCard: '01-hero.mov',
+    },
   ])('refuses a symlinked $label before rendering or publishing', async ({link, escapedCard}) => {
     const root = await mkdtemp(path.join(tmpdir(), 'carousel-publish-symlink-'));
     const projectPath = path.join(root, 'project');

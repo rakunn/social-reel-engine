@@ -44,6 +44,7 @@ import {
 import {readRenderSettings} from '../render/policy';
 import {stageImmutableFile} from '../render/scratch';
 import {superviseRemotionRender} from '../render/remotion-supervisor';
+import {SIPS, SRGB_PROFILE} from './photo-conversion';
 
 export type PhotoProfileDetails = {
   width: number;
@@ -167,10 +168,6 @@ const photoApprovalPath = (projectPath: string): string =>
   path.join(projectPath, 'analysis/photo-approval.json');
 const photoQcJsonPath = (projectPath: string): string => path.join(projectPath, 'analysis/photo-qc.json');
 const photoQcMarkdownPath = (projectPath: string): string => path.join(projectPath, 'analysis/photo-qc.md');
-const SIPS = process.env.REEL_SIPS_PATH || 'sips';
-const SRGB_PROFILE =
-  process.env.REEL_SRGB_PROFILE_PATH || '/System/Library/ColorSync/Profiles/sRGB Profile.icc';
-
 const profileDirectory = (profile: PhotoProfile): string => profile.replace(':', 'x');
 
 const PhotoOutputSchema = z.object({
@@ -765,6 +762,49 @@ export const preparePhotoRenderDirectories = async (
   return {stagingDirectory, publicDirectory, realStagingDirectory};
 };
 
+export const prunePhotoCandidateProfiles = async (
+  projectPath: string,
+  intendedProfiles: readonly PhotoProfile[],
+): Promise<void> => {
+  const resolvedProjectRoot = path.resolve(projectPath);
+  const realProjectRoot = await realpath(resolvedProjectRoot);
+  const previewsRoot = path.join(resolvedProjectRoot, 'previews');
+  const realPreviewsRoot = await ensureRealPhotoDirectory(
+    previewsRoot,
+    path.join(realProjectRoot, 'previews'),
+  );
+  const candidatesRoot = path.join(previewsRoot, 'photo-candidates');
+  const realCandidatesRoot = await ensureRealPhotoDirectory(
+    candidatesRoot,
+    path.join(realPreviewsRoot, 'photo-candidates'),
+  );
+  const intendedDirectories = new Set(intendedProfiles.map(profileDirectory));
+  const staleDirectories: string[] = [];
+  for (const entry of await readdir(candidatesRoot, {withFileTypes: true})) {
+    const absolute = path.join(candidatesRoot, entry.name);
+    const stats = await lstat(absolute);
+    if (!stats.isDirectory() || stats.isSymbolicLink()) {
+      if (stats.isSymbolicLink()) {
+        throw new Error(`Photo candidate boundary contains a symlink: ${absolute}`);
+      }
+      continue;
+    }
+    const realEntry = await realpath(absolute);
+    const relativeEntry = path.relative(realCandidatesRoot, realEntry);
+    if (
+      relativeEntry === '..' ||
+      relativeEntry.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(relativeEntry)
+    ) {
+      throw new Error(`Photo candidate directory resolves outside the project: ${absolute}`);
+    }
+    if (!intendedDirectories.has(entry.name)) staleDirectories.push(absolute);
+  }
+  for (const directory of staleDirectories) {
+    await rm(directory, {recursive: true, force: true});
+  }
+};
+
 const preparePhotoOutputProfile = async (
   projectPath: string,
   profile: PhotoProfile,
@@ -1050,6 +1090,7 @@ export const generatePhotos = async (
       ),
     );
   }
+  await prunePhotoCandidateProfiles(projectPath, config.profiles);
   const candidateReviewHash = hashValue({fingerprint, selected, outputs: outputs.map((output) => ({
     profile: output.profile,
     candidateFiles: output.candidateFiles,

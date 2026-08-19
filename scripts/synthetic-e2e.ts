@@ -351,16 +351,23 @@ export const runSyntheticE2e = async (
       const reduced = await generatePhotos(projectPath, engineRoot);
       const remaining = await readdir(path.join(projectPath, 'output/photos/9x16'));
       let removedProfileExists = true;
+      let removedCandidateProfileExists = true;
       try {
         await access(path.join(projectPath, 'output/photos/4x5'));
       } catch {
         removedProfileExists = false;
       }
+      try {
+        await access(path.join(projectPath, 'previews/photo-candidates/4x5'));
+      } catch {
+        removedCandidateProfileExists = false;
+      }
       stalePhotoOutputsPruned =
         reduced.completed &&
         reduced.outputs.length === 3 &&
         remaining.sort().join(',') === '01.jpg,02.jpg,03.jpg' &&
-        !removedProfileExists;
+        !removedProfileExists &&
+        !removedCandidateProfileExists;
       photoStatus = await readPhotoOutputStatus(projectPath);
     }
     const afterHashes = await Promise.all(originalFiles.map(hashFile));
