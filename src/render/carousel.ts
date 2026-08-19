@@ -351,6 +351,7 @@ export const renderCarouselPackage = async (
   if (freshness.fresh) {
     const current = await readCarouselPackageRecord(projectPath);
     if (!current) throw new Error('Fresh carousel package record disappeared');
+    await assertVerifiedInputSnapshotUnchanged(projectPath, integrity);
     return current;
   }
 
