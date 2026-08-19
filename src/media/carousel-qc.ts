@@ -60,6 +60,30 @@ export const CarouselQcReportSchema = z
 
 export type CarouselQcReport = z.infer<typeof CarouselQcReportSchema>;
 
+export const carouselQcMatchesPackage = (
+  packageRecord: CarouselPackageRecord,
+  report: CarouselQcReport,
+): boolean => {
+  if (
+    report.packageFingerprint !== packageRecord.fingerprint ||
+    report.cards.length !== packageRecord.cards.length
+  ) {
+    return false;
+  }
+  return packageRecord.cards.every((card, index) => {
+    const qcCard = report.cards[index];
+    const artifact = qcCard?.report.renderArtifact;
+    return (
+      qcCard?.index === card.index &&
+      qcCard.clipId === card.clipId &&
+      qcCard.file === card.file &&
+      artifact?.fingerprint === packageRecord.fingerprint &&
+      artifact.checksumSha256 === card.checksumSha256 &&
+      artifact.sizeBytes === card.sizeBytes
+    );
+  });
+};
+
 export const summarizeCarouselQc = (
   packageRecord: CarouselPackageRecord,
   reports: QcReport[],

@@ -100,6 +100,11 @@ export const buildPhotoCandidates = (
     });
   });
 
+export const buildPhotoCandidatesForCount = (
+  edit: Pick<EditManifest, 'clips' | 'output'>,
+  requestedCount: number,
+): PhotoCandidate[] => buildPhotoCandidates(edit, Math.max(7, requestedCount));
+
 export const selectPhotoCandidates = <Candidate extends {id: string; clipId: string}>(
   candidates: readonly Candidate[],
   count: number,
@@ -809,7 +814,7 @@ export const generatePhotos = async (
   }
 
   const edit = EditManifestSchema.parse(await readJson(path.join(projectPath, 'edits/edit.json')));
-  const candidates = buildPhotoCandidates(edit);
+  const candidates = buildPhotoCandidatesForCount(edit, config.count);
   const gradedByClip = new Map(graded.items.map((item) => [item.clipId, item.path]));
   const scores: Record<string, number> = {};
   await Promise.all(

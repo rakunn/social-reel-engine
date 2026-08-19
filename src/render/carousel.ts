@@ -62,9 +62,14 @@ export const evaluateCarouselOutputStatus = (
   packageFingerprint: string | null,
   qcPackageFingerprint: string | null,
   qcFailures: readonly string[],
+  qcCardsMatchPackage: boolean,
 ): CarouselOutputStatus => {
   if (!packageFresh || !packageFingerprint) return 'ready';
-  if (qcPackageFingerprint !== packageFingerprint || qcFailures.length > 0) {
+  if (
+    qcPackageFingerprint !== packageFingerprint ||
+    !qcCardsMatchPackage ||
+    qcFailures.length > 0
+  ) {
     return 'awaiting-qc';
   }
   return 'rendered';

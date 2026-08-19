@@ -304,7 +304,7 @@ const getProjectStatusWithoutOperation = async (projectPath: string): Promise<Pr
       readCarouselPackageFreshness,
       readCarouselPackageRecord,
     } = await import('../render/carousel');
-    const {CarouselQcReportSchema} = await import('../media/carousel-qc');
+    const {CarouselQcReportSchema, carouselQcMatchesPackage} = await import('../media/carousel-qc');
     const [packageRecord, freshness] = await Promise.all([
       readCarouselPackageRecord(projectPath),
       readCarouselPackageFreshness(projectPath).catch(() => ({
@@ -314,6 +314,7 @@ const getProjectStatusWithoutOperation = async (projectPath: string): Promise<Pr
     ]);
     let qcPackageFingerprint: string | null = null;
     let qcFailures: string[] = [];
+    let qcCardsMatchPackage = false;
     try {
       const qc = await readJson(
         path.join(projectPath, 'analysis/qc-carousel.json'),
@@ -321,6 +322,9 @@ const getProjectStatusWithoutOperation = async (projectPath: string): Promise<Pr
       );
       qcPackageFingerprint = qc.packageFingerprint;
       qcFailures = qc.failures;
+      qcCardsMatchPackage = packageRecord
+        ? carouselQcMatchesPackage(packageRecord, qc)
+        : false;
     } catch {
       qcPackageFingerprint = null;
     }
@@ -329,6 +333,7 @@ const getProjectStatusWithoutOperation = async (projectPath: string): Promise<Pr
       packageRecord?.fingerprint ?? null,
       qcPackageFingerprint,
       qcFailures,
+      qcCardsMatchPackage,
     );
     if (carouselStatus === 'ready') {
       return {

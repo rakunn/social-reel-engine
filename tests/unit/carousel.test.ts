@@ -284,9 +284,16 @@ describe('carousel card rendering model', () => {
   });
 
   it('requires current QC before reporting a carousel package as rendered', () => {
-    expect(evaluateCarouselOutputStatus(false, null, null, [])).toBe('ready');
+    const evaluateWithCardBinding = evaluateCarouselOutputStatus as (
+      packageFresh: boolean,
+      packageFingerprint: string | null,
+      qcPackageFingerprint: string | null,
+      qcFailures: readonly string[],
+      qcCardsMatchPackage: boolean,
+    ) => ReturnType<typeof evaluateCarouselOutputStatus>;
+    expect(evaluateCarouselOutputStatus(false, null, null, [], false)).toBe('ready');
     expect(
-      evaluateCarouselOutputStatus(true, 'a'.repeat(64), null, []),
+      evaluateCarouselOutputStatus(true, 'a'.repeat(64), null, [], false),
     ).toBe('awaiting-qc');
     expect(
       evaluateCarouselOutputStatus(
@@ -294,11 +301,21 @@ describe('carousel card rendering model', () => {
         'a'.repeat(64),
         'a'.repeat(64),
         ['closer: width mismatch'],
+        true,
       ),
     ).toBe('awaiting-qc');
     expect(
-      evaluateCarouselOutputStatus(true, 'a'.repeat(64), 'a'.repeat(64), []),
+      evaluateCarouselOutputStatus(true, 'a'.repeat(64), 'a'.repeat(64), [], true),
     ).toBe('rendered');
+    expect(
+      evaluateWithCardBinding(
+        true,
+        'a'.repeat(64),
+        'a'.repeat(64),
+        [],
+        false,
+      ),
+    ).toBe('awaiting-qc');
   });
 });
 
@@ -352,5 +369,74 @@ describe('carousel QC summary', () => {
     expect(summary.failures).toEqual([
       'closer: width expected 1910, observed 1920',
     ]);
+  });
+
+  it('binds every QC card artifact to the current package bytes', async () => {
+    const qcModule = await import('../../src/media/carousel-qc');
+    const carouselQcMatchesPackage = Reflect.get(qcModule, 'carouselQcMatchesPackage');
+    const packageRecord: CarouselPackageRecord = {
+      schemaVersion: '1.0.0',
+      generatedAt: '2026-08-18T00:00:00.000Z',
+      fingerprint: 'a'.repeat(64),
+      aspectRatio: '1.91:1',
+      cards: [
+        {
+          index: 0,
+          clipId: 'hero',
+          file: 'output/carousel/aaaaaaaaaaaaaaaa/01-hero.mp4',
+          checksumSha256: 'b'.repeat(64),
+          sizeBytes: 10,
+          durationSeconds: 4.5,
+        },
+        {
+          index: 1,
+          clipId: 'closer',
+          file: 'output/carousel/aaaaaaaaaaaaaaaa/02-closer.mp4',
+          checksumSha256: 'c'.repeat(64),
+          sizeBytes: 11,
+          durationSeconds: 4.5,
+        },
+      ],
+    };
+    const reports = packageRecord.cards.map((card) =>
+      QcReportSchema.parse({
+        schemaVersion: '1.0.0',
+        generatedAt: '2026-08-18T00:01:00.000Z',
+        target: 'delivery',
+        readable: true,
+        approvals: {edit: true, color: true},
+        renderArtifact: {
+          fingerprint: packageRecord.fingerprint,
+          checksumSha256: card.checksumSha256,
+          sizeBytes: card.sizeBytes,
+        },
+        expected: {},
+        observed: {},
+        checks: [],
+        warnings: [],
+        failures: [],
+      }),
+    );
+    const qc = summarizeCarouselQc(
+      packageRecord,
+      reports,
+      new Date('2026-08-18T00:02:00.000Z'),
+    );
+
+    expect(carouselQcMatchesPackage).toEqual(expect.any(Function));
+    if (typeof carouselQcMatchesPackage !== 'function') return;
+    expect(carouselQcMatchesPackage(packageRecord, qc)).toBe(true);
+    expect(
+      carouselQcMatchesPackage(
+        {
+          ...packageRecord,
+          cards: [
+            {...packageRecord.cards[0], checksumSha256: 'd'.repeat(64)},
+            packageRecord.cards[1],
+          ],
+        },
+        qc,
+      ),
+    ).toBe(false);
   });
 });

@@ -88,6 +88,22 @@ describe('photo candidate policy', () => {
     expect(candidates.every((candidate) => candidate.shotFrame >= 15)).toBe(true);
   });
 
+  it('scales per-clip sampling to satisfy photo counts above seven', async () => {
+    const photos = await import('../../src/media/photos');
+    const buildPhotoCandidatesForCount = Reflect.get(photos, 'buildPhotoCandidatesForCount');
+    const parsed = EditManifestSchema.parse({
+      ...edit,
+      clips: [
+        {...edit.clips[0], transitionAfter: {type: 'none', durationSeconds: 0}},
+      ],
+    });
+
+    expect(buildPhotoCandidatesForCount).toEqual(expect.any(Function));
+    if (typeof buildPhotoCandidatesForCount !== 'function') return;
+    expect(buildPhotoCandidatesForCount(parsed, 5)).toHaveLength(7);
+    expect(buildPhotoCandidatesForCount(parsed, 20)).toHaveLength(20);
+  });
+
   it('prioritizes the highest-ranked distinct shots before selecting extra candidates', () => {
     const candidates = [
       {id: 'a-1', clipId: 'a'},
