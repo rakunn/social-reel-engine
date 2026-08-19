@@ -1,4 +1,4 @@
-import {mkdtemp, rm, writeFile} from 'node:fs/promises';
+import {access, mkdtemp, readFile, readdir, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -324,7 +324,45 @@ export const runSyntheticE2e = async (
     }
     await approvePhotoReframes(projectPath);
     const photos = await generatePhotos(projectPath, engineRoot);
-    const photoStatus = await readPhotoOutputStatus(projectPath);
+    const photoPackage = JSON.parse(
+      await readFile(path.join(projectPath, 'analysis/photos.json'), 'utf8'),
+    );
+    await writeJson(path.join(projectPath, 'analysis/photo-qc.json'), {
+      schemaVersion: '1.0.0',
+      generatedAt: new Date().toISOString(),
+      fingerprint: photoPackage.fingerprint,
+      checks: [],
+      warnings: [],
+      failures: ['synthetic cached-QC failure'],
+    });
+    if ((await readPhotoOutputStatus(projectPath)) !== 'ready') {
+      throw new Error('Failed cached photo QC must make the package non-rendered');
+    }
+    await generatePhotos(projectPath, engineRoot);
+    const recoveredPhotoQc = JSON.parse(
+      await readFile(path.join(projectPath, 'analysis/photo-qc.json'), 'utf8'),
+    );
+    let photoStatus = await readPhotoOutputStatus(projectPath);
+    const cachedPhotoQcRecovered =
+      recoveredPhotoQc.failures.length === 0 && photoStatus === 'rendered';
+    let stalePhotoOutputsPruned = true;
+    if (!options.silent) {
+      await configurePhotoOutput(projectPath, {profiles: ['9:16'], count: 3});
+      const reduced = await generatePhotos(projectPath, engineRoot);
+      const remaining = await readdir(path.join(projectPath, 'output/photos/9x16'));
+      let removedProfileExists = true;
+      try {
+        await access(path.join(projectPath, 'output/photos/4x5'));
+      } catch {
+        removedProfileExists = false;
+      }
+      stalePhotoOutputsPruned =
+        reduced.completed &&
+        reduced.outputs.length === 3 &&
+        remaining.sort().join(',') === '01.jpg,02.jpg,03.jpg' &&
+        !removedProfileExists;
+      photoStatus = await readPhotoOutputStatus(projectPath);
+    }
     const afterHashes = await Promise.all(originalFiles.map(hashFile));
     const originalsUnchanged = originalHashes.every((hash, index) => hash === afterHashes[index]);
     const result = {
@@ -334,6 +372,8 @@ export const runSyntheticE2e = async (
       originalsUnchanged,
       renderArtifactsReused,
       photoStatus,
+      cachedPhotoQcRecovered,
+      stalePhotoOutputsPruned,
       silent: options.silent === true,
     };
     if (
@@ -344,7 +384,9 @@ export const runSyntheticE2e = async (
       deliveryQc.failures.length ||
       !photos.completed ||
       photos.outputs.length !== 10 ||
-      photoStatus !== 'rendered'
+      photoStatus !== 'rendered' ||
+      !cachedPhotoQcRecovered ||
+      !stalePhotoOutputsPruned
     ) {
       throw new Error(`Synthetic acceptance failed: ${JSON.stringify(result, null, 2)}`);
     }

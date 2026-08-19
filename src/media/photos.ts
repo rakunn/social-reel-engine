@@ -1,4 +1,4 @@
-import {copyFile, mkdir, rm, stat, writeFile} from 'node:fs/promises';
+import {copyFile, mkdir, readdir, rm, stat, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {z} from 'zod';
 import {
@@ -6,6 +6,7 @@ import {
   PhotoConfigSchema,
   PhotoProfileSchema,
   QcReportSchema,
+  ReelBriefSchema,
   type EditManifest,
   type PhotoConfig,
   type PhotoProfile,
@@ -21,6 +22,7 @@ import {probeFile, runFfmpeg} from './ffmpeg';
 import {runProcess} from './process';
 import {writeAtomically} from './atomic-output';
 import {
+  assertVerifiedInputSnapshotUnchanged,
   createSourceIntegrityContext,
   type SourceIntegrityContext,
 } from './source-integrity';
@@ -30,8 +32,7 @@ import {
   type RenderArtifactRecord,
 } from '../render/artifacts';
 import {readRenderSettings} from '../render/policy';
-import {prepareRenderProps} from '../render/stage';
-import {withDisposableRenderStage} from '../render/scratch';
+import {stageImmutableFile} from '../render/scratch';
 import {superviseRemotionRender} from '../render/remotion-supervisor';
 
 export type PhotoProfileDetails = {
@@ -195,6 +196,20 @@ const PhotoApprovalSchema = z.object({
   approvedBy: z.string().min(1),
 });
 
+const PhotoQcReportSchema = z.object({
+  schemaVersion: z.literal('1.0.0'),
+  generatedAt: z.string().datetime({offset: true}),
+  fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  checks: z.array(
+    z.object({
+      file: z.string().min(1),
+      status: z.enum(['pass', 'fail']),
+    }).passthrough(),
+  ),
+  warnings: z.array(z.string()),
+  failures: z.array(z.string()),
+});
+
 type PhotoPackage = z.infer<typeof PhotoPackageSchema>;
 
 type PhotoReadiness = {
@@ -235,10 +250,22 @@ export const readPhotoConfig = async (projectPath: string): Promise<PhotoConfig>
   }
 };
 
+export const assertPhotoProjectType = (brief: {projectType: 'reel' | 'carousel'}): void => {
+  if (brief.projectType !== 'reel') {
+    throw new Error('Photo export is available only for reel projects');
+  }
+};
+
+const assertPhotoProject = async (projectPath: string): Promise<void> => {
+  const brief = await readJson(path.join(projectPath, 'brief.json'), ReelBriefSchema);
+  assertPhotoProjectType(brief);
+};
+
 export const configurePhotoOutput = async (
   projectPath: string,
   next: Pick<PhotoConfig, 'profiles' | 'count'> & {jpegQuality?: number},
 ): Promise<PhotoConfig> => {
+  await assertPhotoProject(projectPath);
   const current = await readPhotoConfig(projectPath);
   const config = PhotoConfigSchema.parse({
     ...current,
@@ -413,6 +440,7 @@ const createContactSheet = async (
   const relativeOutput = `previews/photo-candidates/${profileDirectory(profile)}/contact-sheet.jpg`;
   const output = resolveInside(projectPath, relativeOutput);
   const directory = path.dirname(resolveInside(projectPath, candidateFiles[0]));
+  const grid = contactSheetGrid(candidateFiles.length);
   await writeAtomically(
     output,
     async (temporaryOutput) =>
@@ -422,7 +450,7 @@ const createContactSheet = async (
         '-i',
         path.join(directory, '*.jpg'),
         '-vf',
-        'scale=360:-2,tile=3x2:padding=8:margin=8',
+        `scale=360:-2,tile=${grid.columns}x${grid.rows}:padding=8:margin=8`,
         '-frames:v',
         '1',
         '-q:v',
@@ -434,6 +462,14 @@ const createContactSheet = async (
     },
   );
   return {file: relativeOutput, checksum: await hashFile(output)};
+};
+
+export const contactSheetGrid = (candidateCount: number): {columns: number; rows: number} => {
+  if (!Number.isSafeInteger(candidateCount) || candidateCount <= 0) {
+    throw new Error('Photo contact sheets require at least one candidate');
+  }
+  const columns = Math.min(4, candidateCount);
+  return {columns, rows: Math.ceil(candidateCount / columns)};
 };
 
 const candidateFilesFor = (profile: PhotoProfile, count: number): string[] =>
@@ -473,6 +509,67 @@ const isPackageFresh = async (
 
 const photoApprovalIsCurrent = async (projectPath: string, packageRecord: PhotoPackage): Promise<boolean> =>
   (await readPhotoApproval(projectPath))?.hash === packageRecord.candidateReviewHash;
+
+export const photoQcReportIsCurrent = (
+  packageRecord: {fingerprint: string; outputs: ReadonlyArray<{outputFiles: readonly string[]}>},
+  reportValue: unknown,
+): boolean => {
+  const parsed = PhotoQcReportSchema.safeParse(reportValue);
+  if (!parsed.success || parsed.data.fingerprint !== packageRecord.fingerprint) return false;
+  if (parsed.data.failures.length > 0) return false;
+  const expected = packageRecord.outputs.flatMap((output) => [...output.outputFiles]).sort();
+  const passed = parsed.data.checks
+    .filter((check) => check.status === 'pass')
+    .map((check) => check.file)
+    .sort();
+  return expected.length === passed.length && expected.every((file, index) => file === passed[index]);
+};
+
+const assertCurrentPhotoQc = async (
+  projectPath: string,
+  packageRecord: PhotoPackage,
+): Promise<void> => {
+  const report = await readJson(photoQcJsonPath(projectPath), PhotoQcReportSchema);
+  if (!photoQcReportIsCurrent(packageRecord, report)) {
+    throw new Error('Current photo QC report is missing, stale, or failing; rerun photos');
+  }
+};
+
+export const prunePublishedPhotoOutputs = async (
+  projectPath: string,
+  intendedFiles: readonly string[],
+): Promise<void> => {
+  const outputRoot = resolveInside(projectPath, 'output/photos');
+  const intended = new Set(
+    intendedFiles.map((file) => {
+      const absolute = resolveInside(projectPath, file);
+      const relative = path.relative(outputRoot, absolute);
+      if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+        throw new Error(`Photo output is outside output/photos: ${file}`);
+      }
+      return absolute;
+    }),
+  );
+  const pruneDirectory = async (directory: string): Promise<void> => {
+    let entries;
+    try {
+      entries = await readdir(directory, {withFileTypes: true});
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+    for (const entry of entries) {
+      const absolute = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await pruneDirectory(absolute);
+        if ((await readdir(absolute)).length === 0) await rm(absolute, {recursive: true, force: true});
+      } else if (!intended.has(absolute)) {
+        await rm(absolute, {force: true});
+      }
+    }
+  };
+  await pruneDirectory(outputRoot);
+};
 
 const publishProfile = async (
   projectPath: string,
@@ -561,19 +658,10 @@ const renderCandidateFiles = async (
   profile: PhotoProfile,
   selected: Array<PhotoCandidate & {score: number}>,
   jpegQuality: number,
+  edit: EditManifest,
+  graded: GradedClipReport,
   integrity: SourceIntegrityContext,
 ): Promise<z.infer<typeof PhotoOutputSchema>> => {
-  const {props, stageRoot} = await prepareRenderProps(projectPath, engineRoot, 'master', {integrity});
-  const publicRoot = path.join(engineRoot, 'public');
-  const stagePublicPath = path.relative(publicRoot, stageRoot).split(path.sep).join('/');
-  if (
-    stagePublicPath === '' ||
-    stagePublicPath === '..' ||
-    stagePublicPath.startsWith('../') ||
-    path.isAbsolute(stagePublicPath)
-  ) {
-    throw new Error(`Photo render stage is outside the engine public directory: ${stageRoot}`);
-  }
   const files = candidateFilesFor(profile, selected.length);
   const details = photoProfile(profile);
   const stagingDirectory = path.join(
@@ -585,38 +673,56 @@ const renderCandidateFiles = async (
   const stagedFiles = selected.map((candidate, index) =>
     path.join(stagingDirectory, `${String(index + 1).padStart(2, '0')}.jpg`),
   );
+  const publicDirectory = path.join(stagingDirectory, 'public');
   try {
     await rm(path.dirname(resolveInside(projectPath, files[0])), {recursive: true, force: true});
-    await withDisposableRenderStage(engineRoot, stageRoot, async () => {
-      await mkdir(stagingDirectory, {recursive: true});
-      await superviseRemotionRender({
-        schemaVersion: '1.0.0',
-        engineRoot,
-        publicDir: publicRoot,
-        target: 'photo',
-        rawOutput: path.join(stagingDirectory, 'photo-render.marker'),
-        inputProps: {},
-        settings: await readRenderSettings(projectPath),
-        photoOutputs: selected.map((candidate, index) => {
-          const media = props.media[candidate.clipId];
-          if (!media) throw new Error(`No staged graded media for photo candidate ${candidate.id}`);
-          return {
-            output: stagedFiles[index],
-            jpegQuality,
-            inputProps: {
-              media: `${stagePublicPath}/${media}`,
-              trimBeforeFrames: Math.round(candidate.sourceSeconds * props.edit.output.fps),
-              crop: candidate.crop,
-              width: details.width,
-              height: details.height,
-            },
-          };
-        }),
-      });
-      for (const [index, stagedFile] of stagedFiles.entries()) {
-        await writeSrgbJpegAtomically(stagedFile, resolveInside(projectPath, files[index]), jpegQuality);
-      }
+    await rm(stagingDirectory, {recursive: true, force: true});
+    await mkdir(publicDirectory, {recursive: true});
+    const mediaByClip = new Map<string, string>();
+    for (const candidate of selected) {
+      if (mediaByClip.has(candidate.clipId)) continue;
+      const item = graded.items.find((gradedItem) => gradedItem.clipId === candidate.clipId);
+      if (!item) throw new Error(`No graded media for photo candidate ${candidate.id}`);
+      const source = resolveInside(projectPath, item.path);
+      const extension = path.extname(source).toLowerCase() || '.mov';
+      mediaByClip.set(
+        candidate.clipId,
+        await stageImmutableFile(
+          source,
+          publicDirectory,
+          `media/${candidate.clipId}${extension}`,
+          item.checksumSha256,
+        ),
+      );
+    }
+    await assertVerifiedInputSnapshotUnchanged(projectPath, integrity);
+    await superviseRemotionRender({
+      schemaVersion: '1.0.0',
+      engineRoot,
+      publicDir: publicDirectory,
+      target: 'photo',
+      rawOutput: path.join(stagingDirectory, 'photo-render.marker'),
+      inputProps: {},
+      settings: await readRenderSettings(projectPath),
+      photoOutputs: selected.map((candidate, index) => {
+        const media = mediaByClip.get(candidate.clipId);
+        if (!media) throw new Error(`No staged graded media for photo candidate ${candidate.id}`);
+        return {
+          output: stagedFiles[index],
+          jpegQuality,
+          inputProps: {
+            media,
+            trimBeforeFrames: Math.round(candidate.sourceSeconds * edit.output.fps),
+            crop: candidate.crop,
+            width: details.width,
+            height: details.height,
+          },
+        };
+      }),
     });
+    for (const [index, stagedFile] of stagedFiles.entries()) {
+      await writeSrgbJpegAtomically(stagedFile, resolveInside(projectPath, files[index]), jpegQuality);
+    }
   } finally {
     await rm(stagingDirectory, {recursive: true, force: true});
   }
@@ -642,6 +748,7 @@ const renderCandidateFiles = async (
 const completePackage = async (
   projectPath: string,
   packageRecord: PhotoPackage,
+  integrity: SourceIntegrityContext,
 ): Promise<PhotoPackage> => {
   const approvalCurrent = await photoApprovalIsCurrent(projectPath, packageRecord);
   const outputs = await Promise.all(
@@ -652,10 +759,16 @@ const completePackage = async (
     ),
   );
   const next = {...packageRecord, outputs};
+  await assertVerifiedInputSnapshotUnchanged(projectPath, integrity);
+  await prunePublishedPhotoOutputs(
+    projectPath,
+    outputs.flatMap((output) => output.outputFiles),
+  );
   await writeJson(photoPackagePath(projectPath), next);
   if (await allOutputsPublished(projectPath, next)) {
     await writePhotoQc(projectPath, next);
   }
+  await assertVerifiedInputSnapshotUnchanged(projectPath, integrity);
   return next;
 };
 
@@ -672,6 +785,7 @@ export const generatePhotos = async (
   options: {integrity?: SourceIntegrityContext} = {},
 ): Promise<GeneratePhotosResult> => {
   const integrity = options.integrity ?? createSourceIntegrityContext();
+  await assertPhotoProject(projectPath);
   const config = await readPhotoConfig(projectPath);
   if (!config.enabled) throw new Error('Photo output is disabled; run photos with at least one --aspect');
   const readiness = await assertPhotoReadiness(projectPath, integrity);
@@ -680,8 +794,12 @@ export const generatePhotos = async (
   const existing = await readPhotoPackage(projectPath);
   if (existing && (await isPackageFresh(projectPath, existing, fingerprint))) {
     const completed = await allOutputsPublished(projectPath, existing);
-    const packageRecord = completed ? existing : await completePackage(projectPath, existing);
+    const packageRecord = completed
+      ? existing
+      : await completePackage(projectPath, existing, integrity);
+    if (completed) await writePhotoQc(projectPath, packageRecord);
     const isCompleted = await allOutputsPublished(projectPath, packageRecord);
+    await assertVerifiedInputSnapshotUnchanged(projectPath, integrity);
     return {
       package: packageRecord,
       awaitingApproval: !isCompleted && packageRecord.outputs.some((output) => photoProfile(output.profile).requiresReview),
@@ -714,7 +832,16 @@ export const generatePhotos = async (
   const outputs = [];
   for (const profile of config.profiles) {
     outputs.push(
-      await renderCandidateFiles(projectPath, engineRoot, profile, selected, config.jpegQuality, integrity),
+      await renderCandidateFiles(
+        projectPath,
+        engineRoot,
+        profile,
+        selected,
+        config.jpegQuality,
+        edit,
+        graded,
+        integrity,
+      ),
     );
   }
   const candidateReviewHash = hashValue({fingerprint, selected, outputs: outputs.map((output) => ({
@@ -734,8 +861,9 @@ export const generatePhotos = async (
     selectedIds,
     outputs,
   });
+  await assertVerifiedInputSnapshotUnchanged(projectPath, integrity);
   await writeJson(photoPackagePath(projectPath), packageRecord);
-  const completedPackage = await completePackage(projectPath, packageRecord);
+  const completedPackage = await completePackage(projectPath, packageRecord, integrity);
   const completed = await allOutputsPublished(projectPath, completedPackage);
   return {
     package: completedPackage,
@@ -806,5 +934,11 @@ export const readPhotoOutputStatus = async (
   if (packageRecord.outputs.some((output) => photoProfile(output.profile).requiresReview)) {
     if (!(await photoApprovalIsCurrent(projectPath, packageRecord))) return 'awaiting-approval';
   }
-  return (await allOutputsPublished(projectPath, packageRecord)) ? 'rendered' : 'ready';
+  if (!(await allOutputsPublished(projectPath, packageRecord))) return 'ready';
+  try {
+    await assertCurrentPhotoQc(projectPath, packageRecord);
+    return 'rendered';
+  } catch {
+    return 'ready';
+  }
 };

@@ -104,4 +104,69 @@ describe('doctor', () => {
       expect.objectContaining({id: 'ffmpeg-encoders', status: 'fail'}),
     );
   }, 30_000);
+
+  it('requires every FFmpeg filter used by photo grading and scoring', async () => {
+    const filters = [
+      'blackdetect',
+      'blend',
+      'blurdetect',
+      'boxblur',
+      'colorbalance',
+      'colortemperature',
+      'drawbox',
+      'drawtext',
+      'eq',
+      'exposure',
+      'format',
+      'fps',
+      'freezedetect',
+      'geq',
+      'loudnorm',
+      'lut3d',
+      'maskedmerge',
+      'metadata',
+      'scale',
+      'setparams',
+      'signalstats',
+      'split',
+      'tile',
+      'vidstabdetect',
+      'vidstabtransform',
+      'zscale',
+    ];
+    for (const omitted of ['eq', 'signalstats', 'blurdetect', 'metadata']) {
+      const root = await mkdtemp(path.join(tmpdir(), `reel-doctor-${omitted}-`));
+      const fakeFfmpeg = path.join(root, 'ffmpeg');
+      await writeFile(
+        fakeFfmpeg,
+        '#!/bin/sh\n' +
+          'case "$*" in\n' +
+          `  *-filters*) printf "%s\\n" "${filters.filter((filter) => filter !== omitted).join(' ')}" ;;\n` +
+          '  *-encoders*) printf "%s\\n" "aac libx264 pcm_s16le png prores_ks" ;;\n' +
+          '  *) printf "%s\\n" "ffmpeg version synthetic" "ffprobe version synthetic" ;;\n' +
+          'esac\n',
+      );
+      await chmod(fakeFfmpeg, 0o755);
+      const code =
+        `const {runDoctor} = await import('./src/commands/doctor.ts');` +
+        `const report = await runDoctor(${JSON.stringify(repositoryRoot)});` +
+        `process.stdout.write(JSON.stringify(report));`;
+      const {stdout} = await execFileAsync(
+        process.execPath,
+        ['--import', 'tsx', '--input-type=module', '--eval', code],
+        {
+          cwd: repositoryRoot,
+          env: {
+            ...process.env,
+            REEL_FFMPEG_PATH: fakeFfmpeg,
+            REEL_FFPROBE_PATH: fakeFfmpeg,
+          },
+        },
+      );
+      const report = JSON.parse(stdout);
+      expect(report.checks, `doctor should reject FFmpeg without ${omitted}`).toContainEqual(
+        expect.objectContaining({id: 'ffmpeg-filters', status: 'fail'}),
+      );
+    }
+  }, 60_000);
 });

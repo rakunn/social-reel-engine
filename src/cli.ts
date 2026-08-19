@@ -322,21 +322,19 @@ export const createCli = (): Command => {
     .action(async (reelName: string, options: {aspect?: string[]; count?: number}) => {
       const {configurePhotoOutput, generatePhotos, readPhotoConfig} = await import('./media/photos');
       const projectPath = project(reelName);
-      const {assertProjectScaffold} = await import('./project/workspace');
-      await assertProjectScaffold(projectPath);
-      const current = await readPhotoConfig(projectPath);
-      const profiles = (options.aspect ?? (current.enabled ? current.profiles : ['9:16'])) as Array<
-        '9:16' | '4:5' | '1:1' | '16:9'
-      >;
-      const config = await configurePhotoOutput(projectPath, {
-        profiles,
-        count: options.count ?? current.count,
-      });
       const result = await runTrackedMediaCommand(reelName, 'photos', 'creating-photo-candidates', async ({update}) => {
+          const current = await readPhotoConfig(projectPath);
+          const profiles = (options.aspect ?? (current.enabled ? current.profiles : ['9:16'])) as Array<
+            '9:16' | '4:5' | '1:1' | '16:9'
+          >;
+          const config = await configurePhotoOutput(projectPath, {
+            profiles,
+            count: options.count ?? current.count,
+          });
           await update({phase: 'rendering-photo-stills'});
-          return await generatePhotos(projectPath, ENGINE_ROOT);
+          return {config, photos: await generatePhotos(projectPath, ENGINE_ROOT)};
         });
-      print({photoConfig: config, ...result});
+      print({photoConfig: result.config, ...result.photos});
     });
 
   program

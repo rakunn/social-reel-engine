@@ -1,10 +1,12 @@
 import {randomUUID} from 'node:crypto';
-import {access, rm} from 'node:fs/promises';
+import {access, readFile, rm} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {describe, expect, it} from 'vitest';
 import {COMMAND_NAMES} from '../../src/commands/registry';
 import {createCli} from '../../src/cli';
+import {completeMediaOperation, beginMediaOperation} from '../../src/project/operation';
+import {createReelProject} from '../../src/project/workspace';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -51,6 +53,36 @@ describe('stable command interface', () => {
       ).rejects.toThrow(/project.*does not exist|does not exist.*project/i);
       await expect(access(projectPath)).rejects.toThrow();
     } finally {
+      await rm(projectPath, {recursive: true, force: true});
+    }
+  });
+
+  it('does not change photo configuration when the media lock is already held', async () => {
+    const reelName = `photo-lock-${randomUUID().replaceAll('-', '')}`;
+    const projectPath = await createReelProject({
+      engineRoot: repositoryRoot,
+      reelName,
+      title: 'Photo Lock Test',
+    });
+    const configPath = path.join(projectPath, 'config/photos.json');
+    const before = await readFile(configPath, 'utf8');
+    const active = await beginMediaOperation(projectPath, 'grade', {phase: 'grading-selected-clips'});
+    try {
+      await expect(
+        createCli().parseAsync([
+          'node',
+          'reel',
+          'photos',
+          reelName,
+          '--aspect',
+          '9:16',
+          '--count',
+          '1',
+        ]),
+      ).rejects.toThrow(/media operation.*active|active.*media operation/i);
+      expect(await readFile(configPath, 'utf8')).toBe(before);
+    } finally {
+      if (active.id) await completeMediaOperation(projectPath, active.id);
       await rm(projectPath, {recursive: true, force: true});
     }
   });
