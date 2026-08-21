@@ -17,7 +17,10 @@ import {
   type CarouselPackageFreshness,
   type CarouselPackageRecord,
 } from '../render/carousel';
-import {syncCarouselSharePackage} from '../render/carousel-share';
+import {
+  invalidateCarouselSharePackage,
+  syncCarouselSharePackage,
+} from '../render/carousel-share';
 import {findRenderInterruption} from '../render/errors';
 import {
   deliveryLoudnormAnalysisFilter,
@@ -170,6 +173,7 @@ export const runCarouselQc = async (
   const probeMedia = options.probeFile ?? probeFile;
   const runMediaFfmpeg = options.runFfmpeg ?? runFfmpeg;
   const inspectFastStart = options.inspectFastStart ?? inspectMp4FastStart;
+  await invalidateCarouselSharePackage(projectPath);
   const packageRecord = await readCarouselPackageRecord(projectPath);
   if (!packageRecord) throw new Error('Carousel package is missing; run render-carousel first');
   let packageFreshness: CarouselPackageFreshness = {

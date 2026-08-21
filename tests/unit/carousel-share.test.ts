@@ -282,6 +282,30 @@ describe('carousel ready-to-share publication', () => {
     ).rejects.toThrow(/ENOENT/);
   });
 
+  it('invalidates the previous share before carousel QC setup can fail', async () => {
+    const projectPath = await mkdtemp(path.join(tmpdir(), 'carousel-share-qc-start-'));
+    temporaryRoots.push(projectPath);
+    const {packageRecord} = await createPackageFixture(projectPath);
+    const shareModule = await loadShareModule();
+    const publishCarouselSharePackage = Reflect.get(
+      shareModule,
+      'publishCarouselSharePackage',
+    );
+    expect(publishCarouselSharePackage).toEqual(expect.any(Function));
+    if (typeof publishCarouselSharePackage !== 'function') return;
+
+    await publishCarouselSharePackage(projectPath, packageRecord);
+    const {runCarouselQc} = await import('../../src/media/carousel-qc');
+
+    await expect(runCarouselQc(projectPath)).rejects.toThrow(/package is missing/i);
+    await expect(
+      access(path.join(projectPath, 'output/carousel/ready-to-share')),
+    ).rejects.toThrow(/ENOENT/);
+    await expect(
+      access(path.join(projectPath, 'analysis/carousel-share.json')),
+    ).rejects.toThrow(/ENOENT/);
+  });
+
   it('requires the exact ready-to-share regular-file inventory for freshness', async () => {
     const projectPath = await mkdtemp(path.join(tmpdir(), 'carousel-share-boundary-'));
     const outsideRoot = await mkdtemp(path.join(tmpdir(), 'carousel-share-outside-'));

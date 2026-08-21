@@ -346,7 +346,9 @@ export const publishCarouselSharePackage = async (
   return record;
 };
 
-const clearCarouselSharePackage = async (projectPath: string): Promise<void> => {
+export const invalidateCarouselSharePackage = async (
+  projectPath: string,
+): Promise<void> => {
   const {carouselRoot, realProjectRoot, realCarouselRoot} = await ensureCarouselRoot(projectPath);
   const analysisRoot = await ensureAnalysisRoot(projectPath, realProjectRoot);
   await assertPublicationGuard();
@@ -375,7 +377,7 @@ export const syncCarouselSharePackage = async (
   now = new Date(),
 ): Promise<CarouselSharePackageRecord | null> => {
   if (qcFailures.length > 0) {
-    await clearCarouselSharePackage(projectPath);
+    await invalidateCarouselSharePackage(projectPath);
     return null;
   }
   return await publishCarouselSharePackage(projectPath, packageRecord, now);
