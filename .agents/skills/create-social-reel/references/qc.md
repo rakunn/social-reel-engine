@@ -20,7 +20,7 @@ The engine records render fingerprints and output checksums. A same-named file i
 
 ## Required checks
 
-For a vertical reel, run QC separately for master and delivery. For a carousel, run `qc-carousel` after `render-carousel` and review `analysis/qc-carousel.{json,md}`; every card must pass. Review the reports for:
+For a vertical reel, run QC separately for master and delivery. For a carousel, run `qc-carousel` after `render-carousel` and review `analysis/qc-carousel.{json,md}`; every card must pass. A failure-free carousel QC run also publishes checksum-verified copies of the current cards under `output/carousel/ready-to-share/` and records them in `analysis/carousel-share.json`. A failed run removes an older share package so it cannot be mistaken for the current output. Review the reports for:
 
 - current approvals and current render fingerprint;
 - missing or checksum-invalid media;
@@ -34,4 +34,4 @@ Any failure blocks completion. Black/freeze warnings require human review becaus
 
 ## Completion report
 
-For a reel, provide clickable absolute paths to `output/master.mov`, `output/delivery.mp4`, `analysis/qc-master.md`, and `analysis/qc-delivery.md`. For a carousel, provide every ordered MP4 path recorded in `analysis/carousel.json` plus `analysis/qc-carousel.md`. State whether QC passed, list reviewed warnings and stabilization outcomes, and identify any remaining limitation without burying it in implementation detail.
+For a reel, provide clickable absolute paths to `output/master.mov`, `output/delivery.mp4`, `analysis/qc-master.md`, and `analysis/qc-delivery.md`. For a carousel, provide a clickable absolute path to `output/carousel/ready-to-share/`, every ordered MP4 path recorded in `analysis/carousel-share.json`, and `analysis/qc-carousel.md`. The fingerprinted paths in `analysis/carousel.json` remain the canonical validation source. State whether QC passed, list reviewed warnings and stabilization outcomes, and identify any remaining limitation without burying it in implementation detail.

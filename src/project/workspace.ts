@@ -153,6 +153,8 @@ export type ProjectStatus = {
   inputs: number;
   editApproved: boolean;
   colorApproved: boolean;
+  shareDirectory?: string;
+  shareFiles?: string[];
   activity?: Pick<
     MediaOperationRecord,
     'command' | 'phase' | 'progress' | 'startedAt' | 'updatedAt' | 'finishedAt' | 'error'
@@ -355,12 +357,41 @@ const getProjectStatusWithoutOperation = async (projectPath: string): Promise<Pr
           : 'Run qc-carousel and review the consolidated report.',
       };
     }
+    const {
+      readCarouselSharePackageFreshness,
+      readCarouselSharePackageRecord,
+    } = await import('../render/carousel-share');
+    const shareRecord = await readCarouselSharePackageRecord(projectPath);
+    const shareFreshness = packageRecord
+      ? await readCarouselSharePackageFreshness(projectPath, packageRecord).catch(() => ({
+          fresh: false,
+          reason: 'Ready-to-share package is missing or stale',
+        }))
+      : {fresh: false, reason: 'Carousel package is missing'};
+    if (!shareRecord || !shareFreshness.fresh) {
+      return {
+        ...base,
+        editApproved,
+        colorApproved,
+        stage: 'carousel-rendered',
+        nextAction:
+          'Carousel QC passed, but the ready-to-share package is missing or stale. Run qc-carousel to refresh it.',
+      };
+    }
+    const shareDirectory = path.join(
+      projectPath,
+      ...shareRecord.directory.split('/'),
+    );
     return {
       ...base,
       editApproved,
       colorApproved,
       stage: 'carousel-rendered',
-      nextAction: 'Review the ordered carousel MP4 package and consolidated QC report.',
+      nextAction: `Review the ordered carousel MP4 package in ${shareDirectory} and the consolidated QC report.`,
+      shareDirectory,
+      shareFiles: shareRecord.cards.map((card) =>
+        path.join(projectPath, ...card.file.split('/')),
+      ),
     };
   }
   const [master, delivery] = await Promise.all([
