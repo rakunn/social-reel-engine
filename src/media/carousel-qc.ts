@@ -17,6 +17,7 @@ import {
   type CarouselPackageFreshness,
   type CarouselPackageRecord,
 } from '../render/carousel';
+import {syncCarouselSharePackage} from '../render/carousel-share';
 import {findRenderInterruption} from '../render/errors';
 import {
   deliveryLoudnormAnalysisFilter,
@@ -287,5 +288,6 @@ export const runCarouselQc = async (
   await writeAtomically(markdownPath, async (temporaryPath) => {
     await writeFile(temporaryPath, carouselQcMarkdown(report, projectPath), 'utf8');
   });
+  await syncCarouselSharePackage(projectPath, packageRecord, report.failures, now);
   return report;
 };
