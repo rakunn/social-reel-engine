@@ -138,6 +138,33 @@ describe('reel project variants', () => {
     await expect(access(path.join(projectsRoot, 'stale-source-variant'))).rejects.toThrow();
   });
 
+  it('rejects a source whose LUT changed after analysis', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-stale-lut-'));
+    const projectsRoot = path.join(temporaryRoot, 'projects');
+    const sourcePath = await createReelProject({
+      engineRoot: repositoryRoot,
+      projectsRoot,
+      reelName: 'stale-lut-source',
+    });
+    await writeVariantReadyEdit(sourcePath, 'stale-lut-source');
+    const lutPath = path.join(sourcePath, 'input/luts/technical/normalizer.cube');
+    await writeFile(lutPath, 'TITLE "Original"\nLUT_3D_SIZE 2\n');
+    await writeVerifiedSourceManifest(sourcePath);
+    await writeFile(lutPath, 'TITLE "Changed"\nLUT_3D_SIZE 2\n');
+
+    const module = await loadVariantModule();
+    if (!module?.createProjectVariant) throw new Error('Variant module is unavailable');
+    await expect(
+      module.createProjectVariant({
+        engineRoot: repositoryRoot,
+        projectsRoot,
+        sourceName: 'stale-lut-source',
+        targetName: 'stale-lut-variant',
+      }),
+    ).rejects.toThrow(/ingest|checksum|analyze/i);
+    await expect(access(path.join(projectsRoot, 'stale-lut-variant'))).rejects.toThrow();
+  });
+
   it('rejects a source project whose creator still holds its name reservation', async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-source-reservation-'));
     const projectsRoot = path.join(temporaryRoot, 'projects');
@@ -790,6 +817,10 @@ describe('reel project variants', () => {
       captions: null,
     });
     await writeJson(path.join(sourcePath, 'edits/edit.json'), edit);
+    await writeJson(
+      path.join(sourcePath, 'analysis/ingest.json'),
+      await scanInputs(sourcePath, new Date('2026-08-26T00:00:00.000Z')),
+    );
     const rights = await confirmRights(sourcePath, new Date('2026-08-26T00:01:00.000Z'));
     const previewPath = path.join(sourcePath, 'previews/preview.mp4');
     await writeFile(previewPath, 'source-reviewed-preview');

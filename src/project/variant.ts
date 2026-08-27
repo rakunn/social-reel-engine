@@ -25,6 +25,7 @@ import {readRightsConfirmationStatus} from '../edit/rights';
 import type {GradedClipReport} from '../media/grade';
 import {readValidatedSourceManifest} from '../media/source-integrity';
 import type {ArtifactIndex} from './artifacts';
+import {readValidatedIngestManifest} from './ingest';
 import {runWithStatusScanLock} from './operation';
 import {
   acquireProjectNameReservation,
@@ -312,6 +313,7 @@ export const createProjectVariant = async ({
       }
       const snapshot = await runWithStatusScanLock(sourcePath, async () => {
     await assertReadTreesContainNoSymbolicLinks(sourcePath);
+    await readValidatedIngestManifest(sourcePath);
     await readValidatedSourceManifest(sourcePath);
     const stagingRoot = await mkdtemp(
       variantStagingPrefix(resolvedProjectsRoot, safeTargetName),
