@@ -1,0 +1,76 @@
+{
+  "schemaVersion": "1.0.0",
+  "upstreamRevision": "ade3d1533e06b2b1462ffcde8e08b129627ca360",
+  "fonts": [
+    {
+      "id": "manrope-variable",
+      "family": "Manrope Variable",
+      "style": "normal",
+      "weight": {"min": 200, "max": 800},
+      "roles": ["display", "body", "metadata"],
+      "scripts": ["Latin", "Cyrillic"],
+      "upstreamRevision": "ade3d1533e06b2b1462ffcde8e08b129627ca360",
+      "downloadUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/manrope/Manrope%5Bwght%5D.ttf",
+      "cacheFile": "library/fonts/manrope-variable.ttf",
+      "checksumSha256": "d0639be45d0af36e798172419d7bd173c4bd4f29e2b76cbb69db1d11bf8b0a40",
+      "maxBytes": 1000000,
+      "license": {"id": "OFL-1.1", "copyright": "Copyright 2019 The Manrope Project Authors (https://github.com/sharanda/manrope)", "url": "https://openfontlicense.org"}
+    },
+    {
+      "id": "fraunces-variable",
+      "family": "Fraunces Variable",
+      "style": "normal",
+      "weight": {"min": 100, "max": 900},
+      "roles": ["display"],
+      "scripts": ["Latin"],
+      "upstreamRevision": "ade3d1533e06b2b1462ffcde8e08b129627ca360",
+      "downloadUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/fraunces/Fraunces%5BSOFT%2CWONK%2Copsz%2Cwght%5D.ttf",
+      "cacheFile": "library/fonts/fraunces-variable.ttf",
+      "checksumSha256": "177ff6c0f14e5550a3c624247cd1189611d4eb65d000b14944c63d967958abbb",
+      "maxBytes": 1000000,
+      "license": {"id": "OFL-1.1", "copyright": "Copyright 2020 The Fraunces Project Authors (github.com/undercasetype/Fraunces)", "url": "https://openfontlicense.org"}
+    },
+    {
+      "id": "barlow-condensed-semibold",
+      "family": "Barlow Condensed SemiBold",
+      "style": "normal",
+      "weight": 600,
+      "roles": ["display"],
+      "scripts": ["Latin"],
+      "upstreamRevision": "ade3d1533e06b2b1462ffcde8e08b129627ca360",
+      "downloadUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/barlowcondensed/BarlowCondensed-SemiBold.ttf",
+      "cacheFile": "library/fonts/barlow-condensed-semibold.ttf",
+      "checksumSha256": "7b619d14bc2327509a9ef32b0890f709626f7ecc9ff61191c2a4314c5499d2d9",
+      "maxBytes": 1000000,
+      "license": {"id": "OFL-1.1", "copyright": "Copyright 2017 The Barlow Project Authors (https://github.com/jpt/barlow)", "url": "https://openfontlicense.org"}
+    },
+    {
+      "id": "instrument-serif-regular",
+      "family": "Instrument Serif",
+      "style": "normal",
+      "weight": 400,
+      "roles": ["display"],
+      "scripts": ["Latin"],
+      "upstreamRevision": "ade3d1533e06b2b1462ffcde8e08b129627ca360",
+      "downloadUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/instrumentserif/InstrumentSerif-Regular.ttf",
+      "cacheFile": "library/fonts/instrument-serif-regular.ttf",
+      "checksumSha256": "498efd461f6ddfcb7a111bf9a565709d2085d48201d501ead960d93e84ffbb88",
+      "maxBytes": 1000000,
+      "license": {"id": "OFL-1.1", "copyright": "Copyright 2022 The Instrument Serif Project Authors (https://github.com/Instrument/instrument-serif)", "url": "https://openfontlicense.org"}
+    },
+    {
+      "id": "noto-sans-tagalog-regular",
+      "family": "Noto Sans Tagalog",
+      "style": "normal",
+      "weight": 400,
+      "roles": ["display", "body", "metadata"],
+      "scripts": ["Tagalog"],
+      "upstreamRevision": "ade3d1533e06b2b1462ffcde8e08b129627ca360",
+      "downloadUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/notosanstagalog/NotoSansTagalog-Regular.ttf",
+      "cacheFile": "library/fonts/noto-sans-tagalog-regular.ttf",
+      "checksumSha256": "871a66319d10d1a027eee889f75ea49be0b7d2a4e97acd6bf7f7a0ed1d741aac",
+      "maxBytes": 1000000,
+      "license": {"id": "OFL-1.1", "copyright": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/tagalog)", "url": "https://openfontlicense.org"}
+    }
+  ]
+}

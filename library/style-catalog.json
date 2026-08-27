@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "1.0.0",
+  "presets": [
+    {
+      "id": "philippines-island-editorial",
+      "name": "Philippines Island Editorial",
+      "description": "Warm, quiet editorial typography for scenic island and landscape stories.",
+      "typography": {
+        "display": {"assetId": "fraunces-variable", "weight": 600, "style": "normal", "fallback": ["Georgia", "serif"]},
+        "body": {"assetId": "manrope-variable", "weight": 450, "style": "normal", "fallback": ["Arial", "sans-serif"]},
+        "metadata": {"assetId": "manrope-variable", "weight": 550, "style": "normal", "fallback": ["Arial", "sans-serif"]}
+      },
+      "palette": {"primary": "#FFF6E8", "dark": "#142B33", "coolAccent": "#287A78", "warmAccent": "#E7A15B", "humanAccent": "#C96859", "earthAccent": "#56382D"},
+      "profiles": {
+        "carousel": {"headingSize": 50, "bodySize": 29, "captionSize": 34, "metadataSize": 22, "horizontalPadding": 0.05, "bottomPadding": 0.076, "maxTextWidth": 0.62, "headingTrackingEm": 0.05, "bodyTrackingEm": 0.025, "headingLineHeight": 1.05, "bodyLineHeight": 1.15, "gap": 10, "fadeFrames": 8, "shadow": "0 2px 18px rgba(8,15,14,0.72)", "scrimOpacity": 0.28, "scrimHeight": 0.34},
+        "reel": {"headingSize": 68, "bodySize": 36, "captionSize": 48, "metadataSize": 26, "horizontalPadding": 0.056, "bottomPadding": 0.076, "maxTextWidth": 0.7, "headingTrackingEm": 0.045, "bodyTrackingEm": 0.02, "headingLineHeight": 1.05, "bodyLineHeight": 1.15, "gap": 12, "fadeFrames": 8, "shadow": "0 2px 20px rgba(8,15,14,0.72)", "scrimOpacity": 0.3, "scrimHeight": 0.3}
+      }
+    },
+    {
+      "id": "philippines-field-notes",
+      "name": "Philippines Field Notes",
+      "description": "Compact location-led typography for routes, boats, activities, and markets.",
+      "typography": {
+        "display": {"assetId": "barlow-condensed-semibold", "weight": 600, "style": "normal", "fallback": ["Arial Narrow", "sans-serif"]},
+        "body": {"assetId": "manrope-variable", "weight": 450, "style": "normal", "fallback": ["Arial", "sans-serif"]},
+        "metadata": {"assetId": "manrope-variable", "weight": 550, "style": "normal", "fallback": ["Arial", "sans-serif"]}
+      },
+      "palette": {"primary": "#FFF6E8", "dark": "#142B33", "coolAccent": "#287A78", "warmAccent": "#E7A15B", "humanAccent": "#C96859", "earthAccent": "#56382D"},
+      "profiles": {
+        "carousel": {"headingSize": 50, "bodySize": 29, "captionSize": 34, "metadataSize": 22, "horizontalPadding": 0.05, "bottomPadding": 0.076, "maxTextWidth": 0.62, "headingTrackingEm": 0.05, "bodyTrackingEm": 0.025, "headingLineHeight": 1.05, "bodyLineHeight": 1.15, "gap": 10, "fadeFrames": 8, "shadow": "0 2px 18px rgba(8,15,14,0.72)", "scrimOpacity": 0.28, "scrimHeight": 0.34},
+        "reel": {"headingSize": 68, "bodySize": 36, "captionSize": 48, "metadataSize": 26, "horizontalPadding": 0.056, "bottomPadding": 0.076, "maxTextWidth": 0.7, "headingTrackingEm": 0.045, "bodyTrackingEm": 0.02, "headingLineHeight": 1.05, "bodyLineHeight": 1.15, "gap": 12, "fadeFrames": 8, "shadow": "0 2px 20px rgba(8,15,14,0.72)", "scrimOpacity": 0.3, "scrimHeight": 0.3}
+      }
+    },
+    {
+      "id": "philippines-postcard",
+      "name": "Philippines Postcard",
+      "description": "A reflective serif treatment for intimate, slower, and food-focused stories.",
+      "typography": {
+        "display": {"assetId": "instrument-serif-regular", "weight": 400, "style": "normal", "fallback": ["Georgia", "serif"]},
+        "body": {"assetId": "manrope-variable", "weight": 450, "style": "normal", "fallback": ["Arial", "sans-serif"]},
+        "metadata": {"assetId": "manrope-variable", "weight": 550, "style": "normal", "fallback": ["Arial", "sans-serif"]}
+      },
+      "palette": {"primary": "#FFF6E8", "dark": "#142B33", "coolAccent": "#287A78", "warmAccent": "#E7A15B", "humanAccent": "#C96859", "earthAccent": "#56382D"},
+      "profiles": {
+        "carousel": {"headingSize": 50, "bodySize": 29, "captionSize": 34, "metadataSize": 22, "horizontalPadding": 0.05, "bottomPadding": 0.076, "maxTextWidth": 0.62, "headingTrackingEm": 0.05, "bodyTrackingEm": 0.025, "headingLineHeight": 1.05, "bodyLineHeight": 1.15, "gap": 10, "fadeFrames": 8, "shadow": "0 2px 18px rgba(8,15,14,0.72)", "scrimOpacity": 0.28, "scrimHeight": 0.34},
+        "reel": {"headingSize": 68, "bodySize": 36, "captionSize": 48, "metadataSize": 26, "horizontalPadding": 0.056, "bottomPadding": 0.076, "maxTextWidth": 0.7, "headingTrackingEm": 0.045, "bodyTrackingEm": 0.02, "headingLineHeight": 1.05, "bodyLineHeight": 1.15, "gap": 12, "fadeFrames": 8, "shadow": "0 2px 20px rgba(8,15,14,0.72)", "scrimOpacity": 0.3, "scrimHeight": 0.3}
+      }
+    }
+  ]
+}
