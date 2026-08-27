@@ -44,6 +44,15 @@ describe('reel project workspace', () => {
     }
   });
 
+  it('supports reel names whose reservation staging suffix would exceed a path component', async () => {
+    const projectsRoot = await makeProjectsRoot();
+    const longReelName = 'a'.repeat(200);
+
+    const reservation = await acquireProjectNameReservation(projectsRoot, longReelName);
+    await expect(reservation.assertOwnership()).resolves.toBeUndefined();
+    await expect(reservation.release()).resolves.toBeUndefined();
+  });
+
   it('reclaims a project-name reservation whose owner process is gone', async () => {
     const projectsRoot = await makeProjectsRoot();
     const reservationPath = path.join(projectsRoot, '.project-stale-project.reservation');

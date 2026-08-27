@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto';
+import {createHash, randomUUID} from 'node:crypto';
 import {access, cp, mkdir, readFile, rename, rm} from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -57,8 +57,21 @@ export type ProjectNameReservation = {
   release(): Promise<void>;
 };
 
-const projectNameReservationPath = (projectsRoot: string, safeName: string): string =>
-  path.join(projectsRoot, `.project-${safeName}.reservation`);
+const MAX_PATH_COMPONENT_BYTES = 255;
+const MAX_PROJECT_RESERVATION_SUFFIX_BYTES = 112;
+
+const reservationPathToken = (value: string): string =>
+  createHash('sha256').update(value).digest('hex');
+
+const projectNameReservationPath = (projectsRoot: string, safeName: string): string => {
+  const readableName = `.project-${safeName}.reservation`;
+  const basename =
+    Buffer.byteLength(readableName) <=
+    MAX_PATH_COMPONENT_BYTES - MAX_PROJECT_RESERVATION_SUFFIX_BYTES
+      ? readableName
+      : `.project-${reservationPathToken(safeName)}.reservation`;
+  return path.join(projectsRoot, basename);
+};
 
 const MARKERLESS_PROJECT_RESERVATION_LEASE_MS = 5 * 60_000;
 const MARKERLESS_PROJECT_RESERVATION_HEARTBEAT_MS = Math.floor(
@@ -68,7 +81,7 @@ const MARKERLESS_PROJECT_RESERVATION_HEARTBEAT_MS = Math.floor(
 const projectNameReservationClaimPath = (
   reservationPath: string,
   ownerId: string,
-): string => `${reservationPath}.reclaiming-${ownerId}.json`;
+): string => `${reservationPath}.reclaiming-${reservationPathToken(ownerId)}.json`;
 
 const projectNameReservationOwnershipLost = (): Error =>
   new Error('Project name reservation ownership was lost');
@@ -109,7 +122,7 @@ const reclaimStaleProjectNameReservation = async (
       return current?.id === identity && !isProcessIdentityAlive(current);
     },
     tombstonePath: (claimId) =>
-      `${reservationPath}.reclaimed-${identity}-${claimId}`,
+      `${reservationPath}.reclaimed-${reservationPathToken(identity)}-${claimId}`,
   });
 };
 
