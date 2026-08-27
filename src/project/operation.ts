@@ -449,26 +449,41 @@ const releaseReclaimClaim = async (claimPath: string, claimId: string): Promise<
   }
 };
 
-type ReclaimLockOptions = {
+export type LockClaimResult<T> =
+  | {acquired: true; value: T}
+  | {acquired: false};
+
+export const runWithLockClaim = async <T>(
+  claimPath: string,
+  operation: (claimId: string) => Promise<T>,
+): Promise<LockClaimResult<T>> => {
+  const claim = await acquireReclaimClaim(claimPath);
+  if (!claim) return {acquired: false};
+  try {
+    return {acquired: true, value: await operation(claim.id)};
+  } finally {
+    await releaseReclaimClaim(claimPath, claim.id);
+  }
+};
+
+export type ReclaimLockOptions = {
   claimPath: string;
   lockPath: string;
   canReclaim(): Promise<boolean>;
   tombstonePath(claimId: string): string;
 };
 
-const reclaimLockWithClaim = async ({
+export const reclaimLockWithClaim = async ({
   claimPath,
   lockPath,
   canReclaim,
   tombstonePath,
 }: ReclaimLockOptions): Promise<boolean> => {
-  const claim = await acquireReclaimClaim(claimPath);
-  if (!claim) return false;
-  try {
-    if (!(await canReclaim()) || !(await reclaimClaimIsOwned(claimPath, claim.id))) {
+  const result = await runWithLockClaim(claimPath, async (claimId) => {
+    if (!(await canReclaim()) || !(await reclaimClaimIsOwned(claimPath, claimId))) {
       return false;
     }
-    const reclaimedPath = tombstonePath(claim.id);
+    const reclaimedPath = tombstonePath(claimId);
     try {
       await rename(lockPath, reclaimedPath);
     } catch (error) {
@@ -481,9 +496,8 @@ const reclaimLockWithClaim = async ({
       if (!missingFile(error)) throw error;
     }
     return true;
-  } finally {
-    await releaseReclaimClaim(claimPath, claim.id);
-  }
+  });
+  return result.acquired && result.value;
 };
 
 const releaseMediaOperationLock = async (

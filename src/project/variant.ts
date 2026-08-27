@@ -367,6 +367,7 @@ export const createProjectVariant = async ({
       if (await exists(targetPath)) {
         throw new Error(`Reel project "${safeTargetName}" already exists`);
       }
+      await targetReservation.assertOwnership();
       await rename(stagedProjectPath, targetPath);
       await rm(stagingRoot, {recursive: true, force: true}).catch(() => undefined);
       return {sourcePath, targetPath, copiedFiles};
