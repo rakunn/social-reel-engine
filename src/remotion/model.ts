@@ -39,8 +39,8 @@ export const secondsToMediaFrames = (seconds: number, fps: number): number =>
 export const fontFaceRule = (fontUrl: string): string =>
   `@font-face{font-family:ReelCustom;src:url(${JSON.stringify(fontUrl)});font-display:block;}`;
 
-export const cardTextContainerStyle = () => ({
-  maxWidth: '100%' as const,
+export const cardTextContainerStyle = (maxTextWidth = 1) => ({
+  maxWidth: `${maxTextWidth * 100}%`,
   overflowWrap: 'anywhere' as const,
   wordBreak: 'break-word' as const,
 });

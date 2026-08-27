@@ -159,9 +159,8 @@ const CardTextOverlay: React.FC<{
       />
       <div
         style={{
-          ...cardTextContainerStyle(),
+          ...cardTextContainerStyle(profile.maxTextWidth),
           color: visualStyle.palette.primary,
-          maxWidth: `${profile.maxTextWidth * 100}%`,
           textShadow: profile.shadow,
           zIndex: 1,
         }}
@@ -232,6 +231,7 @@ const TitleCard: React.FC<{
       <div
         style={{
           ...text.heading,
+          ...cardTextContainerStyle(profile.maxTextWidth),
           textAlign: 'center',
           textShadow: profile.shadow,
           whiteSpace: 'pre-wrap',

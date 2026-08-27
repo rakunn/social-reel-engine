@@ -250,4 +250,14 @@ describe('data-driven Remotion model', () => {
       }),
     );
   });
+
+  it('constrains timeline titles to the selected profile width', () => {
+    expect(remotionModel.cardTextContainerStyle(0.7)).toEqual(
+      expect.objectContaining({
+        maxWidth: '70%',
+        overflowWrap: 'anywhere',
+        wordBreak: 'break-word',
+      }),
+    );
+  });
 });
