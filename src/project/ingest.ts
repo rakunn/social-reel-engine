@@ -4,6 +4,7 @@ import path from 'node:path';
 import {hashFile} from '../core/hash';
 import {writeJson} from '../core/json';
 import {resolveInside} from '../core/paths';
+import {runWithStatusScanLock} from './operation';
 
 export const INPUT_KINDS = [
   'clips',
@@ -96,7 +97,7 @@ export const scanInputs = async (
   return {schemaVersion: '1.0.0', generatedAt: now.toISOString(), files};
 };
 
-export const ingestFiles = async (
+const ingestFilesWithLock = async (
   projectPath: string,
   sourcePaths: readonly string[],
   kind: InputKind,
@@ -139,4 +140,19 @@ export const ingestFiles = async (
   const manifest = await scanInputs(projectPath);
   await writeJson(path.join(projectPath, 'analysis/ingest.json'), manifest);
   return {added, unchanged};
+};
+
+export const ingestFiles = async (
+  projectPath: string,
+  sourcePaths: readonly string[],
+  kind: InputKind,
+): Promise<{added: string[]; unchanged: string[]}> => {
+  const result = await runWithStatusScanLock(
+    projectPath,
+    async () => await ingestFilesWithLock(projectPath, sourcePaths, kind),
+  );
+  if (!result.acquired) {
+    throw new Error('Cannot ingest while a project snapshot, status scan, or media work is active');
+  }
+  return result.value;
 };
