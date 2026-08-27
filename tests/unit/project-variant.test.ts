@@ -210,6 +210,50 @@ describe('reel project variants', () => {
     await expect(access(path.join(projectsRoot, 'bad-lut-config-variant'))).rejects.toThrow();
   });
 
+  it('rejects a LUT declaration outside the cloned input directories', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-lut-path-'));
+    const projectsRoot = path.join(temporaryRoot, 'projects');
+    const sourcePath = await createReelProject({
+      engineRoot: repositoryRoot,
+      projectsRoot,
+      reelName: 'external-lut-source',
+    });
+    await writeVariantReadyEdit(sourcePath, 'external-lut-source');
+    await writeVerifiedSourceManifest(sourcePath);
+    const lutPath = path.join(sourcePath, 'assets/look.cube');
+    await mkdir(path.dirname(lutPath), {recursive: true});
+    await writeFile(lutPath, 'TITLE "External"\nLUT_3D_SIZE 2\n');
+    await writeJson(path.join(sourcePath, 'config/luts.json'), {
+      schemaVersion: '1.0.0',
+      luts: [
+        {
+          id: 'external-look',
+          kind: 'creative',
+          file: 'assets/look.cube',
+          checksumSha256: await hashFile(lutPath),
+          cameraModel: null,
+          profileId: null,
+          inputColorSpace: 'Rec.709 Gamma 2.4',
+          outputColorSpace: 'Rec.709 Gamma 2.4',
+          transformSemantics: 'look',
+          defaultMix: 0.35,
+        },
+      ],
+    });
+
+    const module = await loadVariantModule();
+    if (!module?.createProjectVariant) throw new Error('Variant module is unavailable');
+    await expect(
+      module.createProjectVariant({
+        engineRoot: repositoryRoot,
+        projectsRoot,
+        sourceName: 'external-lut-source',
+        targetName: 'external-lut-variant',
+      }),
+    ).rejects.toThrow(/LUT|input|cloned|directory/i);
+    await expect(access(path.join(projectsRoot, 'external-lut-variant'))).rejects.toThrow();
+  });
+
   it('rejects a source project whose creator still holds its name reservation', async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-source-reservation-'));
     const projectsRoot = path.join(temporaryRoot, 'projects');

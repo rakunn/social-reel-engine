@@ -64,6 +64,13 @@ const assertConfiguredLutsMatchFiles = async (projectPath: string): Promise<void
   );
   const luts = LutDefinitionsSchema.parse(config.luts ?? []);
   for (const lut of luts) {
+    const clonedDirectory =
+      lut.kind === 'creative' ? 'input/luts/creative/' : 'input/luts/technical/';
+    if (!lut.file.startsWith(clonedDirectory)) {
+      throw new Error(
+        `Configured ${lut.kind} LUT must be inside the cloned ${clonedDirectory} directory: ${lut.file}`,
+      );
+    }
     const checksumSha256 = await hashFile(resolveInside(projectPath, lut.file));
     if (checksumSha256 !== lut.checksumSha256) {
       throw new Error(`Configured LUT checksum no longer matches: ${lut.file}`);
