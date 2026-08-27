@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import {constants as fsConstants} from 'node:fs';
 import {
   access,
@@ -52,6 +53,19 @@ const exists = async (filePath: string): Promise<boolean> => {
   } catch {
     return false;
   }
+};
+
+const MAX_PATH_COMPONENT_BYTES = 255;
+const MKDTEMP_RANDOM_SUFFIX_BYTES = 6;
+
+const variantStagingPrefix = (projectsRoot: string, targetName: string): string => {
+  const readablePrefix = `.variant-${targetName}.partial-`;
+  const basename =
+    Buffer.byteLength(readablePrefix) <=
+    MAX_PATH_COMPONENT_BYTES - MKDTEMP_RANDOM_SUFFIX_BYTES
+      ? readablePrefix
+      : `.variant-${createHash('sha256').update(targetName).digest('hex')}.partial-`;
+  return path.join(projectsRoot, basename);
 };
 
 const assertNoSymbolicLinks = async (sourceRoot: string, source: string): Promise<void> => {
@@ -293,7 +307,7 @@ export const createProjectVariant = async ({
     const snapshot = await runWithStatusScanLock(sourcePath, async () => {
     await assertReadTreesContainNoSymbolicLinks(sourcePath);
     const stagingRoot = await mkdtemp(
-      path.join(resolvedProjectsRoot, `.variant-${safeTargetName}.partial-`),
+      variantStagingPrefix(resolvedProjectsRoot, safeTargetName),
     );
     const stagedProjectPath = path.join(stagingRoot, safeTargetName);
     try {
