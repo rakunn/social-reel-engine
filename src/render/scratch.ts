@@ -200,6 +200,21 @@ export const pruneRenderStages = async (
   );
 };
 
+export const prepareFreshRenderStage = async (
+  engineRoot: string,
+  reelName: string,
+  stageRoot: string,
+): Promise<void> => {
+  const safeReelName = assertSafeReelName(reelName);
+  const validated = exactRenderStage(engineRoot, stageRoot);
+  if (validated.reelName !== safeReelName) {
+    throw new Error(`Render stage ${stageRoot} does not belong to reel ${safeReelName}`);
+  }
+  await removeRenderStage(engineRoot, validated.stageRoot);
+  await pruneRenderStages(engineRoot, safeReelName);
+  await mkdir(validated.stageRoot, {recursive: true});
+};
+
 const fileChecksumIfPresent = async (filePath: string): Promise<string | null> => {
   try {
     return await hashFile(filePath);
