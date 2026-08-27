@@ -21,6 +21,7 @@ import {
   cardTextContainerStyle,
   cardTextStyles,
   captionContainerStyle,
+  captionTextContainerStyle,
   captionFrameRange,
   colorWithOpacity,
   cropTransform,
@@ -260,6 +261,7 @@ const CaptionCard: React.FC<{
     >
       <div
         style={{
+          ...captionTextContainerStyle(profile),
           color: visualStyle.palette.primary,
           backgroundColor: 'rgba(0,0,0,0.72)',
           borderRadius: 12,

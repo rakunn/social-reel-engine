@@ -260,4 +260,23 @@ describe('data-driven Remotion model', () => {
       }),
     );
   });
+
+  it('constrains captions to the selected profile width', () => {
+    const captionTextContainerStyle = (
+      remotionModel as typeof remotionModel & {
+        captionTextContainerStyle?: (
+          profile: typeof CINEMATIC_MINIMAL_STYLE.profiles.reel,
+        ) => {maxWidth: string; overflowWrap: string; wordBreak: string};
+      }
+    ).captionTextContainerStyle;
+
+    expect(captionTextContainerStyle).toBeTypeOf('function');
+    expect(captionTextContainerStyle?.(CINEMATIC_MINIMAL_STYLE.profiles.reel)).toEqual(
+      expect.objectContaining({
+        maxWidth: `${CINEMATIC_MINIMAL_STYLE.profiles.reel.maxTextWidth * 100}%`,
+        overflowWrap: 'anywhere',
+        wordBreak: 'break-word',
+      }),
+    );
+  });
 });

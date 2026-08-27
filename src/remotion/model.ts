@@ -54,6 +54,9 @@ export const captionContainerStyle = (
   paddingBottom: outputHeight * profile.bottomPadding,
 });
 
+export const captionTextContainerStyle = (profile: OutputStyleTokens) =>
+  cardTextContainerStyle(profile.maxTextWidth);
+
 export const colorWithOpacity = (hexColor: string, opacity: number): string => {
   const match = /^#([a-f0-9]{2})([a-f0-9]{2})([a-f0-9]{2})$/i.exec(hexColor);
   if (!match) throw new Error(`Expected a six-digit hexadecimal color: ${hexColor}`);
