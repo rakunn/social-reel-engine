@@ -17,6 +17,7 @@ describe('stable command interface', () => {
       'new',
       'variant',
       'ingest',
+      'style',
       'analyze',
       'proxy',
       'beats',
@@ -43,6 +44,28 @@ describe('stable command interface', () => {
     const format = command?.options.find((option) => option.long === '--format');
     expect(format?.argChoices).toEqual(['reel-9:16', 'carousel-1.91:1']);
     expect(format?.defaultValue).toBe('reel-9:16');
+  });
+
+  it('offers reusable style listing and project application modes', () => {
+    const command = createCli().commands.find((candidate) => candidate.name() === 'style');
+    expect(command?.options.map((option) => option.long)).toEqual(['--list', '--apply']);
+    expect(command?.registeredArguments[0].required).toBe(false);
+  });
+
+  it('rejects an unknown project before applying a style', async () => {
+    const reelName = `missing-style-${randomUUID().replaceAll('-', '')}`;
+    const projectPath = path.join(repositoryRoot, 'projects', reelName);
+    await expect(
+      createCli().parseAsync([
+        'node',
+        'reel',
+        'style',
+        reelName,
+        '--apply',
+        'philippines-island-editorial',
+      ]),
+    ).rejects.toThrow(/project.*does not exist|does not exist.*project/i);
+    await expect(access(projectPath)).rejects.toThrow();
   });
 
   it('rejects an unknown project before a tracked command creates operation state', async () => {

@@ -10,6 +10,7 @@ import {readJson, writeJson} from '../core/json';
 import {assertSafeReelName} from '../core/paths';
 import {validateEdit} from '../edit/validate';
 import {scanInputs} from './ingest';
+import {StyleConfigSchema} from '../style/contracts';
 import {
   isMediaOperationLockActive,
   isMediaOperationAlive,
@@ -44,6 +45,7 @@ export const assertProjectScaffold = async (projectPath: string): Promise<void> 
     path.join(projectPath, 'brief.json'),
     path.join(projectPath, 'analysis'),
     path.join(projectPath, 'config'),
+    path.join(projectPath, 'config/style.json'),
     path.join(projectPath, 'edits/edit.json'),
   ];
   try {
@@ -109,6 +111,8 @@ export const createReelProject = async ({
     errorOnExist: true,
     force: false,
   });
+
+  await readJson(path.join(projectPath, 'config/style.json'), StyleConfigSchema);
 
   const briefPath = path.join(projectPath, 'brief.json');
   await writeJson(briefPath, brief);

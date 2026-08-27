@@ -16,6 +16,7 @@ import {
 } from '../../src/project/artifacts';
 import {hashFile} from '../../src/core/hash';
 import {analyzeSources} from '../../src/media/analyze';
+import {StyleConfigSchema} from '../../src/style/contracts';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -78,6 +79,11 @@ describe('reel project workspace', () => {
       count: 5,
       jpegQuality: 95,
     });
+    expect(
+      StyleConfigSchema.parse(
+        JSON.parse(await readFile(path.join(projectPath, 'config/style.json'), 'utf8')),
+      ).presetId,
+    ).toBe('cinematic-minimal');
 
     await expect(
       createReelProject({

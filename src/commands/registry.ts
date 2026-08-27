@@ -3,6 +3,7 @@ export const COMMAND_NAMES = [
   'new',
   'variant',
   'ingest',
+  'style',
   'analyze',
   'proxy',
   'beats',
