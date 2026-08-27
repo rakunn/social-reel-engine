@@ -40,16 +40,44 @@ const exists = async (filePath: string): Promise<boolean> => {
   }
 };
 
-const cloneTree = async (source: string, target: string): Promise<number> => {
-  const sourceStat = await lstat(source);
-  if (sourceStat.isSymbolicLink()) {
-    throw new Error(`Variant source contains a symbolic link: ${source}`);
+const assertNoSymbolicLinks = async (sourceRoot: string, source: string): Promise<void> => {
+  const resolvedRoot = path.resolve(sourceRoot);
+  const resolvedSource = path.resolve(source);
+  const relativePath = path.relative(resolvedRoot, resolvedSource);
+  if (relativePath === '..' || relativePath.startsWith(`..${path.sep}`)) {
+    throw new Error(`Variant source escaped its project: ${source}`);
   }
+  let currentPath = resolvedRoot;
+  const paths = [currentPath];
+  if (relativePath) {
+    for (const segment of relativePath.split(path.sep)) {
+      currentPath = path.join(currentPath, segment);
+      paths.push(currentPath);
+    }
+  }
+  for (const candidatePath of paths) {
+    if ((await lstat(candidatePath)).isSymbolicLink()) {
+      throw new Error(`Variant source contains a symbolic link: ${candidatePath}`);
+    }
+  }
+};
+
+const cloneTree = async (
+  sourceRoot: string,
+  source: string,
+  target: string,
+): Promise<number> => {
+  await assertNoSymbolicLinks(sourceRoot, source);
+  const sourceStat = await lstat(source);
   if (sourceStat.isDirectory()) {
     await mkdir(target, {recursive: true});
     let copied = 0;
     for (const entry of await readdir(source)) {
-      copied += await cloneTree(path.join(source, entry), path.join(target, entry));
+      copied += await cloneTree(
+        sourceRoot,
+        path.join(source, entry),
+        path.join(target, entry),
+      );
     }
     return copied;
   }
@@ -61,8 +89,11 @@ const cloneTree = async (source: string, target: string): Promise<number> => {
   return 1;
 };
 
-const cloneIfPresent = async (source: string, target: string): Promise<number> =>
-  (await exists(source)) ? await cloneTree(source, target) : 0;
+const cloneIfPresent = async (
+  sourceRoot: string,
+  source: string,
+  target: string,
+): Promise<number> => (await exists(source)) ? await cloneTree(sourceRoot, source, target) : 0;
 
 const cloneValidArtifactCache = async (
   sourcePath: string,
@@ -98,6 +129,7 @@ const cloneValidArtifactCache = async (
     if (!valid) continue;
     for (const relativePath of record.files) {
       copiedFiles += await cloneTree(
+        sourcePath,
         resolveInside(sourcePath, relativePath),
         resolveInside(targetPath, relativePath),
       );
@@ -110,6 +142,7 @@ const cloneValidArtifactCache = async (
       artifacts,
     } satisfies ArtifactIndex);
     copiedFiles += await cloneIfPresent(
+      sourcePath,
       path.join(sourcePath, 'analysis/proxies.json'),
       path.join(targetPath, 'analysis/proxies.json'),
     );
@@ -146,11 +179,15 @@ const cloneValidGradedClipCache = async (
     const sourceFile = resolveInside(sourcePath, item.path);
     try {
       if ((await hashFile(sourceFile)) !== item.checksumSha256) continue;
-      copiedFiles += await cloneTree(sourceFile, resolveInside(targetPath, item.path));
-      validItems.push(item);
     } catch {
       continue;
     }
+    copiedFiles += await cloneTree(
+      sourcePath,
+      sourceFile,
+      resolveInside(targetPath, item.path),
+    );
+    validItems.push(item);
   }
   if (validItems.length === 0) return 0;
   await writeJson(path.join(targetPath, 'analysis/graded-clips.json'), {
@@ -177,6 +214,7 @@ export const createProjectVariant = async ({
   const sourcePath = path.join(resolvedProjectsRoot, safeSourceName);
   const targetPath = path.join(resolvedProjectsRoot, safeTargetName);
   await assertProjectScaffold(sourcePath);
+  await assertNoSymbolicLinks(sourcePath, sourcePath);
   if (await exists(targetPath)) {
     throw new Error(`Reel project "${safeTargetName}" already exists`);
   }
@@ -196,13 +234,17 @@ export const createProjectVariant = async ({
     .then((status) => status.colorApproved && sourceApprovals.color ? sourceApprovals.color : null)
     .catch(() => null);
   const format = sourceBrief.projectType === 'carousel' ? 'carousel-1.91:1' : 'reel-9:16';
+  const titleSuffix = ' variant';
+  const variantTitle =
+    title?.trim() ||
+    `${sourceBrief.identity.title.slice(0, 160 - titleSuffix.length).trimEnd()}${titleSuffix}`;
   let created = false;
   try {
     await createReelProject({
       engineRoot,
       projectsRoot: resolvedProjectsRoot,
       reelName: safeTargetName,
-      title: title?.trim() || `${sourceBrief.identity.title} variant`,
+      title: variantTitle,
       format,
       now,
     });
@@ -210,12 +252,14 @@ export const createProjectVariant = async ({
     let copiedFiles = 0;
     for (const relativePath of ['input', 'config']) {
       copiedFiles += await cloneTree(
+        sourcePath,
         path.join(sourcePath, relativePath),
         path.join(targetPath, relativePath),
       );
     }
     for (const relativePath of ['analysis/sources.json', 'analysis/ingest.json']) {
       copiedFiles += await cloneIfPresent(
+        sourcePath,
         path.join(sourcePath, relativePath),
         path.join(targetPath, relativePath),
       );
@@ -229,7 +273,7 @@ export const createProjectVariant = async ({
         ...sourceBrief,
         identity: {
           reelName: safeTargetName,
-          title: title?.trim() || `${sourceBrief.identity.title} variant`,
+          title: variantTitle,
           createdAt: now.toISOString(),
         },
         rightsConfirmed: reusableRights,
@@ -250,10 +294,12 @@ export const createProjectVariant = async ({
     );
     if (reusableColor) {
       copiedFiles += await cloneTree(
+        sourcePath,
         path.join(sourcePath, 'previews/graded-stills'),
         path.join(targetPath, 'previews/graded-stills'),
       );
       copiedFiles += await cloneTree(
+        sourcePath,
         path.join(sourcePath, 'analysis/graded-stills.json'),
         path.join(targetPath, 'analysis/graded-stills.json'),
       );
