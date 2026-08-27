@@ -1,5 +1,15 @@
 import {constants as fsConstants} from 'node:fs';
-import {access, copyFile, lstat, mkdir, readdir, readFile, rm} from 'node:fs/promises';
+import {
+  access,
+  copyFile,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rename,
+  rm,
+} from 'node:fs/promises';
 import path from 'node:path';
 import {
   ApprovalStateSchema,
@@ -95,6 +105,17 @@ const cloneIfPresent = async (
   target: string,
 ): Promise<number> => (await exists(source)) ? await cloneTree(sourceRoot, source, target) : 0;
 
+const reusableArtifactDirectories = new Set([
+  'work/proxies',
+  'analysis/frames',
+  'analysis/contact-sheets',
+]);
+
+const isReusableArtifactPath = (relativePath: string): boolean =>
+  relativePath === path.posix.normalize(relativePath) &&
+  !relativePath.includes('\\') &&
+  reusableArtifactDirectories.has(path.posix.dirname(relativePath));
+
 const cloneValidArtifactCache = async (
   sourcePath: string,
   targetPath: string,
@@ -108,7 +129,14 @@ const cloneValidArtifactCache = async (
   const artifacts: ArtifactIndex['artifacts'] = {};
   let copiedFiles = 0;
   for (const [key, record] of Object.entries(sourceIndex.artifacts)) {
-    if (!record.checksums || record.files.length !== Object.keys(record.checksums).length) continue;
+    if (
+      !record.checksums ||
+      record.files.length === 0 ||
+      record.files.length !== Object.keys(record.checksums).length
+    ) {
+      continue;
+    }
+    if (!record.files.every(isReusableArtifactPath)) continue;
     let valid = true;
     for (const relativePath of record.files) {
       const expectedChecksum = record.checksums[relativePath];
@@ -219,113 +247,123 @@ export const createProjectVariant = async ({
     throw new Error(`Reel project "${safeTargetName}" already exists`);
   }
   const snapshot = await runWithStatusScanLock(sourcePath, async () => {
-  const sourceBrief = await readJson(path.join(sourcePath, 'brief.json'), ReelBriefSchema);
-  const sourceEdit = await readJson(path.join(sourcePath, 'edits/edit.json'), EditManifestSchema);
-  const sourceApprovals = await readJson(
-    path.join(sourcePath, 'analysis/approvals.json'),
-    ApprovalStateSchema,
-  );
-  const reusableRights = await readRightsConfirmationStatus(sourcePath)
-    .then((status) => status.confirmed)
-    .catch(() => false);
-  const reusableColor = await readApprovalStatus(sourcePath)
-    .then((status) => status.colorApproved && sourceApprovals.color ? sourceApprovals.color : null)
-    .catch(() => null);
-  const format = sourceBrief.projectType === 'carousel' ? 'carousel-1.91:1' : 'reel-9:16';
-  const titleSuffix = ' variant';
-  const variantTitle =
-    title?.trim() ||
-    `${sourceBrief.identity.title.slice(0, 160 - titleSuffix.length).trimEnd()}${titleSuffix}`;
-  let created = false;
-  try {
-    await createReelProject({
-      engineRoot,
-      projectsRoot: resolvedProjectsRoot,
-      reelName: safeTargetName,
-      title: variantTitle,
-      format,
-      now,
-    });
-    created = true;
-    let copiedFiles = 0;
-    for (const relativePath of ['input', 'config']) {
-      copiedFiles += await cloneTree(
-        sourcePath,
-        path.join(sourcePath, relativePath),
-        path.join(targetPath, relativePath),
-      );
-    }
-    for (const relativePath of [
-      'analysis/sources.json',
-      'analysis/ingest.json',
-      'analysis/beats.json',
-    ]) {
-      copiedFiles += await cloneIfPresent(
-        sourcePath,
-        path.join(sourcePath, relativePath),
-        path.join(targetPath, relativePath),
-      );
-    }
-    copiedFiles += await cloneValidArtifactCache(sourcePath, targetPath);
-    copiedFiles += await cloneValidGradedClipCache(sourcePath, targetPath);
-
-    await writeJson(
-      path.join(targetPath, 'brief.json'),
-      ReelBriefSchema.parse({
-        ...sourceBrief,
-        identity: {
-          reelName: safeTargetName,
-          title: variantTitle,
-          createdAt: now.toISOString(),
-        },
-        rightsConfirmed: reusableRights,
-        rightsConfirmation: reusableRights ? sourceBrief.rightsConfirmation : null,
-      }),
+    const stagingRoot = await mkdtemp(
+      path.join(resolvedProjectsRoot, `.variant-${safeTargetName}.partial-`),
     );
-    await writeJson(
-      path.join(targetPath, 'edits/edit.json'),
-      EditManifestSchema.parse({...sourceEdit, reelName: safeTargetName}),
-    );
-    await writeJson(
-      path.join(targetPath, 'analysis/approvals.json'),
-      ApprovalStateSchema.parse({
-        schemaVersion: '1.0.0',
-        edit: null,
-        color: reusableColor,
-      }),
-    );
-    if (reusableColor) {
-      copiedFiles += await cloneTree(
-        sourcePath,
-        path.join(sourcePath, 'previews/graded-stills'),
-        path.join(targetPath, 'previews/graded-stills'),
+    const stagedProjectPath = path.join(stagingRoot, safeTargetName);
+    try {
+      const sourceBrief = await readJson(path.join(sourcePath, 'brief.json'), ReelBriefSchema);
+      const sourceEdit = await readJson(path.join(sourcePath, 'edits/edit.json'), EditManifestSchema);
+      const sourceApprovals = await readJson(
+        path.join(sourcePath, 'analysis/approvals.json'),
+        ApprovalStateSchema,
       );
-      copiedFiles += await cloneTree(
-        sourcePath,
-        path.join(sourcePath, 'analysis/graded-stills.json'),
-        path.join(targetPath, 'analysis/graded-stills.json'),
-      );
-    }
-    if (reusableRights) {
-      const targetRights = await readRightsConfirmationStatus(targetPath).catch(() => ({
-        confirmed: false,
-      }));
-      if (!targetRights.confirmed) {
-        await writeJson(
-          path.join(targetPath, 'brief.json'),
-          ReelBriefSchema.parse({
-            ...(await readJson(path.join(targetPath, 'brief.json'), ReelBriefSchema)),
-            rightsConfirmed: false,
-            rightsConfirmation: null,
-          }),
+      const reusableRights = await readRightsConfirmationStatus(sourcePath)
+        .then((status) => status.confirmed)
+        .catch(() => false);
+      const reusableColor = await readApprovalStatus(sourcePath)
+        .then((status) =>
+          status.colorApproved && sourceApprovals.color ? sourceApprovals.color : null,
+        )
+        .catch(() => null);
+      const format =
+        sourceBrief.projectType === 'carousel' ? 'carousel-1.91:1' : 'reel-9:16';
+      const titleSuffix = ' variant';
+      const variantTitle =
+        title?.trim() ||
+        `${sourceBrief.identity.title.slice(0, 160 - titleSuffix.length).trimEnd()}${titleSuffix}`;
+      await createReelProject({
+        engineRoot,
+        projectsRoot: stagingRoot,
+        reelName: safeTargetName,
+        title: variantTitle,
+        format,
+        now,
+      });
+      let copiedFiles = 0;
+      for (const relativePath of ['input', 'config']) {
+        copiedFiles += await cloneTree(
+          sourcePath,
+          path.join(sourcePath, relativePath),
+          path.join(stagedProjectPath, relativePath),
         );
       }
+      for (const relativePath of [
+        'analysis/sources.json',
+        'analysis/ingest.json',
+        'analysis/beats.json',
+      ]) {
+        copiedFiles += await cloneIfPresent(
+          sourcePath,
+          path.join(sourcePath, relativePath),
+          path.join(stagedProjectPath, relativePath),
+        );
+      }
+      copiedFiles += await cloneValidArtifactCache(sourcePath, stagedProjectPath);
+      copiedFiles += await cloneValidGradedClipCache(sourcePath, stagedProjectPath);
+
+      await writeJson(
+        path.join(stagedProjectPath, 'brief.json'),
+        ReelBriefSchema.parse({
+          ...sourceBrief,
+          identity: {
+            reelName: safeTargetName,
+            title: variantTitle,
+            createdAt: now.toISOString(),
+          },
+          rightsConfirmed: reusableRights,
+          rightsConfirmation: reusableRights ? sourceBrief.rightsConfirmation : null,
+        }),
+      );
+      await writeJson(
+        path.join(stagedProjectPath, 'edits/edit.json'),
+        EditManifestSchema.parse({...sourceEdit, reelName: safeTargetName}),
+      );
+      await writeJson(
+        path.join(stagedProjectPath, 'analysis/approvals.json'),
+        ApprovalStateSchema.parse({
+          schemaVersion: '1.0.0',
+          edit: null,
+          color: reusableColor,
+        }),
+      );
+      if (reusableColor) {
+        copiedFiles += await cloneTree(
+          sourcePath,
+          path.join(sourcePath, 'previews/graded-stills'),
+          path.join(stagedProjectPath, 'previews/graded-stills'),
+        );
+        copiedFiles += await cloneTree(
+          sourcePath,
+          path.join(sourcePath, 'analysis/graded-stills.json'),
+          path.join(stagedProjectPath, 'analysis/graded-stills.json'),
+        );
+      }
+      if (reusableRights) {
+        const targetRights = await readRightsConfirmationStatus(stagedProjectPath).catch(() => ({
+          confirmed: false,
+        }));
+        if (!targetRights.confirmed) {
+          await writeJson(
+            path.join(stagedProjectPath, 'brief.json'),
+            ReelBriefSchema.parse({
+              ...(await readJson(path.join(stagedProjectPath, 'brief.json'), ReelBriefSchema)),
+              rightsConfirmed: false,
+              rightsConfirmation: null,
+            }),
+          );
+        }
+      }
+      if (await exists(targetPath)) {
+        throw new Error(`Reel project "${safeTargetName}" already exists`);
+      }
+      await rename(stagedProjectPath, targetPath);
+      await rm(stagingRoot, {recursive: true, force: true}).catch(() => undefined);
+      return {sourcePath, targetPath, copiedFiles};
+    } catch (error) {
+      await rm(stagingRoot, {recursive: true, force: true});
+      throw error;
     }
-    return {sourcePath, targetPath, copiedFiles};
-  } catch (error) {
-    if (created) await rm(targetPath, {recursive: true, force: true});
-    throw error;
-  }
   });
   if (!snapshot.acquired) {
     throw new Error('Cannot create a variant while the source project has active media work');

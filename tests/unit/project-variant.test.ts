@@ -1,6 +1,7 @@
-import {access, mkdir, mkdtemp, readFile, rm, symlink, writeFile} from 'node:fs/promises';
+import {access, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
+import {setTimeout as delay} from 'node:timers/promises';
 import {fileURLToPath} from 'node:url';
 import {describe, expect, it} from 'vitest';
 import {createReelProject} from '../../src/project/workspace';
@@ -64,6 +65,61 @@ const writeVariantReadyEdit = async (projectPath: string, reelName: string): Pro
 };
 
 describe('reel project variants', () => {
+  it('keeps the target unpublished until its complete staged snapshot is ready', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-publication-'));
+    const projectsRoot = path.join(temporaryRoot, 'projects');
+    const sourcePath = await createReelProject({
+      engineRoot: repositoryRoot,
+      projectsRoot,
+      reelName: 'atomic-source',
+    });
+    await writeVariantReadyEdit(sourcePath, 'atomic-source');
+    await writeFile(path.join(sourcePath, 'input/clips/clip.mp4'), Buffer.alloc(1024 * 1024));
+
+    const module = await loadVariantModule();
+    if (!module?.createProjectVariant) throw new Error('Variant module is unavailable');
+    let completed = false;
+    const creation = module.createProjectVariant({
+      engineRoot: repositoryRoot,
+      projectsRoot,
+      sourceName: 'atomic-source',
+      targetName: 'atomic-variant',
+    }).finally(() => {
+      completed = true;
+    });
+    let sawStagingProject = false;
+    let sawIncompletePublishedTarget = false;
+    while (!completed) {
+      const entries = await readdir(projectsRoot);
+      sawStagingProject ||= entries.some((entry) =>
+        entry.startsWith('.variant-atomic-variant.partial-'),
+      );
+      if (entries.includes('atomic-variant')) {
+        try {
+          await readFile(path.join(projectsRoot, 'atomic-variant/input/clips/clip.mp4'));
+          const edit = JSON.parse(
+            await readFile(
+              path.join(projectsRoot, 'atomic-variant/edits/edit.json'),
+              'utf8',
+            ),
+          );
+          if (edit.reelName !== 'atomic-variant') sawIncompletePublishedTarget = true;
+        } catch {
+          sawIncompletePublishedTarget = true;
+        }
+      }
+      await delay(0);
+    }
+    const result = await creation;
+
+    expect(sawStagingProject).toBe(true);
+    expect(sawIncompletePublishedTarget).toBe(false);
+    await expect(access(result.targetPath)).resolves.toBeUndefined();
+    expect(await readdir(projectsRoot)).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/^\.variant-atomic-variant\.partial-/)]),
+    );
+  });
+
   it('caps the generated variant title at the brief schema limit', async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-title-'));
     const projectsRoot = path.join(temporaryRoot, 'projects');
@@ -236,6 +292,8 @@ describe('reel project variants', () => {
     }
     const tamperedProxy = 'work/proxies/tampered.mp4';
     await writeFile(path.join(sourcePath, tamperedProxy), 'tampered-proxy-artifact');
+    await writeFile(path.join(sourcePath, 'previews/preview.mp4'), 'source-preview');
+    await writeFile(path.join(sourcePath, 'output/delivery.mp4'), 'source-output');
     await writeJson(path.join(sourcePath, 'analysis/artifacts.json'), {
       schemaVersion: '1.0.0',
       artifacts: {
@@ -258,6 +316,16 @@ describe('reel project variants', () => {
           files: [tamperedProxy],
           checksums: {[tamperedProxy]: '0'.repeat(64)},
         },
+        'render:delivery': {
+          fingerprint: 'c'.repeat(64),
+          generatedAt: '2026-08-26T00:10:00.000Z',
+          files: ['output/delivery.mp4'],
+          checksums: {
+            'output/delivery.mp4': await hashFile(
+              path.join(sourcePath, 'output/delivery.mp4'),
+            ),
+          },
+        },
       },
     });
     await writeJson(path.join(sourcePath, 'analysis/proxies.json'), {
@@ -265,8 +333,6 @@ describe('reel project variants', () => {
       generatedAt: '2026-08-26T00:10:00.000Z',
       items: [],
     });
-    await writeFile(path.join(sourcePath, 'previews/preview.mp4'), 'source-preview');
-    await writeFile(path.join(sourcePath, 'output/delivery.mp4'), 'source-output');
     await writeFile(path.join(sourcePath, 'input/music/track.wav'), 'music-bytes');
     await writeJson(path.join(sourcePath, 'analysis/beats.json'), {
       schemaVersion: '1.0.0',
@@ -332,9 +398,9 @@ describe('reel project variants', () => {
       JSON.parse(await readFile(path.join(result.targetPath, 'analysis/artifacts.json'), 'utf8')),
     ).toEqual(
       expect.objectContaining({
-        artifacts: expect.objectContaining({
+        artifacts: {
           'proxy:video-source': expect.objectContaining({files: proxyFiles}),
-        }),
+        },
       }),
     );
     await expect(access(path.join(result.targetPath, proxyFiles[0]))).resolves.toBeUndefined();
