@@ -45,6 +45,13 @@ export const cardTextContainerStyle = () => ({
   wordBreak: 'break-word' as const,
 });
 
+export const colorWithOpacity = (hexColor: string, opacity: number): string => {
+  const match = /^#([a-f0-9]{2})([a-f0-9]{2})([a-f0-9]{2})$/i.exec(hexColor);
+  if (!match) throw new Error(`Expected a six-digit hexadecimal color: ${hexColor}`);
+  const channels = match.slice(1).map((channel) => Number.parseInt(channel, 16));
+  return `rgba(${channels[0]},${channels[1]},${channels[2]},${opacity})`;
+};
+
 export const fontFaceRules = (fonts: StagedFontRoles): string => {
   const seen = new Set<string>();
   const rules: string[] = [];

@@ -21,6 +21,7 @@ import {
   cardTextContainerStyle,
   cardTextStyles,
   captionFrameRange,
+  colorWithOpacity,
   cropTransform,
   fontFaceRule,
   fontFaceRules,
@@ -144,7 +145,7 @@ const CardTextOverlay: React.FC<{
           right: 0,
           bottom: 0,
           height: `${profile.scrimHeight * 100}%`,
-          backgroundColor: `rgba(20,43,51,${profile.scrimOpacity})`,
+          backgroundColor: colorWithOpacity(visualStyle.palette.dark, profile.scrimOpacity),
           zIndex: 0,
         }}
       />

@@ -192,6 +192,10 @@ describe('data-driven Remotion model', () => {
     );
   });
 
+  it('derives the overlay scrim from the preset dark color and opacity', () => {
+    expect(remotionModel.colorWithOpacity('#2A4C6E', 0.28)).toBe('rgba(42,76,110,0.28)');
+  });
+
   it('loads each distinct role font once', () => {
     const mockedLoadFont = vi.mocked(loadFont);
     mockedLoadFont.mockClear();

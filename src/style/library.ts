@@ -39,6 +39,47 @@ export const readFontCatalog = async (engineRoot: string): Promise<FontCatalog> 
 export const readStyleCatalog = async (engineRoot: string): Promise<StyleCatalog> =>
   await readJson(path.join(engineRoot, 'library/style-catalog.json'), StyleCatalogSchema);
 
+export const assertStyleCatalogFontCompatibility = (
+  fonts: FontCatalog,
+  styles: StyleCatalog,
+): void => {
+  const assetById = new Map(fonts.fonts.map((asset) => [asset.id, asset]));
+  for (const preset of styles.presets) {
+    for (const role of ['display', 'body', 'metadata'] as const) {
+      const selection = preset.typography[role];
+      const asset = assetById.get(selection.assetId);
+      if (!asset) {
+        throw new Error(
+          `Style preset ${preset.id} references unknown font ${selection.assetId}`,
+        );
+      }
+      if (!asset.roles.includes(role)) {
+        throw new Error(
+          `Style preset ${preset.id} selects font ${asset.id} for unsupported ${role} role`,
+        );
+      }
+      if (selection.style !== asset.style) {
+        throw new Error(
+          `Style preset ${preset.id} requests ${selection.style} font style from ${asset.id}, which provides ${asset.style}`,
+        );
+      }
+      const weightSupported =
+        typeof asset.weight === 'number'
+          ? selection.weight === asset.weight
+          : asset.weight.min <= selection.weight && selection.weight <= asset.weight.max;
+      if (!weightSupported) {
+        const supported =
+          typeof asset.weight === 'number'
+            ? String(asset.weight)
+            : `${asset.weight.min}-${asset.weight.max}`;
+        throw new Error(
+          `Style preset ${preset.id} requests weight ${selection.weight} from ${asset.id}, which supports ${supported}`,
+        );
+      }
+    }
+  }
+};
+
 const assertAllowedFontUrl = (input: string, revision: string): URL => {
   const url = new URL(input);
   if (
@@ -144,6 +185,7 @@ export const listStyleLibrary = async (engineRoot: string) => {
     readFontCatalog(engineRoot),
     readStyleCatalog(engineRoot),
   ]);
+  assertStyleCatalogFontCompatibility(fonts, styles);
   const statusById = Object.fromEntries(
     await Promise.all(
       fonts.fonts.map(async (asset) => [asset.id, await fontCacheStatus(engineRoot, asset)]),
@@ -190,6 +232,7 @@ export const applyStylePreset = async (
     readFontCatalog(engineRoot),
     readStyleCatalog(engineRoot),
   ]);
+  assertStyleCatalogFontCompatibility(fonts, styles);
   const preset = styles.presets.find(({id}) => id === presetId);
   if (!preset) throw new Error(`Unknown style preset "${presetId}"`);
   const assetById = new Map(fonts.fonts.map((asset) => [asset.id, asset]));

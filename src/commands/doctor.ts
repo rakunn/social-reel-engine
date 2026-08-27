@@ -12,7 +12,12 @@ import {LutDefinitionSchema} from '../contracts/schemas';
 import {checkRemotionRuntime} from '../render/remotion-runtime';
 import {findRenderInterruption} from '../render/errors';
 import {SIPS, SRGB_PROFILE} from '../media/photo-conversion';
-import {fontCacheStatus, readFontCatalog, readStyleCatalog} from '../style/library';
+import {
+  assertStyleCatalogFontCompatibility,
+  fontCacheStatus,
+  readFontCatalog,
+  readStyleCatalog,
+} from '../style/library';
 
 export type DoctorCheck = {
   id: string;
@@ -344,16 +349,7 @@ export const styleLibraryCheck = async (engineRoot: string): Promise<DoctorCheck
       readFontCatalog(engineRoot),
       readStyleCatalog(engineRoot),
     ]);
-    const fontIds = new Set(fonts.fonts.map(({id}) => id));
-    for (const preset of styles.presets) {
-      for (const selection of Object.values(preset.typography)) {
-        if (!fontIds.has(selection.assetId)) {
-          throw new Error(
-            `Style preset ${preset.id} references unknown font ${selection.assetId}`,
-          );
-        }
-      }
-    }
+    assertStyleCatalogFontCompatibility(fonts, styles);
     const statuses = await Promise.all(
       fonts.fonts.map(async (asset) => ({asset, status: await fontCacheStatus(engineRoot, asset)})),
     );

@@ -10,8 +10,11 @@ import {scanInputs} from '../../src/project/ingest';
 import {StyleConfigSchema, type FontAsset} from '../../src/style/contracts';
 import {
   applyStylePreset,
+  assertStyleCatalogFontCompatibility,
   listStyleLibrary,
   materializeCatalogFont,
+  readFontCatalog,
+  readStyleCatalog,
 } from '../../src/style/library';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
@@ -33,6 +36,45 @@ const fixtureAsset: FontAsset = {
 };
 
 describe('style library', () => {
+  it.each([
+    {
+      name: 'unsupported role',
+      mutate: (fonts: Awaited<ReturnType<typeof readFontCatalog>>, styles: Awaited<ReturnType<typeof readStyleCatalog>>) => {
+        const selection = styles.presets[0].typography.display;
+        fonts.fonts.find(({id}) => id === selection.assetId)!.roles = ['body'];
+      },
+      error: /role|display/i,
+    },
+    {
+      name: 'mismatched style',
+      mutate: (_fonts: Awaited<ReturnType<typeof readFontCatalog>>, styles: Awaited<ReturnType<typeof readStyleCatalog>>) => {
+        styles.presets[0].typography.display.style = 'italic';
+      },
+      error: /font style|italic/i,
+    },
+    {
+      name: 'mismatched fixed weight',
+      mutate: (fonts: Awaited<ReturnType<typeof readFontCatalog>>, styles: Awaited<ReturnType<typeof readStyleCatalog>>) => {
+        const selection = styles.presets[0].typography.display;
+        fonts.fonts.find(({id}) => id === selection.assetId)!.weight = 400;
+      },
+      error: /weight/i,
+    },
+    {
+      name: 'weight outside a variable range',
+      mutate: (fonts: Awaited<ReturnType<typeof readFontCatalog>>, styles: Awaited<ReturnType<typeof readStyleCatalog>>) => {
+        const selection = styles.presets[0].typography.display;
+        fonts.fonts.find(({id}) => id === selection.assetId)!.weight = {min: 100, max: 400};
+      },
+      error: /weight|range/i,
+    },
+  ])('rejects a preset selection with $name', async ({mutate, error}) => {
+    const fonts = structuredClone(await readFontCatalog(repositoryRoot));
+    const styles = structuredClone(await readStyleCatalog(repositoryRoot));
+    mutate(fonts, styles);
+    expect(() => assertStyleCatalogFontCompatibility(fonts, styles)).toThrow(error);
+  });
+
   it('lists every catalog font with cache, script, role, and license metadata', async () => {
     const listing = await listStyleLibrary(repositoryRoot);
     expect(listing.fonts).toHaveLength(5);
