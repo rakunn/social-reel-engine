@@ -40,7 +40,7 @@ export const createCli = (): Command => {
 
   program
     .command('doctor')
-    .description('Verify Node, Remotion, FFmpeg, librosa, and the local LUT library')
+    .description('Verify the render toolchain plus local LUT and style libraries')
     .action(async () => {
       const {runDoctor} = await import('./commands/doctor');
       const report = await runDoctor(ENGINE_ROOT);

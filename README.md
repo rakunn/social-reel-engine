@@ -69,6 +69,8 @@ npm run reel -- new island-sunrise --title "Island Sunrise"
 npm run reel -- ingest island-sunrise /path/to/clip-1.mp4 /path/to/clip-2.mov --kind clips
 npm run reel -- ingest island-sunrise /path/to/music.wav --kind music
 npm run reel -- ingest island-sunrise --library dji-mini-4-pro-dlogm-rec709-v1
+npm run reel -- style --list
+npm run reel -- style island-sunrise --apply philippines-island-editorial
 npm run reel -- analyze island-sunrise
 npm run reel -- proxy island-sunrise
 npm run reel -- beats island-sunrise
@@ -98,6 +100,8 @@ npm run reel -- status loboc-river
 ```
 
 Use `npm run reel -- ingest <name> --list-library` to inspect the local LUT catalog. Catalog installation copies the LUT into the job, verifies its SHA-256 checksum, and writes its declared semantics into `config/luts.json`.
+
+Use `npm run reel -- style --list` to inspect reusable typography and palette presets. Applying a preset downloads only its required Google Fonts from commit-pinned URLs, verifies their SHA-256 checksums, caches them locally under `library/fonts/`, ingests exact project copies, and writes `config/style.json`. Run `analyze` afterward. The included fonts use OFL-1.1; selected font checksums participate in rights and render identity. Typography changes require a new rough review, but they do not invalidate an otherwise exact color approval. Presets never alter exposure, white balance, tint, contrast, or LUT choices, and the optional Tagalog-script font never authorizes generated or inferred Baybayin copy.
 
 Run `confirm-rights` only after the user explicitly confirms the exact current used asset set. The command records that decision and its asset-checksum fingerprint in `brief.json`; `status` blocks final export if a referenced asset later changes, without invalidating confirmation for unused inputs.
 
@@ -140,6 +144,7 @@ projects/<reel-name>/
 │   ├── settings.json
 │   ├── sources.json
 │   ├── luts.json
+│   ├── style.json
 │   └── photos.json
 ├── analysis/
 ├── edits/edit.json

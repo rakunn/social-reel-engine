@@ -12,6 +12,7 @@ import {LutDefinitionSchema} from '../contracts/schemas';
 import {checkRemotionRuntime} from '../render/remotion-runtime';
 import {findRenderInterruption} from '../render/errors';
 import {SIPS, SRGB_PROFILE} from '../media/photo-conversion';
+import {fontCacheStatus, readFontCatalog, readStyleCatalog} from '../style/library';
 
 export type DoctorCheck = {
   id: string;
@@ -337,6 +338,48 @@ const libraryCheck = async (engineRoot: string): Promise<DoctorCheck> => {
   }
 };
 
+export const styleLibraryCheck = async (engineRoot: string): Promise<DoctorCheck> => {
+  try {
+    const [fonts, styles] = await Promise.all([
+      readFontCatalog(engineRoot),
+      readStyleCatalog(engineRoot),
+    ]);
+    const fontIds = new Set(fonts.fonts.map(({id}) => id));
+    for (const preset of styles.presets) {
+      for (const selection of Object.values(preset.typography)) {
+        if (!fontIds.has(selection.assetId)) {
+          throw new Error(
+            `Style preset ${preset.id} references unknown font ${selection.assetId}`,
+          );
+        }
+      }
+    }
+    const statuses = await Promise.all(
+      fonts.fonts.map(async (asset) => ({asset, status: await fontCacheStatus(engineRoot, asset)})),
+    );
+    const corrupt = statuses.filter(({status}) => status === 'corrupt');
+    if (corrupt.length > 0) {
+      return {
+        id: 'style-library',
+        status: 'warn',
+        message: `Cached font checksum mismatch or corrupt file: ${corrupt.map(({asset}) => asset.id).join(', ')}`,
+      };
+    }
+    const cached = statuses.filter(({status}) => status === 'cached').length;
+    return {
+      id: 'style-library',
+      status: 'pass',
+      message: `Style catalogs are valid; ${cached}/${fonts.fonts.length} fonts cached locally`,
+    };
+  } catch (error) {
+    return {
+      id: 'style-library',
+      status: 'fail',
+      message: `Style library catalog validation failed: ${(error as Error).message}`,
+    };
+  }
+};
+
 export const runDoctor = async (
   engineRoot: string,
   options: RunDoctorOptions = {},
@@ -438,5 +481,6 @@ export const runDoctor = async (
     ),
   );
   checks.push(await libraryCheck(engineRoot));
+  checks.push(await styleLibraryCheck(engineRoot));
   return {ok: checks.every((check) => check.status !== 'fail'), checks};
 };

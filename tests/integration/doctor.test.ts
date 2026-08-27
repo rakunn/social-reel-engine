@@ -33,6 +33,7 @@ describe('doctor', () => {
           id: 'lut-library',
           status: expect.stringMatching(/^(pass|warn)$/),
         }),
+        expect.objectContaining({id: 'style-library', status: 'pass'}),
       ]),
     );
   });

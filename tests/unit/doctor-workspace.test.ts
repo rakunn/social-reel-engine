@@ -1,4 +1,4 @@
-import {mkdir, mkdtemp, rm} from 'node:fs/promises';
+import {copyFile, mkdir, mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -7,6 +7,7 @@ import {
   dependencyMaterializationCheck,
   runDoctor,
   storageCapacityCheck,
+  styleLibraryCheck,
 } from '../../src/commands/doctor';
 import {RenderInterruptedError} from '../../src/render/errors';
 
@@ -28,6 +29,46 @@ afterEach(async () => {
 });
 
 describe('Doctor workspace preflight', () => {
+  it('passes valid catalogs when no optional font has been downloaded', async () => {
+    const engineRoot = await makeDirectory();
+    await mkdir(path.join(engineRoot, 'library'), {recursive: true});
+    await Promise.all(
+      ['font-catalog.json', 'style-catalog.json'].map(async (file) =>
+        await copyFile(
+          path.join(repositoryRoot, 'library', file),
+          path.join(engineRoot, 'library', file),
+        ),
+      ),
+    );
+    await expect(styleLibraryCheck(engineRoot)).resolves.toEqual(
+      expect.objectContaining({
+        id: 'style-library',
+        status: 'pass',
+        message: expect.stringMatching(/0\/5.*cached|catalogs.*valid/i),
+      }),
+    );
+  });
+
+  it('warns when a cached font checksum is wrong', async () => {
+    const engineRoot = await makeDirectory();
+    await mkdir(path.join(engineRoot, 'library/fonts'), {recursive: true});
+    await Promise.all(
+      ['font-catalog.json', 'style-catalog.json'].map(async (file) =>
+        await copyFile(
+          path.join(repositoryRoot, 'library', file),
+          path.join(engineRoot, 'library', file),
+        ),
+      ),
+    );
+    await writeFile(path.join(engineRoot, 'library/fonts/manrope-variable.ttf'), 'corrupt');
+    await expect(styleLibraryCheck(engineRoot)).resolves.toEqual(
+      expect.objectContaining({
+        id: 'style-library',
+        status: 'warn',
+        message: expect.stringMatching(/checksum|corrupt/i),
+      }),
+    );
+  });
   it('fails fast when a critical macOS dependency is still dataless', async () => {
     const engineRoot = await makeDirectory();
     const criticalRoot = path.join(engineRoot, 'node_modules/@remotion');
