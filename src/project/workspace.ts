@@ -13,8 +13,10 @@ import {validateEdit} from '../edit/validate';
 import {scanInputs} from './ingest';
 import {StyleConfigSchema} from '../style/contracts';
 import {
+  isProcessIdentityAlive,
   isMediaOperationLockActive,
   isMediaOperationAlive,
+  readProcessStartMarker,
   readMediaOperation,
   runWithStatusScanLock,
   type MediaOperationRecord,
@@ -44,6 +46,8 @@ type ProjectNameReservationOwner = {
   schemaVersion: '1.0.0';
   id: string;
   pid: number;
+  processStartMarker: string | null;
+  leaseExpiresAt: string | null;
   acquiredAt: string;
 };
 
@@ -54,14 +58,7 @@ export type ProjectNameReservation = {
 const projectNameReservationPath = (projectsRoot: string, safeName: string): string =>
   path.join(projectsRoot, `.project-${safeName}.reservation`);
 
-const processIsAlive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
-  }
-};
+const MARKERLESS_PROJECT_RESERVATION_LEASE_MS = 5 * 60_000;
 
 const readReservationOwner = async (
   reservationPath: string,
@@ -70,7 +67,16 @@ const readReservationOwner = async (
     const owner = await readJson<ProjectNameReservationOwner>(
       path.join(reservationPath, 'owner.json'),
     );
-    return owner.schemaVersion === '1.0.0' && owner.id && owner.pid > 0 ? owner : null;
+    return owner.schemaVersion === '1.0.0' &&
+      typeof owner.id === 'string' &&
+      owner.id.length > 0 &&
+      Number.isInteger(owner.pid) &&
+      owner.pid > 0 &&
+      (owner.processStartMarker === null || typeof owner.processStartMarker === 'string') &&
+      (owner.leaseExpiresAt === null || typeof owner.leaseExpiresAt === 'string') &&
+      typeof owner.acquiredAt === 'string'
+      ? owner
+      : null;
   } catch {
     return null;
   }
@@ -80,7 +86,7 @@ const reclaimStaleProjectNameReservation = async (
   reservationPath: string,
 ): Promise<boolean> => {
   const owner = await readReservationOwner(reservationPath);
-  if (!owner || processIsAlive(owner.pid)) return false;
+  if (!owner || isProcessIdentityAlive(owner)) return false;
   const retiredPath = `${reservationPath}.reclaimed-${randomUUID()}`;
   try {
     await rename(reservationPath, retiredPath);
@@ -103,11 +109,19 @@ export const acquireProjectNameReservation = async (
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const id = randomUUID();
     const candidatePath = `${reservationPath}.initializing-${id}`;
+    const acquiredAt = new Date();
+    const processStartMarker = readProcessStartMarker(process.pid);
     const owner: ProjectNameReservationOwner = {
       schemaVersion: '1.0.0',
       id,
       pid: process.pid,
-      acquiredAt: new Date().toISOString(),
+      processStartMarker,
+      leaseExpiresAt: processStartMarker
+        ? null
+        : new Date(
+            acquiredAt.getTime() + MARKERLESS_PROJECT_RESERVATION_LEASE_MS,
+          ).toISOString(),
+      acquiredAt: acquiredAt.toISOString(),
     };
     await mkdir(candidatePath);
     await writeJson(path.join(candidatePath, 'owner.json'), owner);

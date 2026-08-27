@@ -156,7 +156,7 @@ const markerlessLeaseExpiry = (now: Date): string =>
 const markerlessLeaseIsCurrent = (leaseExpiresAt: string | null): boolean =>
   leaseExpiresAt !== null && Date.parse(leaseExpiresAt) > Date.now();
 
-const readProcessStartMarker = (pid: number): string | null => {
+export const readProcessStartMarker = (pid: number): string | null => {
   try {
     const marker = execFileSync('ps', ['-p', String(pid), '-o', 'lstart='], {
       encoding: 'utf8',
@@ -169,7 +169,7 @@ const readProcessStartMarker = (pid: number): string | null => {
   }
 };
 
-const isProcessIdentityAlive = (identity: {
+export const isProcessIdentityAlive = (identity: {
   pid: number;
   processStartMarker: string | null;
   leaseExpiresAt: string | null;
