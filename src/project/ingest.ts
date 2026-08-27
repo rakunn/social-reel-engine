@@ -1,8 +1,9 @@
 import {constants as fsConstants} from 'node:fs';
 import {copyFile, mkdir, readdir, stat} from 'node:fs/promises';
 import path from 'node:path';
-import {hashFile} from '../core/hash';
-import {writeJson} from '../core/json';
+import {z} from 'zod';
+import {canonicalJson, hashFile} from '../core/hash';
+import {readJson, writeJson} from '../core/json';
 import {resolveInside} from '../core/paths';
 import {runWithStatusScanLock} from './operation';
 
@@ -44,16 +45,23 @@ const ignoredInputDirectories = new Set([
   '.fseventsd',
 ]);
 
-export type IngestManifest = {
-  schemaVersion: '1.0.0';
-  generatedAt: string;
-  files: Array<{
-    relativePath: string;
-    kind: InputKind;
-    checksumSha256: string;
-    sizeBytes: number;
-  }>;
-};
+export const IngestManifestSchema = z
+  .object({
+    schemaVersion: z.literal('1.0.0'),
+    generatedAt: z.string().datetime(),
+    files: z.array(
+      z
+        .object({
+          relativePath: z.string().min(1),
+          kind: z.enum(INPUT_KINDS),
+          checksumSha256: z.string().regex(/^[a-f0-9]{64}$/),
+          sizeBytes: z.number().int().nonnegative(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type IngestManifest = z.infer<typeof IngestManifestSchema>;
 
 const walkFiles = async (directory: string): Promise<string[]> => {
   const entries = await readdir(directory, {withFileTypes: true});
@@ -95,6 +103,21 @@ export const scanInputs = async (
   }
   files.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
   return {schemaVersion: '1.0.0', generatedAt: now.toISOString(), files};
+};
+
+export const readValidatedIngestManifest = async (
+  projectPath: string,
+): Promise<IngestManifest> => {
+  const [recorded, current] = await Promise.all([
+    readJson(path.join(projectPath, 'analysis/ingest.json'), IngestManifestSchema),
+    scanInputs(projectPath),
+  ]);
+  if (canonicalJson(recorded.files) !== canonicalJson(current.files)) {
+    throw new Error(
+      'Input files differ from the recorded ingest checksums; run analyze again',
+    );
+  }
+  return current;
 };
 
 export const ingestFilesWithinStatusScanLock = async (
