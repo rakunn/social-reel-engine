@@ -267,6 +267,20 @@ describe('reel project variants', () => {
     });
     await writeFile(path.join(sourcePath, 'previews/preview.mp4'), 'source-preview');
     await writeFile(path.join(sourcePath, 'output/delivery.mp4'), 'source-output');
+    await writeFile(path.join(sourcePath, 'input/music/track.wav'), 'music-bytes');
+    await writeJson(path.join(sourcePath, 'analysis/beats.json'), {
+      schemaVersion: '1.0.0',
+      generatedAt: '2026-08-26T00:10:00.000Z',
+      relativePath: 'input/music/track.wav',
+      checksumSha256: await hashFile(path.join(sourcePath, 'input/music/track.wav')),
+      analyzer: 'librosa-0.11.0',
+      analyzerImplementationSha256: 'd'.repeat(64),
+      durationSeconds: 10,
+      sampleRate: 48000,
+      tempoBpm: 90,
+      beatsSeconds: [0.5, 1.5],
+      onsetsSeconds: [0.25, 0.75],
+    });
 
     const module = await loadVariantModule();
     expect(module?.createProjectVariant).toBeTypeOf('function');
@@ -327,6 +341,7 @@ describe('reel project variants', () => {
     await expect(access(path.join(result.targetPath, tamperedProxy))).rejects.toThrow();
     await expect(access(path.join(result.targetPath, 'previews/preview.mp4'))).rejects.toThrow();
     await expect(access(path.join(result.targetPath, 'output/delivery.mp4'))).rejects.toThrow();
+    await expect(access(path.join(result.targetPath, 'analysis/beats.json'))).resolves.toBeUndefined();
     expect(await readFile(path.join(sourcePath, 'output/delivery.mp4'), 'utf8')).toBe(
       'source-output',
     );

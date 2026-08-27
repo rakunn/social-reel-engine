@@ -18,6 +18,7 @@ import {
 import type {EditManifest} from '../contracts/schemas';
 import {
   buildShotTimings,
+  cardTextContainerStyle,
   captionFrameRange,
   cropTransform,
   fontFaceRule,
@@ -102,6 +103,7 @@ const CardTextOverlay: React.FC<{
     >
       <div
         style={{
+          ...cardTextContainerStyle(),
           color: '#fffaf2',
           fontFamily: 'ReelCustom, Helvetica Neue, Arial, sans-serif',
           textShadow: '0 2px 18px rgba(0,0,0,0.78)',
