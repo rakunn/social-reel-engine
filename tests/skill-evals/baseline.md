@@ -32,3 +32,24 @@ Before the carousel extension, the engine's video contract was fixed to 1080×19
 ## Captioned carousel derivative baseline
 
 A fresh-context, read-only agent evaluated an approved clean-carousel-to-captioned-variant request against the pre-update skill. It found three deterministic gaps: the skill did not mention `variant`, did not route carousel copy through per-card `textOverlay`, and said any caption change invalidated both editorial and color approval. A strictly skill-only run would therefore risk creating a redundant project workflow and repeat the color gate even though the engine's exact color projection and reviewed still bytes were unchanged. The agent could infer the optimal workflow only by going beyond the written skill: isolated variant, new rough approval, exact-match rights/color reuse, then separate carousel render and QC.
+
+## Philippines styled-carousel derivative baseline
+
+A fresh-context, read-only agent evaluated the Bohol typography scenario before the skill prose was updated. It unexpectedly passed all eight behavior checks, but the style-specific commands and preset recommendation were inferred rather than stated by the skill. Its verbatim proposed command sequence was:
+
+```text
+npm run reel -- status <approved-clean-name>
+npm run reel -- doctor
+npm run reel -- style --list
+npm run reel -- variant <approved-clean-name> <captioned-variant-name> --title "Bohol — Captioned"
+npm run reel -- status <captioned-variant-name>
+npm run reel -- style <captioned-variant-name> --apply philippines-island-editorial
+npm run reel -- analyze <captioned-variant-name>
+npm run reel -- proxy <captioned-variant-name>
+npm run reel -- validate-edit <captioned-variant-name>
+npm run reel -- preview <captioned-variant-name>
+npm run reel -- qc <captioned-variant-name> --target preview
+npm run reel -- status <captioned-variant-name>
+```
+
+It then stopped for exact rough approval, preserved color only if `status` kept it current, treated every selected font as a rights asset, rejected invented/inferred/transliterated Baybayin, and finished with `grade`, `render-carousel`, `qc-carousel`, and `status`. There were no scenario misses. The update is therefore a determinism improvement: it makes behavior that previously depended on inference explicit in the reusable skill.

@@ -144,6 +144,20 @@
         "invalidate color for source interval crop stabilization grade LUT or output color dimension changes",
         "render-carousel and qc-carousel to a separate ready-to-share package"
       ]
+    },
+    {
+      "id": "philippines-styled-carousel-derivative",
+      "prompt": "Use create-social-reel to plan the next safe commands for an approved clean 1.91:1 Bohol carousel. The user wants a separate captioned derivative with subtle Philippine editorial typography from the reusable library. Preserve the approved grade and rights where exact, and state what must be reviewed again. Do not execute commands.",
+      "mustCover": [
+        "use variant rather than new",
+        "run style --list and apply a named preset rather than choosing a font filename",
+        "recommend philippines-island-editorial for quiet scenic Bohol footage",
+        "run analyze after preset application",
+        "treat typography as editorial-only and require a new rough approval",
+        "preserve exact color approval only when status confirms it remains current",
+        "treat selected fonts as rights assets",
+        "do not invent or transliterate Baybayin"
+      ]
     }
   ]
 }

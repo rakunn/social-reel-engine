@@ -30,12 +30,16 @@ npm run reel -- ingest <name> <lut-paths...> --kind technical-lut
 npm run reel -- ingest <name> <lut-paths...> --kind creative-lut
 npm run reel -- ingest <name> <font-paths...> --kind fonts
 npm run reel -- ingest <name> <brand-paths...> --kind brand
+npm run reel -- style --list
+npm run reel -- style <name> --apply <preset-id>
 npm run reel -- confirm-rights <name>
 ```
 
 Use `--list-library` to inspect catalog declarations and `--library <id...>` to install verified catalog LUTs. Ingest performs immutable basename-preserving copies and checksum verification. A same-name file with different bytes is a conflict, not an overwrite opportunity.
 
 Use `variant` when the requested asset is a separate version of an existing project. It creates a new project identity with copy-on-write inputs and reusable checksum-validated caches, retains exact edit/color decisions, and omits source previews and outputs. Use `new` for unrelated footage or a genuinely independent treatment.
+
+Use `style --list` instead of inventing a font filename or assuming a cached binary exists. Applying a named preset materializes checksum-pinned catalog fonts, ingests each distinct selected role asset, and writes `config/style.json`; run `analyze` immediately afterward. Preserve a derivative's existing named preset by default. For styled copy on quiet Philippine scenic footage with no competing direction, recommend `philippines-island-editorial`. Treat all selected display/body/metadata fonts as used rights assets. Noto Sans Tagalog does not authorize generated or inferred Baybayin: use only user-supplied or independently verified text.
 
 ## Configuration records
 
