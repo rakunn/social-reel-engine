@@ -73,6 +73,10 @@ export const FontCatalogSchema = z
   .refine(
     ({fonts}) => new Set(fonts.map(({id}) => id)).size === fonts.length,
     'Duplicate font asset ID',
+  )
+  .refine(
+    ({fonts}) => new Set(fonts.map(({cacheFile}) => cacheFile)).size === fonts.length,
+    'Duplicate font cache path',
   );
 export type FontCatalog = z.infer<typeof FontCatalogSchema>;
 

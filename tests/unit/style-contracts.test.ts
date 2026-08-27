@@ -52,4 +52,15 @@ describe('style contracts', () => {
     catalog.fonts[0].weight = {min: 900, max: 100};
     expect(() => FontCatalogSchema.parse(catalog)).toThrow(/weight|range/i);
   });
+
+  it('rejects font assets that share one cache path', async () => {
+    const catalog = structuredClone(
+      FontCatalogSchema.parse(
+        await readJson(path.join(repositoryRoot, 'library/font-catalog.json')),
+      ),
+    );
+    catalog.fonts[1].cacheFile = catalog.fonts[0].cacheFile;
+
+    expect(() => FontCatalogSchema.parse(catalog)).toThrow(/cache|path|duplicate/i);
+  });
 });
