@@ -247,6 +247,7 @@ export const createProjectVariant = async ({
   const targetPath = path.join(resolvedProjectsRoot, safeTargetName);
   await assertProjectScaffold(sourcePath);
   await assertNoSymbolicLinks(sourcePath, sourcePath);
+  await assertNoSymbolicLinks(sourcePath, path.join(sourcePath, 'analysis'));
   const targetReservation = await acquireProjectNameReservation(
     resolvedProjectsRoot,
     safeTargetName,

@@ -1,4 +1,14 @@
-import {access, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile} from 'node:fs/promises';
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -93,6 +103,33 @@ describe('reel project variants', () => {
     } finally {
       await reservation.release();
     }
+  });
+
+  it('rejects a symlinked analysis directory before acquiring its status lock', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-analysis-link-'));
+    const projectsRoot = path.join(temporaryRoot, 'projects');
+    const sourcePath = await createReelProject({
+      engineRoot: repositoryRoot,
+      projectsRoot,
+      reelName: 'analysis-link-source',
+    });
+    await writeVariantReadyEdit(sourcePath, 'analysis-link-source');
+    const externalAnalysisPath = path.join(temporaryRoot, 'external-analysis');
+    await rename(path.join(sourcePath, 'analysis'), externalAnalysisPath);
+    await symlink(externalAnalysisPath, path.join(sourcePath, 'analysis'), 'dir');
+
+    const module = await loadVariantModule();
+    if (!module?.createProjectVariant) throw new Error('Variant module is unavailable');
+    await expect(
+      module.createProjectVariant({
+        engineRoot: repositoryRoot,
+        projectsRoot,
+        sourceName: 'analysis-link-source',
+        targetName: 'analysis-link-variant',
+      }),
+    ).rejects.toThrow(/symbolic link/i);
+    await expect(access(path.join(projectsRoot, 'analysis-link-variant'))).rejects.toThrow();
+    await expect(access(path.join(externalAnalysisPath, 'status-scan.lock'))).rejects.toThrow();
   });
 
   it('keeps the target unpublished until its complete staged snapshot is ready', async () => {

@@ -54,6 +54,8 @@ describe('reel project workspace', () => {
         schemaVersion: '1.0.0',
         id: 'stale-owner',
         pid: 2_147_483_647,
+        processStartMarker: null,
+        leaseExpiresAt: '2026-08-27T00:00:00.000Z',
         acquiredAt: '2026-08-27T00:00:00.000Z',
       }),
     );
@@ -65,6 +67,32 @@ describe('reel project workspace', () => {
         reelName: 'stale-project',
       }),
     ).resolves.toBe(path.join(projectsRoot, 'stale-project'));
+    await expect(access(reservationPath)).rejects.toThrow();
+  });
+
+  it('reclaims a project-name reservation after its PID has been reused', async () => {
+    const projectsRoot = await makeProjectsRoot();
+    const reservationPath = path.join(projectsRoot, '.project-reused-pid-project.reservation');
+    await mkdir(reservationPath, {recursive: true});
+    await writeFile(
+      path.join(reservationPath, 'owner.json'),
+      JSON.stringify({
+        schemaVersion: '1.0.0',
+        id: 'stale-reused-pid-owner',
+        pid: process.pid,
+        processStartMarker: 'a different process start marker',
+        leaseExpiresAt: null,
+        acquiredAt: '2026-08-27T00:00:00.000Z',
+      }),
+    );
+
+    await expect(
+      createReelProject({
+        engineRoot: repositoryRoot,
+        projectsRoot,
+        reelName: 'reused-pid-project',
+      }),
+    ).resolves.toBe(path.join(projectsRoot, 'reused-pid-project'));
     await expect(access(reservationPath)).rejects.toThrow();
   });
 
