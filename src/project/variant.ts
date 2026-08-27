@@ -23,6 +23,7 @@ import {assertSafeReelName, resolveInside} from '../core/paths';
 import {readApprovalStatus} from '../edit/approve';
 import {readRightsConfirmationStatus} from '../edit/rights';
 import type {GradedClipReport} from '../media/grade';
+import {readValidatedSourceManifest} from '../media/source-integrity';
 import type {ArtifactIndex} from './artifacts';
 import {runWithStatusScanLock} from './operation';
 import {
@@ -311,6 +312,7 @@ export const createProjectVariant = async ({
       }
       const snapshot = await runWithStatusScanLock(sourcePath, async () => {
     await assertReadTreesContainNoSymbolicLinks(sourcePath);
+    await readValidatedSourceManifest(sourcePath);
     const stagingRoot = await mkdtemp(
       variantStagingPrefix(resolvedProjectsRoot, safeTargetName),
     );

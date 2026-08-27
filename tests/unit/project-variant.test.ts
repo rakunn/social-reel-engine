@@ -21,8 +21,14 @@ import {
 import {writeJson} from '../../src/core/json';
 import {hashFile} from '../../src/core/hash';
 import {beginMediaOperation, completeMediaOperation} from '../../src/project/operation';
+import {scanInputs} from '../../src/project/ingest';
 import {SourceManifestSchema, EditManifestSchema} from '../../src/contracts/schemas';
-import {sourceIdFor} from '../../src/media/analyze';
+import {
+  cameraFromConfirmation,
+  mediaTypeForKind,
+  sourceIdFor,
+  type SourcesConfig,
+} from '../../src/media/analyze';
 import {confirmRights} from '../../src/edit/rights';
 import {approveColor, approveEdit, readApprovalStatus} from '../../src/edit/approve';
 import {
@@ -77,7 +83,61 @@ const writeVariantReadyEdit = async (projectPath: string, reelName: string): Pro
   });
 };
 
+const writeVerifiedSourceManifest = async (projectPath: string): Promise<void> => {
+  const ingest = await scanInputs(projectPath, new Date('2026-08-26T00:00:00.000Z'));
+  const config = JSON.parse(
+    await readFile(path.join(projectPath, 'config/sources.json'), 'utf8'),
+  ) as SourcesConfig;
+  await writeJson(path.join(projectPath, 'analysis/ingest.json'), ingest);
+  await writeJson(
+    path.join(projectPath, 'analysis/sources.json'),
+    SourceManifestSchema.parse({
+      schemaVersion: '1.0.0',
+      generatedAt: '2026-08-26T00:00:00.000Z',
+      sources: ingest.files.map((file) => {
+        const mediaType = mediaTypeForKind(file.kind);
+        return {
+          id: sourceIdFor(mediaType, file.relativePath, file.checksumSha256),
+          relativePath: file.relativePath,
+          checksumSha256: file.checksumSha256,
+          sizeBytes: file.sizeBytes,
+          mediaType,
+          ffprobe: {format: {}, streams: []},
+          camera: cameraFromConfirmation(config.sources[file.relativePath]),
+        };
+      }),
+    }),
+  );
+};
+
 describe('reel project variants', () => {
+  it('rejects a source whose inputs changed after analysis', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-stale-source-'));
+    const projectsRoot = path.join(temporaryRoot, 'projects');
+    const sourcePath = await createReelProject({
+      engineRoot: repositoryRoot,
+      projectsRoot,
+      reelName: 'stale-source',
+    });
+    await writeVariantReadyEdit(sourcePath, 'stale-source');
+    const clipPath = path.join(sourcePath, 'input/clips/clip.mp4');
+    await writeFile(clipPath, 'analyzed-source-bytes');
+    await writeVerifiedSourceManifest(sourcePath);
+    await writeFile(clipPath, 'changed-after-analysis');
+
+    const module = await loadVariantModule();
+    if (!module?.createProjectVariant) throw new Error('Variant module is unavailable');
+    await expect(
+      module.createProjectVariant({
+        engineRoot: repositoryRoot,
+        projectsRoot,
+        sourceName: 'stale-source',
+        targetName: 'stale-source-variant',
+      }),
+    ).rejects.toThrow(/stale|checksum|analyze/i);
+    await expect(access(path.join(projectsRoot, 'stale-source-variant'))).rejects.toThrow();
+  });
+
   it('rejects a source project whose creator still holds its name reservation', async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-source-reservation-'));
     const projectsRoot = path.join(temporaryRoot, 'projects');
@@ -204,6 +264,7 @@ describe('reel project variants', () => {
     });
     await writeVariantReadyEdit(sourcePath, 'atomic-source');
     await writeFile(path.join(sourcePath, 'input/clips/clip.mp4'), Buffer.alloc(1024 * 1024));
+    await writeVerifiedSourceManifest(sourcePath);
 
     const module = await loadVariantModule();
     if (!module?.createProjectVariant) throw new Error('Variant module is unavailable');
@@ -258,6 +319,7 @@ describe('reel project variants', () => {
       reelName: 'long-target-source',
     });
     await writeVariantReadyEdit(sourcePath, 'long-target-source');
+    await writeVerifiedSourceManifest(sourcePath);
     const targetName = 'v'.repeat(240);
 
     const module = await loadVariantModule();
@@ -286,6 +348,7 @@ describe('reel project variants', () => {
       title: 'T'.repeat(160),
     });
     await writeVariantReadyEdit(sourcePath, 'long-title-source');
+    await writeVerifiedSourceManifest(sourcePath);
 
     const module = await loadVariantModule();
     if (!module?.createProjectVariant) throw new Error('Variant module is unavailable');
@@ -312,6 +375,7 @@ describe('reel project variants', () => {
       reelName: 'symlink-source',
     });
     await writeVariantReadyEdit(sourcePath, 'symlink-source');
+    await writeVerifiedSourceManifest(sourcePath);
     const externalCache = path.join(temporaryRoot, 'external-cache');
     const externalFile = path.join(externalCache, 'escaped.mp4');
     await mkdir(externalCache, {recursive: true});
@@ -490,6 +554,7 @@ describe('reel project variants', () => {
       items: [],
     });
     await writeFile(path.join(sourcePath, 'input/music/track.wav'), 'music-bytes');
+    await writeVerifiedSourceManifest(sourcePath);
     await writeJson(path.join(sourcePath, 'analysis/beats.json'), {
       schemaVersion: '1.0.0',
       generatedAt: '2026-08-26T00:10:00.000Z',
