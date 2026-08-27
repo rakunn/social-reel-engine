@@ -16,8 +16,10 @@ import {
   isProcessIdentityAlive,
   isMediaOperationLockActive,
   isMediaOperationAlive,
+  reclaimLockWithClaim,
   readProcessStartMarker,
   readMediaOperation,
+  runWithLockClaim,
   runWithStatusScanLock,
   type MediaOperationRecord,
 } from './operation';
@@ -52,6 +54,7 @@ type ProjectNameReservationOwner = {
 };
 
 export type ProjectNameReservation = {
+  assertOwnership(): Promise<void>;
   release(): Promise<void>;
 };
 
@@ -59,6 +62,17 @@ const projectNameReservationPath = (projectsRoot: string, safeName: string): str
   path.join(projectsRoot, `.project-${safeName}.reservation`);
 
 const MARKERLESS_PROJECT_RESERVATION_LEASE_MS = 5 * 60_000;
+const MARKERLESS_PROJECT_RESERVATION_HEARTBEAT_MS = Math.floor(
+  MARKERLESS_PROJECT_RESERVATION_LEASE_MS / 3,
+);
+
+const projectNameReservationClaimPath = (
+  reservationPath: string,
+  ownerId: string,
+): string => `${reservationPath}.reclaiming-${ownerId}.json`;
+
+const projectNameReservationOwnershipLost = (): Error =>
+  new Error('Project name reservation ownership was lost');
 
 const readReservationOwner = async (
   reservationPath: string,
@@ -87,15 +101,17 @@ const reclaimStaleProjectNameReservation = async (
 ): Promise<boolean> => {
   const owner = await readReservationOwner(reservationPath);
   if (!owner || isProcessIdentityAlive(owner)) return false;
-  const retiredPath = `${reservationPath}.reclaimed-${randomUUID()}`;
-  try {
-    await rename(reservationPath, retiredPath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true;
-    return false;
-  }
-  await rm(retiredPath, {recursive: true, force: true});
-  return true;
+  const identity = owner.id;
+  return await reclaimLockWithClaim({
+    claimPath: projectNameReservationClaimPath(reservationPath, identity),
+    lockPath: reservationPath,
+    canReclaim: async () => {
+      const current = await readReservationOwner(reservationPath);
+      return current?.id === identity && !isProcessIdentityAlive(current);
+    },
+    tombstonePath: (claimId) =>
+      `${reservationPath}.reclaimed-${identity}-${claimId}`,
+  });
 };
 
 export const acquireProjectNameReservation = async (
@@ -128,16 +144,69 @@ export const acquireProjectNameReservation = async (
     try {
       await rename(candidatePath, reservationPath);
       let released = false;
+      let ownershipFailure: Error | null = null;
+      const claimPath = projectNameReservationClaimPath(reservationPath, id);
+      const assertOwnership = async (): Promise<ProjectNameReservationOwner> => {
+        if (ownershipFailure) throw ownershipFailure;
+        const current = await readReservationOwner(reservationPath);
+        if (!current || current.id !== id || !isProcessIdentityAlive(current)) {
+          ownershipFailure = projectNameReservationOwnershipLost();
+          throw ownershipFailure;
+        }
+        return current;
+      };
+      const renewLease = async (): Promise<void> => {
+        const claimed = await runWithLockClaim(claimPath, async () => {
+          const current = await assertOwnership();
+          if (current.processStartMarker) return;
+          const leaseExpiresAt = new Date(
+            Date.now() + MARKERLESS_PROJECT_RESERVATION_LEASE_MS,
+          ).toISOString();
+          await writeJson(path.join(reservationPath, 'owner.json'), {
+            ...current,
+            leaseExpiresAt,
+          } satisfies ProjectNameReservationOwner);
+          await assertOwnership();
+        });
+        if (!claimed.acquired) {
+          ownershipFailure = projectNameReservationOwnershipLost();
+          throw ownershipFailure;
+        }
+      };
+      let renewalQueue: Promise<void> = Promise.resolve();
+      const enqueueRenewal = (): void => {
+        const renewal = renewalQueue.then(async () => await renewLease());
+        renewalQueue = renewal.then(
+          () => undefined,
+          (error) => {
+            ownershipFailure =
+              error instanceof Error ? error : projectNameReservationOwnershipLost();
+          },
+        );
+      };
+      const heartbeat =
+        processStartMarker === null
+          ? setInterval(() => {
+              enqueueRenewal();
+            }, MARKERLESS_PROJECT_RESERVATION_HEARTBEAT_MS)
+          : null;
+      heartbeat?.unref();
       return {
+        assertOwnership: async () => {
+          await renewalQueue;
+          await assertOwnership();
+        },
         release: async () => {
           if (released) return;
-          const current = await readReservationOwner(reservationPath);
-          if (!current || current.id !== id) {
-            throw new Error(`Project name reservation ownership was lost for "${safeName}"`);
-          }
-          const retiredPath = `${reservationPath}.released-${id}`;
-          await rename(reservationPath, retiredPath);
-          await rm(retiredPath, {recursive: true, force: true});
+          if (heartbeat) clearInterval(heartbeat);
+          await renewalQueue;
+          const claimed = await runWithLockClaim(claimPath, async () => {
+            await assertOwnership();
+            const retiredPath = `${reservationPath}.released-${id}`;
+            await rename(reservationPath, retiredPath);
+            await rm(retiredPath, {recursive: true, force: true});
+          });
+          if (!claimed.acquired) throw projectNameReservationOwnershipLost();
           released = true;
         },
       };
@@ -245,6 +314,7 @@ export const createReelProject = async ({
       master: {...masterSettings, ...profile.output},
     });
     await writeJson(settingsPath, nextSettings);
+    await reservation.assertOwnership();
     return projectPath;
   } finally {
     await reservation.release();
