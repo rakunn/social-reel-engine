@@ -1,5 +1,5 @@
 import {constants as fsConstants} from 'node:fs';
-import {copyFile, mkdir, readdir, stat} from 'node:fs/promises';
+import {copyFile, mkdir, readdir, stat, unlink} from 'node:fs/promises';
 import path from 'node:path';
 import {z} from 'zod';
 import {canonicalJson, hashFile} from '../core/hash';
@@ -18,6 +18,10 @@ export const INPUT_KINDS = [
 ] as const;
 
 export type InputKind = (typeof INPUT_KINDS)[number];
+
+export type IngestOptions = {
+  expectedChecksums?: ReadonlyMap<string, string>;
+};
 
 const kindDirectory: Record<InputKind, string> = {
   clips: 'input/clips',
@@ -124,6 +128,7 @@ export const ingestFilesWithinStatusScanLock = async (
   projectPath: string,
   sourcePaths: readonly string[],
   kind: InputKind,
+  options: IngestOptions = {},
 ): Promise<{added: string[]; unchanged: string[]}> => {
   if (!INPUT_KINDS.includes(kind)) {
     throw new Error(`Unsupported input kind "${kind}"`);
@@ -134,6 +139,13 @@ export const ingestFilesWithinStatusScanLock = async (
   const unchanged: string[] = [];
 
   for (const sourcePath of sourcePaths) {
+    const expectedChecksum = options.expectedChecksums?.get(path.resolve(sourcePath));
+    if (expectedChecksum && (await hashFile(sourcePath)) !== expectedChecksum) {
+      throw new Error(`Input checksum does not match the verified catalog bytes: ${sourcePath}`);
+    }
+  }
+
+  for (const sourcePath of sourcePaths) {
     const sourceStat = await stat(sourcePath);
     if (!sourceStat.isFile()) {
       throw new Error(`Input is not a regular file: ${sourcePath}`);
@@ -141,10 +153,15 @@ export const ingestFilesWithinStatusScanLock = async (
     const targetPath = path.join(targetDirectory, path.basename(sourcePath));
     const relativePath = path.relative(projectPath, targetPath).split(path.sep).join('/');
     const sourceHash = await hashFile(sourcePath);
+    const expectedChecksum = options.expectedChecksums?.get(path.resolve(sourcePath));
+    if (expectedChecksum && sourceHash !== expectedChecksum) {
+      throw new Error(`Input checksum does not match the verified catalog bytes: ${sourcePath}`);
+    }
     try {
       await copyFile(sourcePath, targetPath, fsConstants.COPYFILE_EXCL);
       const copiedHash = await hashFile(targetPath);
-      if (copiedHash !== sourceHash) {
+      if (copiedHash !== sourceHash || (expectedChecksum && copiedHash !== expectedChecksum)) {
+        await unlink(targetPath);
         throw new Error(`Checksum verification failed after copying ${sourcePath}`);
       }
       added.push(relativePath);
@@ -169,10 +186,11 @@ export const ingestFiles = async (
   projectPath: string,
   sourcePaths: readonly string[],
   kind: InputKind,
+  options: IngestOptions = {},
 ): Promise<{added: string[]; unchanged: string[]}> => {
   const result = await runWithStatusScanLock(
     projectPath,
-    async () => await ingestFilesWithinStatusScanLock(projectPath, sourcePaths, kind),
+    async () => await ingestFilesWithinStatusScanLock(projectPath, sourcePaths, kind, options),
   );
   if (!result.acquired) {
     throw new Error('Cannot ingest while a project snapshot, status scan, or media work is active');

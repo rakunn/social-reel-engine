@@ -259,6 +259,11 @@ export const applyStylePreset = async (
     projectPath,
     materialized.map(({filePath}) => filePath),
     'fonts',
+    {
+      expectedChecksums: new Map(
+        materialized.map(({asset, filePath}) => [path.resolve(filePath), asset.checksumSha256]),
+      ),
+    },
   );
 
   const firstFamilyByAsset = new Map<string, 'ReelDisplay' | 'ReelBody' | 'ReelMetadata'>();

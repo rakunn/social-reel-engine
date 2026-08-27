@@ -35,6 +35,31 @@ const fixtureAsset: FontAsset = {
   license: {id: 'OFL-1.1', copyright: 'Fixture copyright', url: 'https://openfontlicense.org'},
 };
 
+const sha256 = (value: string | Uint8Array): string =>
+  createHash('sha256').update(value).digest('hex');
+
+const createFixtureCatalogRoot = async (
+  temporaryRoot: string,
+  fontBytes: Readonly<Record<string, string>>,
+): Promise<string> => {
+  const root = path.join(temporaryRoot, 'catalog-root');
+  const fonts = structuredClone(await readFontCatalog(repositoryRoot));
+  for (const [assetId, bytes] of Object.entries(fontBytes)) {
+    const asset = fonts.fonts.find(({id}) => id === assetId);
+    if (!asset) throw new Error(`Unknown fixture font ${assetId}`);
+    asset.checksumSha256 = sha256(bytes);
+  }
+  await mkdir(path.join(root, 'library'), {recursive: true});
+  await Promise.all([
+    writeFile(path.join(root, 'library/font-catalog.json'), `${JSON.stringify(fonts, null, 2)}\n`),
+    writeFile(
+      path.join(root, 'library/style-catalog.json'),
+      await readFile(path.join(repositoryRoot, 'library/style-catalog.json')),
+    ),
+  ]);
+  return root;
+};
+
 describe('style library', () => {
   it.each([
     {
@@ -144,13 +169,19 @@ describe('style library', () => {
     const fontFixtureRoot = path.join(temporaryRoot, 'font-fixtures');
     await mkdir(fontFixtureRoot, {recursive: true});
     const fontFixturePath = (id: string) => path.join(fontFixtureRoot, `${id}.ttf`);
-    await Promise.all([
-      writeFile(fontFixturePath('fraunces-variable'), 'fraunces-fixture'),
-      writeFile(fontFixturePath('manrope-variable'), 'manrope-fixture'),
-    ]);
+    const fixtureBytes = {
+      'fraunces-variable': 'fraunces-fixture',
+      'manrope-variable': 'manrope-fixture',
+    };
+    await Promise.all(
+      Object.entries(fixtureBytes).map(
+        async ([id, bytes]) => await writeFile(fontFixturePath(id), bytes),
+      ),
+    );
+    const catalogRoot = await createFixtureCatalogRoot(temporaryRoot, fixtureBytes);
     const result = await applyStylePreset(
       projectPath,
-      repositoryRoot,
+      catalogRoot,
       'philippines-island-editorial',
       {materialize: async (_root, asset) => fontFixturePath(asset.id)},
     );
@@ -175,17 +206,60 @@ describe('style library', () => {
     const fontFixtureRoot = path.join(temporaryRoot, 'font-fixtures');
     await mkdir(fontFixtureRoot, {recursive: true});
     const fontFixturePath = (id: string) => path.join(fontFixtureRoot, `${id}.ttf`);
-    await writeFile(fontFixturePath('fraunces-variable'), 'fraunces-fixture');
-    await writeFile(fontFixturePath('manrope-variable'), 'manrope-fixture');
+    const fixtureBytes = {
+      'fraunces-variable': 'fraunces-fixture',
+      'manrope-variable': 'manrope-fixture',
+    };
+    await writeFile(fontFixturePath('fraunces-variable'), fixtureBytes['fraunces-variable']);
+    await writeFile(fontFixturePath('manrope-variable'), fixtureBytes['manrope-variable']);
+    const catalogRoot = await createFixtureCatalogRoot(temporaryRoot, fixtureBytes);
     await writeFile(path.join(projectPath, 'input/fonts/manrope-variable.ttf'), 'conflict');
     const stylePath = path.join(projectPath, 'config/style.json');
     const before = await readFile(stylePath, 'utf8');
     await expect(
-      applyStylePreset(projectPath, repositoryRoot, 'philippines-island-editorial', {
+      applyStylePreset(projectPath, catalogRoot, 'philippines-island-editorial', {
         materialize: async (_root, asset) => fontFixturePath(asset.id),
       }),
     ).rejects.toThrow(/overwrite|different bytes|conflict/i);
     expect(await readFile(stylePath, 'utf8')).toBe(before);
     await expect(access(path.join(projectPath, 'input/fonts/fraunces-variable.ttf'))).rejects.toThrow();
+  });
+
+  it('rejects a catalog font replaced while another font is materializing', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'style-race-'));
+    const projectPath = await createReelProject({
+      engineRoot: repositoryRoot,
+      projectsRoot: path.join(temporaryRoot, 'projects'),
+      reelName: 'font-race-project',
+    });
+    const fontFixtureRoot = path.join(temporaryRoot, 'font-fixtures');
+    await mkdir(fontFixtureRoot, {recursive: true});
+    const fontFixturePath = (id: string) => path.join(fontFixtureRoot, `${id}.ttf`);
+    const fixtureBytes = {
+      'fraunces-variable': 'verified-fraunces',
+      'manrope-variable': 'verified-manrope',
+    };
+    await Promise.all(
+      Object.entries(fixtureBytes).map(
+        async ([id, bytes]) => await writeFile(fontFixturePath(id), bytes),
+      ),
+    );
+    const catalogRoot = await createFixtureCatalogRoot(temporaryRoot, fixtureBytes);
+    const stylePath = path.join(projectPath, 'config/style.json');
+    const before = await readFile(stylePath, 'utf8');
+
+    await expect(
+      applyStylePreset(projectPath, catalogRoot, 'philippines-island-editorial', {
+        materialize: async (_root, asset) => {
+          if (asset.id === 'manrope-variable') {
+            await writeFile(fontFixturePath('fraunces-variable'), 'replacement-bytes');
+          }
+          return fontFixturePath(asset.id);
+        },
+      }),
+    ).rejects.toThrow(/checksum|catalog|verified/i);
+
+    expect(await readFile(stylePath, 'utf8')).toBe(before);
+    expect((await scanInputs(projectPath)).files.filter((file) => file.kind === 'fonts')).toHaveLength(0);
   });
 });
