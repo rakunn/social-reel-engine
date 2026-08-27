@@ -144,6 +144,26 @@ describe('render scratch lifecycle', () => {
     expect((await stat(staged)).ino).toBe((await stat(source)).ino);
   });
 
+  it('copies staged media when an independent file lifecycle is required', async () => {
+    const engineRoot = await makeDirectory();
+    const source = path.join(engineRoot, 'project/input/music/track.wav');
+    const stageRoot = renderStageRoot(engineRoot, 'camp-reel', 'cccccccccccccccc');
+    await mkdir(path.dirname(source), {recursive: true});
+    await writeFile(source, 'immutable-music');
+
+    const relative = await stageImmutableFile(
+      source,
+      stageRoot,
+      'music/track.wav',
+      undefined,
+      {copy: true},
+    );
+    const staged = path.join(stageRoot, relative);
+
+    expect(await readFile(staged, 'utf8')).toBe('immutable-music');
+    expect((await stat(staged)).ino).not.toBe((await stat(source)).ino);
+  });
+
   it('disposes the current stage after success and failure', async () => {
     const engineRoot = await makeDirectory();
     const successful = renderStageRoot(engineRoot, 'camp-reel', '5555555555555555');

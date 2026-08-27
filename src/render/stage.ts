@@ -170,6 +170,7 @@ export const prepareRenderProps = async (
         stageRoot,
         `music/${path.basename(input)}`,
         musicSource.checksumSha256,
+        {copy: true},
       );
       music = staged;
     }
