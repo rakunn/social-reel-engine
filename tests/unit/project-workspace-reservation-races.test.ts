@@ -103,7 +103,10 @@ describe('project-name reservation races', () => {
     const projectsRoot = path.join(temporaryRoot, 'projects');
     const reservation = await acquireProjectNameReservation(projectsRoot, 'long-copy-project');
 
-    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    for (let minute = 0; minute < 6; minute += 1) {
+      await vi.advanceTimersByTimeAsync(60_000);
+      await reservation.assertOwnership();
+    }
     const contender = settleReservation(
       acquireProjectNameReservation(projectsRoot, 'long-copy-project'),
     );

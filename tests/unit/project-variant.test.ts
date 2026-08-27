@@ -132,6 +132,38 @@ describe('reel project variants', () => {
     await expect(access(path.join(externalAnalysisPath, 'status-scan.lock'))).rejects.toThrow();
   });
 
+  it.each(['brief.json', 'edits/edit.json'])(
+    'rejects a symlinked directly-read metadata file: %s',
+    async (relativePath) => {
+      const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-metadata-link-'));
+      const projectsRoot = path.join(temporaryRoot, 'projects');
+      const sourcePath = await createReelProject({
+        engineRoot: repositoryRoot,
+        projectsRoot,
+        reelName: 'metadata-link-source',
+      });
+      await writeVariantReadyEdit(sourcePath, 'metadata-link-source');
+      const sourceMetadataPath = path.join(sourcePath, relativePath);
+      const externalMetadataPath = path.join(
+        temporaryRoot,
+        `external-${relativePath.replaceAll('/', '-')}`,
+      );
+      await rename(sourceMetadataPath, externalMetadataPath);
+      await symlink(externalMetadataPath, sourceMetadataPath, 'file');
+
+      const module = await loadVariantModule();
+      if (!module?.createProjectVariant) throw new Error('Variant module is unavailable');
+      await expect(
+        module.createProjectVariant({
+          engineRoot: repositoryRoot,
+          projectsRoot,
+          sourceName: 'metadata-link-source',
+          targetName: `metadata-link-${path.basename(relativePath, '.json')}`,
+        }),
+      ).rejects.toThrow(/symbolic link/i);
+    },
+  );
+
   it('keeps the target unpublished until its complete staged snapshot is ready', async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-publication-'));
     const projectsRoot = path.join(temporaryRoot, 'projects');
