@@ -45,6 +45,15 @@ export const cardTextContainerStyle = () => ({
   wordBreak: 'break-word' as const,
 });
 
+export const captionContainerStyle = (
+  profile: OutputStyleTokens,
+  outputHeight: number,
+) => ({
+  paddingLeft: `${profile.horizontalPadding * 100}%`,
+  paddingRight: `${profile.horizontalPadding * 100}%`,
+  paddingBottom: outputHeight * profile.bottomPadding,
+});
+
 export const colorWithOpacity = (hexColor: string, opacity: number): string => {
   const match = /^#([a-f0-9]{2})([a-f0-9]{2})([a-f0-9]{2})$/i.exec(hexColor);
   if (!match) throw new Error(`Expected a six-digit hexadecimal color: ${hexColor}`);

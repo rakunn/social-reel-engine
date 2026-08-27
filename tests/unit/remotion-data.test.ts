@@ -198,6 +198,22 @@ describe('data-driven Remotion model', () => {
     expect(remotionModel.colorWithOpacity('#2A4C6E', 0.28)).toBe('rgba(42,76,110,0.28)');
   });
 
+  it('computes caption bottom padding from frame height', () => {
+    const captionContainerStyle = (
+      remotionModel as typeof remotionModel & {
+        captionContainerStyle?: (
+          profile: typeof CINEMATIC_MINIMAL_STYLE.profiles.reel,
+          outputHeight: number,
+        ) => {paddingBottom: number};
+      }
+    ).captionContainerStyle;
+
+    expect(captionContainerStyle).toBeTypeOf('function');
+    expect(
+      captionContainerStyle?.(CINEMATIC_MINIMAL_STYLE.profiles.reel, 1920).paddingBottom,
+    ).toBeCloseTo(1920 * CINEMATIC_MINIMAL_STYLE.profiles.reel.bottomPadding);
+  });
+
   it('loads each distinct role font once', () => {
     const mockedLoadFont = vi.mocked(loadFont);
     mockedLoadFont.mockClear();

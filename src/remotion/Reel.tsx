@@ -20,6 +20,7 @@ import {
   buildShotTimings,
   cardTextContainerStyle,
   cardTextStyles,
+  captionContainerStyle,
   captionFrameRange,
   colorWithOpacity,
   cropTransform,
@@ -246,35 +247,36 @@ const CaptionCard: React.FC<{
   caption: Caption;
   visualStyle: StyleConfig;
   profile: OutputStyleTokens;
-}> = ({caption, visualStyle, profile}) => (
-  <AbsoluteFill
-    style={{
-      justifyContent: 'flex-end',
-      alignItems: 'center',
-      paddingLeft: `${profile.horizontalPadding * 100}%`,
-      paddingRight: `${profile.horizontalPadding * 100}%`,
-      paddingBottom: `${profile.bottomPadding * 100}%`,
-      pointerEvents: 'none',
-    }}
-  >
-    <div
+}> = ({caption, visualStyle, profile}) => {
+  const output = useVideoConfig();
+  return (
+    <AbsoluteFill
       style={{
-        color: visualStyle.palette.primary,
-        backgroundColor: 'rgba(0,0,0,0.72)',
-        borderRadius: 12,
-        fontFamily: [visualStyle.typography.body.family, ...visualStyle.typography.body.fallback].join(', '),
-        fontSize: profile.captionSize,
-        fontWeight: visualStyle.typography.body.weight,
-        lineHeight: profile.bodyLineHeight,
-        padding: '14px 22px 18px',
-        textAlign: 'center',
-        whiteSpace: 'pre-wrap',
+        justifyContent: 'flex-end',
+        alignItems: 'center',
+        ...captionContainerStyle(profile, output.height),
+        pointerEvents: 'none',
       }}
     >
-      {caption.text.trim()}
-    </div>
-  </AbsoluteFill>
-);
+      <div
+        style={{
+          color: visualStyle.palette.primary,
+          backgroundColor: 'rgba(0,0,0,0.72)',
+          borderRadius: 12,
+          fontFamily: [visualStyle.typography.body.family, ...visualStyle.typography.body.fallback].join(', '),
+          fontSize: profile.captionSize,
+          fontWeight: visualStyle.typography.body.weight,
+          lineHeight: profile.bodyLineHeight,
+          padding: '14px 22px 18px',
+          textAlign: 'center',
+          whiteSpace: 'pre-wrap',
+        }}
+      >
+        {caption.text.trim()}
+      </div>
+    </AbsoluteFill>
+  );
+};
 
 const Captions: React.FC<{captions: Caption[]; visualStyle: StyleConfig}> = ({captions, visualStyle}) => {
   const output = useVideoConfig();
