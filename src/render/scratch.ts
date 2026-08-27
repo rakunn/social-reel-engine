@@ -240,6 +240,7 @@ export const stageImmutableFile = async (
   stageRoot: string,
   relativeTarget: string,
   sourceChecksumSha256?: string,
+  options: {copy?: boolean} = {},
 ): Promise<string> => {
   const target = resolveInside(stageRoot, relativeTarget);
   await mkdir(path.dirname(target), {recursive: true});
@@ -248,7 +249,11 @@ export const stageImmutableFile = async (
     await writeAtomically(
       target,
       async (temporaryOutput) => {
-        await linkOrCopy(source, temporaryOutput);
+        if (options.copy) {
+          await copyFile(source, temporaryOutput);
+        } else {
+          await linkOrCopy(source, temporaryOutput);
+        }
       },
       async (temporaryOutput) => {
         if ((await hashFile(temporaryOutput)) !== checksumSha256) {
