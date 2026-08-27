@@ -23,7 +23,6 @@ import {
   captionFrameRange,
   colorWithOpacity,
   cropTransform,
-  fontFaceRule,
   fontFaceRules,
   secondsToMediaFrames,
   styleProfileForOutput,
@@ -37,19 +36,6 @@ import {CINEMATIC_MINIMAL_STYLE} from '../style/contracts';
 const dbToGain = (db: number): number => 10 ** (db / 20);
 
 const customFontLoads = new Map<string, Promise<void>>();
-
-export const ensureCustomFontLoaded = (fontUrl: string): Promise<void> => {
-  const assetUrl = staticFile(fontUrl).replaceAll("'", '%27');
-  const existing = customFontLoads.get(assetUrl);
-  if (existing) return existing;
-  const loading = loadFont({
-    family: 'ReelCustom',
-    url: assetUrl,
-    display: 'block',
-  });
-  customFontLoads.set(assetUrl, loading);
-  return loading;
-};
 
 export const ensureCustomFontsLoaded = (fonts: StagedFontRoles): Promise<void[]> => {
   const distinct = new Map<string, NonNullable<StagedFontRoles[keyof StagedFontRoles]>>();
@@ -69,6 +55,27 @@ export const ensureCustomFontsLoaded = (fonts: StagedFontRoles): Promise<void[]>
     }),
   );
 };
+
+const legacyFontRoles = (fontUrl: string, visualStyle: StyleConfig): StagedFontRoles => ({
+  display: {
+    url: fontUrl,
+    family: visualStyle.typography.display.family,
+    weight: visualStyle.typography.display.weight,
+    style: visualStyle.typography.display.style,
+  },
+  body: {
+    url: fontUrl,
+    family: visualStyle.typography.body.family,
+    weight: visualStyle.typography.body.weight,
+    style: visualStyle.typography.body.style,
+  },
+  metadata: {
+    url: fontUrl,
+    family: visualStyle.typography.metadata.family,
+    weight: visualStyle.typography.metadata.weight,
+    style: visualStyle.typography.metadata.style,
+  },
+});
 
 const transitionPresentation = (
   type: EditManifest['clips'][number]['transitionAfter']['type'],
@@ -289,11 +296,12 @@ const Captions: React.FC<{captions: Caption[]; visualStyle: StyleConfig}> = ({ca
 
 export const SocialReel: React.FC<ReelRenderProps> = (props) => {
   const visualStyle = props.visualStyle ?? CINEMATIC_MINIMAL_STYLE;
-  const fonts = props.fonts ?? {display: null, body: null, metadata: null};
+  const suppliedFonts = props.fonts ?? {display: null, body: null, metadata: null};
+  const fonts =
+    props.fontUrl && Object.values(suppliedFonts).every((font) => font === null)
+      ? legacyFontRoles(props.fontUrl, visualStyle)
+      : suppliedFonts;
   void ensureCustomFontsLoaded(fonts);
-  if (props.fontUrl && Object.values(fonts).every((font) => font === null)) {
-    void ensureCustomFontLoaded(props.fontUrl);
-  }
   const staticFonts = Object.fromEntries(
     Object.entries(fonts).map(([role, font]) => [
       role,
@@ -304,9 +312,7 @@ export const SocialReel: React.FC<ReelRenderProps> = (props) => {
   const timings = buildShotTimings(props.edit);
   return (
     <AbsoluteFill style={{backgroundColor: '#050505'}}>
-      {roleRules || props.fontUrl ? (
-        <style>{roleRules || fontFaceRule(staticFile(props.fontUrl!))}</style>
-      ) : null}
+      {roleRules ? <style>{roleRules}</style> : null}
       <TransitionSeries>
         {props.edit.clips.map((clip, index) => {
           const timing = timings[index];

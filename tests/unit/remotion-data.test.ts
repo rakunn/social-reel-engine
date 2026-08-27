@@ -139,7 +139,7 @@ describe('data-driven Remotion model', () => {
     );
   });
 
-  it('blocks Remotion rendering until a staged custom font has loaded', () => {
+  it('maps a legacy staged font URL onto every active typography role', () => {
     const mockedLoadFont = vi.mocked(loadFont);
     mockedLoadFont.mockClear();
 
@@ -148,12 +148,14 @@ describe('data-driven Remotion model', () => {
       fontUrl: "jobs/remotion-test/fonts/Director's Cut.ttf",
     });
 
-    expect(mockedLoadFont).toHaveBeenCalledTimes(1);
-    expect(mockedLoadFont).toHaveBeenCalledWith({
-      family: 'ReelCustom',
-      url: "/jobs/remotion-test/fonts/Director%27s%20Cut.ttf",
-      display: 'block',
-    });
+    expect(mockedLoadFont).toHaveBeenCalledTimes(3);
+    for (const family of ['ReelDisplay', 'ReelBody', 'ReelMetadata']) {
+      expect(mockedLoadFont).toHaveBeenCalledWith({
+        family,
+        url: "/jobs/remotion-test/fonts/Director%27s%20Cut.ttf",
+        display: 'block',
+      });
+    }
   });
 
   it('fades a title to zero on its final rendered frame', () => {
