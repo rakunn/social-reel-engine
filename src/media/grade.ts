@@ -195,7 +195,7 @@ export const generateGradedStills = async (
     generatedAt: now.toISOString(),
     editManifestHash: createEditHash(edit),
     editReviewHash,
-    colorManifestHash: createColorHash(edit, luts),
+    colorManifestHash: createColorHash(edit, luts, manifest.sources),
     stills,
     checksums,
   };
@@ -454,7 +454,7 @@ export const gradeSelectedClips = async (
     schemaVersion: '1.0.0',
     generatedAt: now.toISOString(),
     editHash: createEditHash(edit),
-    colorHash: createColorHash(edit, luts),
+    colorHash: createColorHash(edit, luts, manifest.sources),
     items,
   };
   await assertVerifiedInputSnapshotUnchanged(projectPath, integrity);

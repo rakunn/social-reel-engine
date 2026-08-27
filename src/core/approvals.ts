@@ -2,6 +2,7 @@ import type {
   ApprovalState,
   EditManifest,
   LutDefinition,
+  SourceEntry,
 } from '../contracts/schemas';
 import {hashValue} from './hash';
 
@@ -42,6 +43,7 @@ export const selectedColorLuts = (
 export const createColorHash = (
   edit: EditManifest,
   luts: readonly (LutDefinition | unknown)[],
+  sources: readonly SourceEntry[],
 ): string => {
   const selectedIds = selectedColorLutIds(edit);
   const selectedLuts = luts
@@ -54,6 +56,24 @@ export const createColorHash = (
         selectedIds.has(lut.id),
     )
     .sort((left, right) => left.id.localeCompare(right.id));
+  const sourcesById = new Map(sources.map((source) => [source.id, source]));
+  const referencedSourceFacts = [...new Set(edit.clips.map((clip) => clip.sourceId))]
+    .sort((left, right) => left.localeCompare(right))
+    .map((sourceId) => {
+      const source = sourcesById.get(sourceId);
+      return {
+        sourceId,
+        camera: source
+          ? {
+              confirmed: source.camera.confirmed,
+              profileId: source.camera.profileId,
+              model: source.camera.model,
+              gamma: source.camera.gamma,
+              gamut: source.camera.gamut,
+            }
+          : null,
+      };
+    });
   return hashValue({
     output: edit.output,
     clips: edit.clips.map((clip) => ({
@@ -66,6 +86,7 @@ export const createColorHash = (
       grade: clip.grade,
     })),
     luts: selectedLuts,
+    sources: referencedSourceFacts,
   });
 };
 

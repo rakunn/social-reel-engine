@@ -95,7 +95,7 @@ describe('color approval identity', () => {
     },
   ])('retains approved color when only $label changes', ({change}) => {
     const changed = EditManifestSchema.parse({...edit, ...change});
-    expect(createColorHash(changed, luts)).toBe(createColorHash(edit, luts));
+    expect(createColorHash(changed, luts, [])).toBe(createColorHash(edit, luts, []));
   });
 
   it.each([
@@ -126,11 +126,11 @@ describe('color approval identity', () => {
     },
   ])('invalidates approved color when the $label changes', ({clip}) => {
     const changed = EditManifestSchema.parse({...edit, clips: [clip]});
-    expect(createColorHash(changed, luts)).not.toBe(createColorHash(edit, luts));
+    expect(createColorHash(changed, luts, [])).not.toBe(createColorHash(edit, luts, []));
   });
 
   it('invalidates approved color when selected LUT bytes change', () => {
     const changedLuts = [luts[0], {...luts[1], checksumSha256: 'c'.repeat(64)}];
-    expect(createColorHash(edit, changedLuts)).not.toBe(createColorHash(edit, luts));
+    expect(createColorHash(edit, changedLuts, [])).not.toBe(createColorHash(edit, luts, []));
   });
 });

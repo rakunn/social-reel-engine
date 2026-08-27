@@ -249,7 +249,7 @@ const makeFixture = async () => {
     generatedAt: '2026-08-10T00:00:00.000Z',
     editManifestHash: createEditHash(edit),
     editReviewHash,
-    colorManifestHash: createColorHash(edit, parsedLuts),
+    colorManifestHash: createColorHash(edit, parsedLuts, sources.sources),
     stills: ['previews/graded-stills/shot-1.png'],
     checksums: {
       'previews/graded-stills/shot-1.png': await hashFile(stillPath),
@@ -1166,6 +1166,57 @@ describe('hash-bound approvals', () => {
       colorApproved: true,
     });
     await expect(assertRenderApprovals(projectPath)).resolves.toBeUndefined();
+  });
+
+  it('invalidates color approval when a referenced source profile becomes unconfirmed', async () => {
+    const {projectPath, sourceId} = await makeFixture();
+    await approveEdit(projectPath, new Date('2026-08-10T00:01:00.000Z'));
+    await approveColor(projectPath, new Date('2026-08-10T00:02:00.000Z'));
+
+    const unconfirmedCamera = {
+      manufacturer: null,
+      model: null,
+      gamma: null,
+      gamut: null,
+      profileId: null,
+      confirmed: false,
+    };
+    const configPath = path.join(projectPath, 'config/sources.json');
+    const config = JSON.parse(await readFile(configPath, 'utf8'));
+    await writeJson(configPath, {
+      ...config,
+      sources: {
+        ...config.sources,
+        'input/clips/clip.mp4': unconfirmedCamera,
+      },
+    });
+    const manifestPath = path.join(projectPath, 'analysis/sources.json');
+    const manifest = SourceManifestSchema.parse(
+      JSON.parse(await readFile(manifestPath, 'utf8')),
+    );
+    await writeJson(manifestPath, {
+      ...manifest,
+      sources: manifest.sources.map((source) =>
+        source.id === sourceId ? {...source, camera: unconfirmedCamera} : source,
+      ),
+    });
+
+    const previewPath = path.join(projectPath, 'previews/preview.mp4');
+    await writeFile(previewPath, 'reviewed-unconfirmed-profile-preview');
+    await recordRenderArtifact(
+      projectPath,
+      'preview',
+      previewPath,
+      await expectedRenderFingerprint(projectPath, 'preview'),
+      new Date('2026-08-10T00:03:00.000Z'),
+    );
+    await approveEdit(projectPath, new Date('2026-08-10T00:04:00.000Z'));
+
+    await expect(readApprovalStatus(projectPath)).resolves.toEqual({
+      editApproved: true,
+      colorApproved: false,
+    });
+    await expect(assertRenderApprovals(projectPath)).rejects.toThrow(/stale|approval/i);
   });
 
   it('invalidates only color when grade settings change', async () => {

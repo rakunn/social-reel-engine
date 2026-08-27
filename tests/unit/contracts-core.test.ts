@@ -363,8 +363,8 @@ describe('versioned public contracts', () => {
     });
 
     expect(parsed.clips[0].grade.treatment).toEqual({kind: 'land-haze', strength: 0.5});
-    expect(createColorHash(parsed, [])).not.toBe(
-      createColorHash(EditManifestSchema.parse(edit), []),
+    expect(createColorHash(parsed, [], [])).not.toBe(
+      createColorHash(EditManifestSchema.parse(edit), [], []),
     );
   });
 
@@ -619,10 +619,10 @@ describe('color and approvals', () => {
       checksumSha256: 'f'.repeat(64),
     }));
     const colorHash = createColorReviewHash(
-      createColorHash(parsedEdit, [technical, creative]),
+      createColorHash(parsedEdit, [technical, creative], []),
       reviewedStills,
     );
-    const colorManifestHash = createColorHash(parsedEdit, [technical, creative]);
+    const colorManifestHash = createColorHash(parsedEdit, [technical, creative], []);
     const state = ApprovalStateSchema.parse({
       schemaVersion: '1.0.0',
       edit: {hash: editHash, approvedAt: '2026-08-10T00:00:00.000Z'},
@@ -646,14 +646,14 @@ describe('color and approvals', () => {
     };
     const changedEditHash = createEditReviewHash(createEditHash(changed), preview);
     const changedColorHash = createColorReviewHash(
-      createColorHash(changed, [technical, creative]),
+      createColorHash(changed, [technical, creative], []),
       reviewedStills,
     );
     expect(
       approvalStatus(
         state,
         changedEditHash,
-        createColorHash(changed, [technical, creative]),
+        createColorHash(changed, [technical, creative], []),
         changedColorHash,
       ),
     ).toEqual({

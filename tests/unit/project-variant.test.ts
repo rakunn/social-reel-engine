@@ -305,27 +305,25 @@ describe('reel project variants', () => {
       schemaVersion: '1.0.0',
       luts: [lut],
     });
-    await writeJson(
-      path.join(sourcePath, 'analysis/sources.json'),
-      SourceManifestSchema.parse({
-        schemaVersion: '1.0.0',
-        generatedAt: '2026-08-26T00:00:00.000Z',
-        sources: [
-          {
-            id: sourceId,
-            relativePath: 'input/clips/clip.mp4',
-            checksumSha256: clipChecksum,
-            sizeBytes: Buffer.byteLength('synthetic-video-bytes'),
-            mediaType: 'video',
-            ffprobe: {
-              format: {duration: '30'},
-              streams: [{codec_type: 'video', avg_frame_rate: '30/1'}],
-            },
-            camera,
+    const sourceManifest = SourceManifestSchema.parse({
+      schemaVersion: '1.0.0',
+      generatedAt: '2026-08-26T00:00:00.000Z',
+      sources: [
+        {
+          id: sourceId,
+          relativePath: 'input/clips/clip.mp4',
+          checksumSha256: clipChecksum,
+          sizeBytes: Buffer.byteLength('synthetic-video-bytes'),
+          mediaType: 'video',
+          ffprobe: {
+            format: {duration: '30'},
+            streams: [{codec_type: 'video', avg_frame_rate: '30/1'}],
           },
-        ],
-      }),
-    );
+          camera,
+        },
+      ],
+    });
+    await writeJson(path.join(sourcePath, 'analysis/sources.json'), sourceManifest);
     const edit = EditManifestSchema.parse({
       schemaVersion: '1.0.0',
       reelName: 'approved-color-source',
@@ -407,7 +405,7 @@ describe('reel project variants', () => {
       generatedAt: '2026-08-26T00:02:00.000Z',
       editManifestHash: createEditHash(edit),
       editReviewHash: createEditReviewHash(createEditHash(edit), previewRecord),
-      colorManifestHash: createColorHash(edit, [lut]),
+      colorManifestHash: createColorHash(edit, [lut], sourceManifest.sources),
       stills: [
         'previews/graded-stills/hero.png',
         'previews/graded-stills/closer.png',

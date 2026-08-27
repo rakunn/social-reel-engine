@@ -168,7 +168,12 @@ const currentReviewHashes = async (
     };
   }
   const editReviewHash = createEditReviewHash(createEditHash(loaded.edit), preview);
-  const colorManifestHash = createColorHash(loaded.edit, loaded.luts);
+  const manifest = await readValidatedSourceManifest(projectPath, options.integrity);
+  const colorManifestHash = createColorHash(
+    loaded.edit,
+    loaded.luts,
+    manifest.sources,
+  );
   const invalidLut = await invalidLutReason(
     projectPath,
     selectedColorLuts(loaded.edit, loaded.luts),
