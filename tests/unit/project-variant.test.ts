@@ -165,6 +165,51 @@ describe('reel project variants', () => {
     await expect(access(path.join(projectsRoot, 'stale-lut-variant'))).rejects.toThrow();
   });
 
+  it('rejects a LUT declaration whose checksum does not match current bytes', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-lut-config-'));
+    const projectsRoot = path.join(temporaryRoot, 'projects');
+    const sourcePath = await createReelProject({
+      engineRoot: repositoryRoot,
+      projectsRoot,
+      reelName: 'bad-lut-config-source',
+    });
+    await writeVariantReadyEdit(sourcePath, 'bad-lut-config-source');
+    const lutPath = path.join(sourcePath, 'input/luts/technical/normalizer.cube');
+    await writeFile(lutPath, 'TITLE "Current"\nLUT_3D_SIZE 2\n');
+    await writeVerifiedSourceManifest(sourcePath);
+    await writeJson(path.join(sourcePath, 'config/luts.json'), {
+      schemaVersion: '1.0.0',
+      luts: [
+        {
+          id: 'bad-normalizer',
+          kind: 'technical',
+          file: 'input/luts/technical/normalizer.cube',
+          checksumSha256: '0'.repeat(64),
+          cameraModel: 'Camera',
+          profileId: 'synthetic-log',
+          inputGamma: 'Log',
+          inputGamut: 'Wide',
+          inputColorSpace: 'Log/Wide',
+          outputColorSpace: 'Rec.709 Gamma 2.4',
+          transformSemantics: 'normalization',
+          defaultMix: 1,
+        },
+      ],
+    });
+
+    const module = await loadVariantModule();
+    if (!module?.createProjectVariant) throw new Error('Variant module is unavailable');
+    await expect(
+      module.createProjectVariant({
+        engineRoot: repositoryRoot,
+        projectsRoot,
+        sourceName: 'bad-lut-config-source',
+        targetName: 'bad-lut-config-variant',
+      }),
+    ).rejects.toThrow(/configured LUT|checksum|mismatch/i);
+    await expect(access(path.join(projectsRoot, 'bad-lut-config-variant'))).rejects.toThrow();
+  });
+
   it('rejects a source project whose creator still holds its name reservation', async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-source-reservation-'));
     const projectsRoot = path.join(temporaryRoot, 'projects');
@@ -447,6 +492,12 @@ describe('reel project variants', () => {
       now: new Date('2026-08-26T00:00:00.000Z'),
     });
     await writeFile(path.join(sourcePath, 'input/clips/clip.mp4'), 'immutable-source-bytes');
+    const normalizerPath = path.join(sourcePath, 'input/luts/technical/normalizer.cube');
+    const lookPath = path.join(sourcePath, 'input/luts/creative/look.cube');
+    await writeFile(normalizerPath, 'TITLE "Normalizer"\nLUT_3D_SIZE 2\n');
+    await writeFile(lookPath, 'TITLE "Look"\nLUT_3D_SIZE 2\n');
+    const normalizerChecksum = await hashFile(normalizerPath);
+    const lookChecksum = await hashFile(lookPath);
     await writeJson(path.join(sourcePath, 'config/sources.json'), {
       schemaVersion: '1.0.0',
       sources: {
@@ -462,7 +513,34 @@ describe('reel project variants', () => {
     });
     await writeJson(path.join(sourcePath, 'config/luts.json'), {
       schemaVersion: '1.0.0',
-      luts: [{id: 'approved-look', kind: 'creative'}],
+      luts: [
+        {
+          id: 'approved-normalizer',
+          kind: 'technical',
+          file: 'input/luts/technical/normalizer.cube',
+          checksumSha256: normalizerChecksum,
+          cameraModel: 'DJI Mini 4 Pro',
+          profileId: 'dji-mini-4-pro-d-log-m',
+          inputGamma: 'D-Log M',
+          inputGamut: 'DJI D-Log M',
+          inputColorSpace: 'D-Log M/DJI D-Log M',
+          outputColorSpace: 'Rec.709 Gamma 2.4',
+          transformSemantics: 'normalization',
+          defaultMix: 1,
+        },
+        {
+          id: 'approved-look',
+          kind: 'creative',
+          file: 'input/luts/creative/look.cube',
+          checksumSha256: lookChecksum,
+          cameraModel: null,
+          profileId: null,
+          inputColorSpace: 'Rec.709 Gamma 2.4',
+          outputColorSpace: 'Rec.709 Gamma 2.4',
+          transformSemantics: 'look',
+          defaultMix: 0.35,
+        },
+      ],
     });
     await writeJson(path.join(sourcePath, 'edits/edit.json'), {
       schemaVersion: '1.0.0',

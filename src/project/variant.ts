@@ -15,6 +15,7 @@ import path from 'node:path';
 import {
   ApprovalStateSchema,
   EditManifestSchema,
+  LutDefinitionsSchema,
   ReelBriefSchema,
 } from '../contracts/schemas';
 import {hashFile} from '../core/hash';
@@ -54,6 +55,19 @@ const exists = async (filePath: string): Promise<boolean> => {
     return true;
   } catch {
     return false;
+  }
+};
+
+const assertConfiguredLutsMatchFiles = async (projectPath: string): Promise<void> => {
+  const config = await readJson<{luts?: unknown[]}>(
+    path.join(projectPath, 'config/luts.json'),
+  );
+  const luts = LutDefinitionsSchema.parse(config.luts ?? []);
+  for (const lut of luts) {
+    const checksumSha256 = await hashFile(resolveInside(projectPath, lut.file));
+    if (checksumSha256 !== lut.checksumSha256) {
+      throw new Error(`Configured LUT checksum no longer matches: ${lut.file}`);
+    }
   }
 };
 
@@ -314,6 +328,7 @@ export const createProjectVariant = async ({
       const snapshot = await runWithStatusScanLock(sourcePath, async () => {
     await assertReadTreesContainNoSymbolicLinks(sourcePath);
     await readValidatedIngestManifest(sourcePath);
+    await assertConfiguredLutsMatchFiles(sourcePath);
     await readValidatedSourceManifest(sourcePath);
     const stagingRoot = await mkdtemp(
       variantStagingPrefix(resolvedProjectsRoot, safeTargetName),
