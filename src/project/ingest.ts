@@ -97,7 +97,7 @@ export const scanInputs = async (
   return {schemaVersion: '1.0.0', generatedAt: now.toISOString(), files};
 };
 
-const ingestFilesWithLock = async (
+export const ingestFilesWithinStatusScanLock = async (
   projectPath: string,
   sourcePaths: readonly string[],
   kind: InputKind,
@@ -149,7 +149,7 @@ export const ingestFiles = async (
 ): Promise<{added: string[]; unchanged: string[]}> => {
   const result = await runWithStatusScanLock(
     projectPath,
-    async () => await ingestFilesWithLock(projectPath, sourcePaths, kind),
+    async () => await ingestFilesWithinStatusScanLock(projectPath, sourcePaths, kind),
   );
   if (!result.acquired) {
     throw new Error('Cannot ingest while a project snapshot, status scan, or media work is active');
