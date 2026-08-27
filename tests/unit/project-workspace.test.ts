@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import {access, mkdir, mkdtemp, readFile, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
@@ -49,6 +50,51 @@ describe('reel project workspace', () => {
     const longReelName = 'a'.repeat(200);
 
     const reservation = await acquireProjectNameReservation(projectsRoot, longReelName);
+    await expect(reservation.assertOwnership()).resolves.toBeUndefined();
+    await expect(reservation.release()).resolves.toBeUndefined();
+  });
+
+  it('reclaims a stale auxiliary claim for a long hashed reservation path', async () => {
+    const projectsRoot = await makeProjectsRoot();
+    await mkdir(projectsRoot, {recursive: true});
+    const longReelName = 'b'.repeat(200);
+    const reservationPath = path.join(
+      projectsRoot,
+      `.project-${createHash('sha256').update(longReelName).digest('hex')}.reservation`,
+    );
+    const reservationOwnerId = 'stale-reservation-owner';
+    await mkdir(reservationPath);
+    await writeFile(
+      path.join(reservationPath, 'owner.json'),
+      JSON.stringify({
+        schemaVersion: '1.0.0',
+        id: reservationOwnerId,
+        pid: 2_147_483_647,
+        processStartMarker: null,
+        leaseExpiresAt: '2026-08-27T00:00:00.000Z',
+        acquiredAt: '2026-08-27T00:00:00.000Z',
+      }),
+    );
+    const claimPath = path.join(
+      projectsRoot,
+      `.project-claim-${createHash('sha256').update(`${path.basename(reservationPath)}\0${reservationOwnerId}`).digest('hex')}.json`,
+    );
+    await writeFile(
+      claimPath,
+      JSON.stringify({
+        schemaVersion: '1.0.0',
+        id: '00000000-0000-4000-8000-000000000000',
+        state: 'active',
+        pid: 2_147_483_647,
+        processStartMarker: null,
+        leaseExpiresAt: '2026-08-27T00:00:00.000Z',
+        acquiredAt: '2026-08-27T00:00:00.000Z',
+        releasedAt: null,
+      }),
+    );
+
+    const reservation = await acquireProjectNameReservation(projectsRoot, longReelName);
+    await expect(access(claimPath)).rejects.toThrow();
     await expect(reservation.assertOwnership()).resolves.toBeUndefined();
     await expect(reservation.release()).resolves.toBeUndefined();
   });

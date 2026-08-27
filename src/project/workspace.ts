@@ -81,7 +81,11 @@ const MARKERLESS_PROJECT_RESERVATION_HEARTBEAT_MS = Math.floor(
 const projectNameReservationClaimPath = (
   reservationPath: string,
   ownerId: string,
-): string => `${reservationPath}.reclaiming-${reservationPathToken(ownerId)}.json`;
+): string =>
+  path.join(
+    path.dirname(reservationPath),
+    `.project-claim-${reservationPathToken(`${path.basename(reservationPath)}\0${ownerId}`)}.json`,
+  );
 
 const projectNameReservationOwnershipLost = (): Error =>
   new Error('Project name reservation ownership was lost');
