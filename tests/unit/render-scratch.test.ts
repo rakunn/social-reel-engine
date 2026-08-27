@@ -13,6 +13,7 @@ import path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
 import {
   pruneRenderStages,
+  prepareFreshRenderStage,
   removeRenderStage,
   renderStageRoot,
   stageImmutableFile,
@@ -45,6 +46,24 @@ afterEach(async () => {
 });
 
 describe('render scratch lifecycle', () => {
+  it('recreates the selected stage instead of reusing stale partial contents', async () => {
+    const engineRoot = await makeDirectory();
+    const current = renderStageRoot(engineRoot, 'camp-reel', 'aaaaaaaaaaaaaaaa');
+    const stale = renderStageRoot(engineRoot, 'camp-reel', 'bbbbbbbbbbbbbbbb');
+    await Promise.all(
+      [current, stale].map(async (directory) => {
+        await mkdir(path.join(directory, 'music'), {recursive: true});
+        await writeFile(path.join(directory, 'music/stale.wav'), 'stale');
+      }),
+    );
+
+    await prepareFreshRenderStage(engineRoot, 'camp-reel', current);
+
+    expect(await exists(current)).toBe(true);
+    expect(await exists(path.join(current, 'music/stale.wav'))).toBe(false);
+    expect(await exists(stale)).toBe(false);
+  });
+
   it('prunes stale fingerprints only for the selected reel', async () => {
     const engineRoot = await makeDirectory();
     const stale = renderStageRoot(engineRoot, 'camp-reel', '1111111111111111');
