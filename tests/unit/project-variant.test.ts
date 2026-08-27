@@ -420,6 +420,26 @@ describe('reel project variants', () => {
       sourcePath,
       new Date('2026-08-26T00:04:00.000Z'),
     );
+    const gradedClipPath = 'work/graded/hero-cached.mov';
+    await mkdir(path.join(sourcePath, 'work/graded'), {recursive: true});
+    await writeFile(path.join(sourcePath, gradedClipPath), 'approved-graded-hero');
+    await writeJson(path.join(sourcePath, 'analysis/graded-clips.json'), {
+      schemaVersion: '1.0.0',
+      generatedAt: '2026-08-26T00:04:00.000Z',
+      editHash: createEditHash(edit),
+      colorHash: sourceApprovals.color?.colorHash,
+      items: [
+        {
+          clipId: 'hero',
+          sourceId,
+          path: gradedClipPath,
+          checksumSha256: await hashFile(path.join(sourcePath, gradedClipPath)),
+          fingerprint: 'c'.repeat(64),
+          cached: false,
+          stabilization: 'disabled',
+        },
+      ],
+    });
 
     const module = await loadVariantModule();
     if (!module?.createProjectVariant) throw new Error('Variant module is unavailable');
@@ -445,6 +465,18 @@ describe('reel project variants', () => {
     await expect(
       access(path.join(result.targetPath, 'previews/graded-stills/hero.png')),
     ).resolves.toBeUndefined();
+    await expect(access(path.join(result.targetPath, gradedClipPath))).resolves.toBeUndefined();
+    expect(
+      JSON.parse(
+        await readFile(path.join(result.targetPath, 'analysis/graded-clips.json'), 'utf8'),
+      ).items,
+    ).toEqual([
+      expect.objectContaining({
+        clipId: 'hero',
+        path: gradedClipPath,
+        checksumSha256: await hashFile(path.join(result.targetPath, gradedClipPath)),
+      }),
+    ]);
 
     const targetPreviewPath = path.join(result.targetPath, 'previews/preview.mp4');
     await writeFile(targetPreviewPath, 'target-reviewed-preview');

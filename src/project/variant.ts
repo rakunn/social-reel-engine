@@ -11,6 +11,7 @@ import {readJson, writeJson} from '../core/json';
 import {assertSafeReelName, resolveInside} from '../core/paths';
 import {readApprovalStatus} from '../edit/approve';
 import {readRightsConfirmationStatus} from '../edit/rights';
+import type {GradedClipReport} from '../media/grade';
 import type {ArtifactIndex} from './artifacts';
 import {isMediaOperationLockActive} from './operation';
 import {assertProjectScaffold, createReelProject} from './workspace';
@@ -116,6 +117,49 @@ const cloneValidArtifactCache = async (
   return copiedFiles;
 };
 
+const cloneValidGradedClipCache = async (
+  sourcePath: string,
+  targetPath: string,
+): Promise<number> => {
+  let report: GradedClipReport;
+  try {
+    report = await readJson<GradedClipReport>(
+      path.join(sourcePath, 'analysis/graded-clips.json'),
+    );
+  } catch {
+    return 0;
+  }
+  if (report.schemaVersion !== '1.0.0' || !Array.isArray(report.items)) return 0;
+
+  const validItems: GradedClipReport['items'] = [];
+  let copiedFiles = 0;
+  for (const item of report.items) {
+    if (
+      !item ||
+      typeof item.path !== 'string' ||
+      path.posix.dirname(item.path) !== 'work/graded' ||
+      !item.path.toLowerCase().endsWith('.mov') ||
+      !/^[a-f0-9]{64}$/.test(item.checksumSha256)
+    ) {
+      continue;
+    }
+    const sourceFile = resolveInside(sourcePath, item.path);
+    try {
+      if ((await hashFile(sourceFile)) !== item.checksumSha256) continue;
+      copiedFiles += await cloneTree(sourceFile, resolveInside(targetPath, item.path));
+      validItems.push(item);
+    } catch {
+      continue;
+    }
+  }
+  if (validItems.length === 0) return 0;
+  await writeJson(path.join(targetPath, 'analysis/graded-clips.json'), {
+    ...report,
+    items: validItems,
+  } satisfies GradedClipReport);
+  return copiedFiles + 1;
+};
+
 export const createProjectVariant = async ({
   engineRoot,
   projectsRoot = path.join(engineRoot, 'projects'),
@@ -177,6 +221,7 @@ export const createProjectVariant = async ({
       );
     }
     copiedFiles += await cloneValidArtifactCache(sourcePath, targetPath);
+    copiedFiles += await cloneValidGradedClipCache(sourcePath, targetPath);
 
     await writeJson(
       path.join(targetPath, 'brief.json'),
