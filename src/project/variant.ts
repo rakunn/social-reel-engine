@@ -13,7 +13,7 @@ import {readApprovalStatus} from '../edit/approve';
 import {readRightsConfirmationStatus} from '../edit/rights';
 import type {GradedClipReport} from '../media/grade';
 import type {ArtifactIndex} from './artifacts';
-import {isMediaOperationLockActive} from './operation';
+import {runWithStatusScanLock} from './operation';
 import {assertProjectScaffold, createReelProject} from './workspace';
 
 export type CreateProjectVariantOptions = {
@@ -218,9 +218,7 @@ export const createProjectVariant = async ({
   if (await exists(targetPath)) {
     throw new Error(`Reel project "${safeTargetName}" already exists`);
   }
-  if (await isMediaOperationLockActive(sourcePath)) {
-    throw new Error('Cannot create a variant while the source project has active media work');
-  }
+  const snapshot = await runWithStatusScanLock(sourcePath, async () => {
   const sourceBrief = await readJson(path.join(sourcePath, 'brief.json'), ReelBriefSchema);
   const sourceEdit = await readJson(path.join(sourcePath, 'edits/edit.json'), EditManifestSchema);
   const sourceApprovals = await readJson(
@@ -257,7 +255,11 @@ export const createProjectVariant = async ({
         path.join(targetPath, relativePath),
       );
     }
-    for (const relativePath of ['analysis/sources.json', 'analysis/ingest.json']) {
+    for (const relativePath of [
+      'analysis/sources.json',
+      'analysis/ingest.json',
+      'analysis/beats.json',
+    ]) {
       copiedFiles += await cloneIfPresent(
         sourcePath,
         path.join(sourcePath, relativePath),
@@ -324,4 +326,9 @@ export const createProjectVariant = async ({
     if (created) await rm(targetPath, {recursive: true, force: true});
     throw error;
   }
+  });
+  if (!snapshot.acquired) {
+    throw new Error('Cannot create a variant while the source project has active media work');
+  }
+  return snapshot.value;
 };

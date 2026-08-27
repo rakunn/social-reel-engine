@@ -39,6 +39,12 @@ export const secondsToMediaFrames = (seconds: number, fps: number): number =>
 export const fontFaceRule = (fontUrl: string): string =>
   `@font-face{font-family:ReelCustom;src:url(${JSON.stringify(fontUrl)});font-display:block;}`;
 
+export const cardTextContainerStyle = () => ({
+  maxWidth: '100%' as const,
+  overflowWrap: 'anywhere' as const,
+  wordBreak: 'break-word' as const,
+});
+
 export const fontFaceRules = (fonts: StagedFontRoles): string => {
   const seen = new Set<string>();
   const rules: string[] = [];

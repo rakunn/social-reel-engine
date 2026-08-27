@@ -18,6 +18,7 @@ import {
 import type {EditManifest} from '../contracts/schemas';
 import {
   buildShotTimings,
+  cardTextContainerStyle,
   cardTextStyles,
   captionFrameRange,
   cropTransform,
@@ -149,6 +150,7 @@ const CardTextOverlay: React.FC<{
       />
       <div
         style={{
+          ...cardTextContainerStyle(),
           color: visualStyle.palette.primary,
           maxWidth: `${profile.maxTextWidth * 100}%`,
           textShadow: profile.shadow,

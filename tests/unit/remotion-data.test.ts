@@ -218,4 +218,14 @@ describe('data-driven Remotion model', () => {
     expect(remotionModel.titleOpacity(4, 17, 8)).toBeGreaterThan(0);
     expect(remotionModel.titleOpacity(16, 17, 8)).toBe(0);
   });
+
+  it('keeps a schema-valid unbroken card label inside the safe area', () => {
+    expect(remotionModel.cardTextContainerStyle()).toEqual(
+      expect.objectContaining({
+        maxWidth: '100%',
+        overflowWrap: 'anywhere',
+        wordBreak: 'break-word',
+      }),
+    );
+  });
 });
