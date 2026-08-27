@@ -1,6 +1,11 @@
 import type {Caption} from '@remotion/captions';
 import {interpolate} from 'remotion';
 import type {EditManifest, AnimatedCrop} from '../contracts/schemas';
+import type {
+  FontRole,
+  OutputStyleTokens,
+  StyleConfig,
+} from '../style/contracts';
 import {
   clipDurationSeconds,
   secondsToFrames,
@@ -14,8 +19,19 @@ export type ReelRenderProps = {
   captions: Caption[];
   watermark: string | null;
   trimBeforeFramesByClip?: Record<string, number>;
+  visualStyle: StyleConfig;
+  fonts: Record<FontRole, StagedFontAsset | null>;
   fontUrl?: string | null;
 };
+
+export type StagedFontAsset = {
+  url: string;
+  family: 'ReelDisplay' | 'ReelBody' | 'ReelMetadata';
+  weight: number;
+  style: 'normal' | 'italic';
+};
+
+export type StagedFontRoles = Record<FontRole, StagedFontAsset | null>;
 
 export const secondsToMediaFrames = (seconds: number, fps: number): number =>
   secondsToFrames(seconds, fps);
@@ -23,10 +39,59 @@ export const secondsToMediaFrames = (seconds: number, fps: number): number =>
 export const fontFaceRule = (fontUrl: string): string =>
   `@font-face{font-family:ReelCustom;src:url(${JSON.stringify(fontUrl)});font-display:block;}`;
 
-export const titleOpacity = (frame: number, durationInFrames: number): number => {
+export const fontFaceRules = (fonts: StagedFontRoles): string => {
+  const seen = new Set<string>();
+  const rules: string[] = [];
+  for (const font of Object.values(fonts)) {
+    if (!font) continue;
+    const key = `${font.family}\0${font.url}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rules.push(
+      `@font-face{font-family:${font.family};src:url(${JSON.stringify(font.url)});font-weight:${font.weight};font-style:${font.style};font-display:block;}`,
+    );
+  }
+  return rules.join('');
+};
+
+export const styleProfileForOutput = (
+  style: StyleConfig,
+  output: {width: number; height: number; fps: number},
+): OutputStyleTokens =>
+  output.width === 1910 && output.height === 1000 ? style.profiles.carousel : style.profiles.reel;
+
+const fontStack = (style: StyleConfig, role: FontRole): string =>
+  [style.typography[role].family, ...style.typography[role].fallback]
+    .map((family) => (/^[a-zA-Z][a-zA-Z0-9-]*$/.test(family) ? family : JSON.stringify(family)))
+    .join(', ');
+
+export const cardTextStyles = (style: StyleConfig, profile: OutputStyleTokens) => ({
+  heading: {
+    fontFamily: fontStack(style, 'display'),
+    color: style.palette.primary,
+    fontSize: profile.headingSize,
+    fontWeight: style.typography.display.weight,
+    letterSpacing: `${profile.headingTrackingEm}em`,
+    lineHeight: profile.headingLineHeight,
+  },
+  body: {
+    fontFamily: fontStack(style, 'body'),
+    color: style.palette.primary,
+    fontSize: profile.bodySize,
+    fontWeight: style.typography.body.weight,
+    letterSpacing: `${profile.bodyTrackingEm}em`,
+    lineHeight: profile.bodyLineHeight,
+  },
+});
+
+export const titleOpacity = (
+  frame: number,
+  durationInFrames: number,
+  requestedFadeFrames = 10,
+): number => {
   const finalFrame = Math.max(0, durationInFrames - 1);
   if (finalFrame === 0) return 0;
-  const fadeDuration = Math.min(10, finalFrame / 2);
+  const fadeDuration = Math.min(requestedFadeFrames, finalFrame / 2);
   const interpolationOptions = {
     extrapolateLeft: 'clamp' as const,
     extrapolateRight: 'clamp' as const,

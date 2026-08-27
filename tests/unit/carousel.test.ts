@@ -23,6 +23,7 @@ import {
 } from '../../src/render/carousel';
 import {summarizeCarouselQc} from '../../src/media/carousel-qc';
 import {renderMasterAndDelivery} from '../../src/render/remotion';
+import {CINEMATIC_MINIMAL_STYLE} from '../../src/style/contracts';
 
 const clip = (id: string, durationSeconds = 4.5) => ({
   id,
@@ -97,6 +98,8 @@ const carouselProps = {
   captions: [],
   watermark: null,
   trimBeforeFramesByClip: {hero: 0, closer: 0},
+  visualStyle: CINEMATIC_MINIMAL_STYLE,
+  fonts: {display: null, body: null, metadata: null},
   fontUrl: null,
 };
 

@@ -12,6 +12,9 @@ import {
 } from '../../src/remotion/model';
 import * as remotionModel from '../../src/remotion/model';
 import * as remotionReel from '../../src/remotion/Reel';
+import {CINEMATIC_MINIMAL_STYLE, StyleConfigSchema} from '../../src/style/contracts';
+import {readJson} from '../../src/core/json';
+import path from 'node:path';
 
 vi.mock('@remotion/fonts', () => ({
   loadFont: vi.fn(async () => undefined),
@@ -67,6 +70,8 @@ const props: ReelRenderProps = {
   music: null,
   captions: [],
   watermark: null,
+  visualStyle: CINEMATIC_MINIMAL_STYLE,
+  fonts: {display: null, body: null, metadata: null},
 };
 
 describe('data-driven Remotion model', () => {
@@ -163,5 +168,54 @@ describe('data-driven Remotion model', () => {
     expect(titleOpacity?.(5, 11)).toBeGreaterThan(0);
     expect(titleOpacity?.(10, 11)).toBe(0);
     expect(titleOpacity?.(0, 1)).toBe(0);
+  });
+
+  it('uses carousel tokens and role families for card copy', async () => {
+    const islandStyle = StyleConfigSchema.parse(
+      await readJson(
+        path.resolve(import.meta.dirname, '../fixtures/styles/philippines-island-editorial.json'),
+      ),
+    );
+    const profile = remotionModel.styleProfileForOutput(islandStyle, {
+      width: 1910,
+      height: 1000,
+      fps: 30,
+    });
+    expect(profile).toEqual(
+      expect.objectContaining({headingSize: 50, bodySize: 29, fadeFrames: 8}),
+    );
+    expect(remotionModel.cardTextStyles(islandStyle, profile)).toEqual(
+      expect.objectContaining({
+        heading: expect.objectContaining({fontFamily: expect.stringContaining('ReelDisplay'), color: '#FFF6E8'}),
+        body: expect.objectContaining({fontFamily: expect.stringContaining('ReelBody'), fontSize: 29}),
+      }),
+    );
+  });
+
+  it('loads each distinct role font once', () => {
+    const mockedLoadFont = vi.mocked(loadFont);
+    mockedLoadFont.mockClear();
+    const fraunces = {
+      url: 'jobs/remotion-test/fonts/fraunces.ttf',
+      family: 'ReelDisplay',
+      weight: 600,
+      style: 'normal',
+    } as const;
+    const manrope = {
+      url: 'jobs/remotion-test/fonts/manrope.ttf',
+      family: 'ReelBody',
+      weight: 450,
+      style: 'normal',
+    } as const;
+    remotionReel.SocialReel({
+      ...props,
+      fonts: {display: fraunces, body: manrope, metadata: manrope},
+    });
+    expect(mockedLoadFont).toHaveBeenCalledTimes(2);
+  });
+
+  it('honors a preset-specific fade duration', () => {
+    expect(remotionModel.titleOpacity(4, 17, 8)).toBeGreaterThan(0);
+    expect(remotionModel.titleOpacity(16, 17, 8)).toBe(0);
   });
 });

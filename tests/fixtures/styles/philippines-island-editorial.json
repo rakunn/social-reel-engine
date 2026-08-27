@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.0.0",
+  "presetId": "philippines-island-editorial",
+  "catalogFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "typography": {
+    "display": {"assetId": "fraunces-variable", "relativePath": "input/fonts/fraunces-variable.ttf", "family": "ReelDisplay", "weight": 600, "style": "normal", "fallback": ["Georgia", "serif"]},
+    "body": {"assetId": "manrope-variable", "relativePath": "input/fonts/manrope-variable.ttf", "family": "ReelBody", "weight": 450, "style": "normal", "fallback": ["Arial", "sans-serif"]},
+    "metadata": {"assetId": "manrope-variable", "relativePath": "input/fonts/manrope-variable.ttf", "family": "ReelBody", "weight": 550, "style": "normal", "fallback": ["Arial", "sans-serif"]}
+  },
+  "palette": {"primary": "#FFF6E8", "dark": "#142B33", "coolAccent": "#287A78", "warmAccent": "#E7A15B", "humanAccent": "#C96859", "earthAccent": "#56382D"},
+  "profiles": {
+    "carousel": {"headingSize": 50, "bodySize": 29, "captionSize": 34, "metadataSize": 22, "horizontalPadding": 0.05, "bottomPadding": 0.076, "maxTextWidth": 0.62, "headingTrackingEm": 0.05, "bodyTrackingEm": 0.025, "headingLineHeight": 1.05, "bodyLineHeight": 1.15, "gap": 10, "fadeFrames": 8, "shadow": "0 2px 18px rgba(8,15,14,0.72)", "scrimOpacity": 0.28, "scrimHeight": 0.34},
+    "reel": {"headingSize": 68, "bodySize": 36, "captionSize": 48, "metadataSize": 26, "horizontalPadding": 0.056, "bottomPadding": 0.076, "maxTextWidth": 0.7, "headingTrackingEm": 0.045, "bodyTrackingEm": 0.02, "headingLineHeight": 1.05, "bodyLineHeight": 1.15, "gap": 12, "fadeFrames": 8, "shadow": "0 2px 20px rgba(8,15,14,0.72)", "scrimOpacity": 0.3, "scrimHeight": 0.3}
+  }
+}

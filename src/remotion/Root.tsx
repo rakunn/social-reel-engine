@@ -3,6 +3,7 @@ import {Composition} from 'remotion';
 import {SocialReel} from './Reel';
 import {calculateReelMetadata, type ReelRenderProps} from './model';
 import {calculatePhotoMetadata, SharePhoto, type SharePhotoProps} from './Photo';
+import {CINEMATIC_MINIMAL_STYLE} from '../style/contracts';
 
 const defaultProps: ReelRenderProps = {
   edit: {
@@ -44,6 +45,8 @@ const defaultProps: ReelRenderProps = {
   captions: [],
   watermark: 'STUDIO PLACEHOLDER',
   trimBeforeFramesByClip: {},
+  visualStyle: CINEMATIC_MINIMAL_STYLE,
+  fonts: {display: null, body: null, metadata: null},
   fontUrl: null,
 };
 

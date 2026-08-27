@@ -32,6 +32,8 @@ import {
   renderStageRoot,
   stageImmutableFile,
 } from './scratch';
+import {readProjectStyle, resolveStyleFontSources} from '../style/project';
+import type {FontRole} from '../style/contracts';
 
 export type StageTarget = 'preview' | 'master';
 
@@ -73,10 +75,12 @@ export const prepareRenderProps = async (
     });
   }
   const sources = await readValidatedSourceManifest(projectPath, integrity);
+  const visualStyle = await readProjectStyle(projectPath, sources);
   const fingerprint = artifactFingerprint({
     target,
     edit,
     media: target === 'preview' ? proxies : graded,
+    visualStyle,
   }).slice(0, 16);
   const publicRelativeRoot = `jobs/${edit.reelName}/${fingerprint}`;
   const stageRoot = renderStageRoot(engineRoot, edit.reelName, fingerprint);
@@ -171,23 +175,38 @@ export const prepareRenderProps = async (
       music = staged;
     }
 
-    let fontUrl: string | null = null;
-    const fontSource = sources.sources
-      .filter(
-        (source) =>
-          source.mediaType === 'font' && /\.(woff2?|ttf|otf)$/i.test(source.relativePath),
-      )
-      .sort((left, right) => left.relativePath.localeCompare(right.relativePath))[0];
-    if (fontSource) {
-      const font = resolveInside(projectPath, fontSource.relativePath);
-      const staged = await stageImmutableFile(
-        font,
-        stageRoot,
-        `fonts/${path.basename(font)}`,
-        fontSource.checksumSha256,
+    const stagedBySourceId = new Map<string, string>();
+    for (const source of resolveStyleFontSources(visualStyle, sources)) {
+      const font = resolveInside(projectPath, source.relativePath);
+      stagedBySourceId.set(
+        source.id,
+        await stageImmutableFile(
+          font,
+          stageRoot,
+          `fonts/${path.basename(font)}`,
+          source.checksumSha256,
+        ),
       );
-      fontUrl = staged;
     }
+    const fonts = Object.fromEntries(
+      (['display', 'body', 'metadata'] as FontRole[]).map((role) => {
+        const selection = visualStyle.typography[role];
+        if (!selection.relativePath) return [role, null];
+        const source = sources.sources.find(
+          (candidate) => candidate.relativePath === selection.relativePath,
+        );
+        if (!source) throw new Error(`Selected style font is missing: ${selection.relativePath}`);
+        return [
+          role,
+          {
+            url: stagedBySourceId.get(source.id)!,
+            family: selection.family,
+            weight: selection.weight,
+            style: selection.style,
+          },
+        ];
+      }),
+    ) as ReelRenderProps['fonts'];
 
     const props: ReelRenderProps = {
       edit,
@@ -196,7 +215,8 @@ export const prepareRenderProps = async (
       captions: await loadCaptions(projectPath, edit),
       watermark: hasUnconfirmedPreview ? 'UNNORMALIZED LOG PREVIEW - NOT FOR EXPORT' : null,
       trimBeforeFramesByClip,
-      fontUrl,
+      visualStyle,
+      fonts,
     };
     if (target === 'preview') {
       await writeJson(path.join(projectPath, 'analysis/preview-stabilization.json'), {
