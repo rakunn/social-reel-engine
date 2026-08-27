@@ -219,6 +219,33 @@ describe('reel project variants', () => {
     );
   });
 
+  it('supports a target name whose unbounded staging prefix would exceed a path component', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-long-target-'));
+    const projectsRoot = path.join(temporaryRoot, 'projects');
+    const sourcePath = await createReelProject({
+      engineRoot: repositoryRoot,
+      projectsRoot,
+      reelName: 'long-target-source',
+    });
+    await writeVariantReadyEdit(sourcePath, 'long-target-source');
+    const targetName = 'v'.repeat(240);
+
+    const module = await loadVariantModule();
+    if (!module?.createProjectVariant) throw new Error('Variant module is unavailable');
+    await expect(
+      module.createProjectVariant({
+        engineRoot: repositoryRoot,
+        projectsRoot,
+        sourceName: 'long-target-source',
+        targetName,
+        title: 'Long target variant',
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({targetPath: path.join(projectsRoot, targetName)}),
+    );
+    await expect(access(path.join(projectsRoot, targetName))).resolves.toBeUndefined();
+  });
+
   it('caps the generated variant title at the brief schema limit', async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-title-'));
     const projectsRoot = path.join(temporaryRoot, 'projects');
