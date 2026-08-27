@@ -78,6 +78,36 @@ const writeVariantReadyEdit = async (projectPath: string, reelName: string): Pro
 };
 
 describe('reel project variants', () => {
+  it('rejects a source project whose creator still holds its name reservation', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-source-reservation-'));
+    const projectsRoot = path.join(temporaryRoot, 'projects');
+    const sourcePath = await createReelProject({
+      engineRoot: repositoryRoot,
+      projectsRoot,
+      reelName: 'creating-source',
+    });
+    await writeVariantReadyEdit(sourcePath, 'creating-source');
+    const sourceReservation = await acquireProjectNameReservation(
+      projectsRoot,
+      'creating-source',
+    );
+    const module = await loadVariantModule();
+    if (!module?.createProjectVariant) throw new Error('Variant module is unavailable');
+    try {
+      await expect(
+        module.createProjectVariant({
+          engineRoot: repositoryRoot,
+          projectsRoot,
+          sourceName: 'creating-source',
+          targetName: 'source-reservation-variant',
+        }),
+      ).rejects.toThrow(/reserved|being created/i);
+      await expect(access(path.join(projectsRoot, 'source-reservation-variant'))).rejects.toThrow();
+    } finally {
+      await sourceReservation.release();
+    }
+  });
+
   it('does not publish over a target name reserved by another creator', async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-reservation-'));
     const projectsRoot = path.join(temporaryRoot, 'projects');
