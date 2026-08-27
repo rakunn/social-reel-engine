@@ -293,18 +293,23 @@ export const createProjectVariant = async ({
   const resolvedProjectsRoot = path.resolve(projectsRoot);
   const sourcePath = path.join(resolvedProjectsRoot, safeSourceName);
   const targetPath = path.join(resolvedProjectsRoot, safeTargetName);
-  await assertProjectScaffold(sourcePath);
-  await assertNoSymbolicLinks(sourcePath, sourcePath);
-  await assertNoSymbolicLinks(sourcePath, path.join(sourcePath, 'analysis'));
-  const targetReservation = await acquireProjectNameReservation(
+  const sourceReservation = await acquireProjectNameReservation(
     resolvedProjectsRoot,
-    safeTargetName,
+    safeSourceName,
   );
   try {
-    if (await exists(targetPath)) {
-      throw new Error(`Reel project "${safeTargetName}" already exists`);
-    }
-    const snapshot = await runWithStatusScanLock(sourcePath, async () => {
+    await assertProjectScaffold(sourcePath);
+    await assertNoSymbolicLinks(sourcePath, sourcePath);
+    await assertNoSymbolicLinks(sourcePath, path.join(sourcePath, 'analysis'));
+    const targetReservation = await acquireProjectNameReservation(
+      resolvedProjectsRoot,
+      safeTargetName,
+    );
+    try {
+      if (await exists(targetPath)) {
+        throw new Error(`Reel project "${safeTargetName}" already exists`);
+      }
+      const snapshot = await runWithStatusScanLock(sourcePath, async () => {
     await assertReadTreesContainNoSymbolicLinks(sourcePath);
     const stagingRoot = await mkdtemp(
       variantStagingPrefix(resolvedProjectsRoot, safeTargetName),
@@ -425,11 +430,14 @@ export const createProjectVariant = async ({
       throw error;
     }
     });
-    if (!snapshot.acquired) {
-      throw new Error('Cannot create a variant while the source project has active media work');
+      if (!snapshot.acquired) {
+        throw new Error('Cannot create a variant while the source project has active media work');
+      }
+      return snapshot.value;
+    } finally {
+      await targetReservation.release();
     }
-    return snapshot.value;
   } finally {
-    await targetReservation.release();
+    await sourceReservation.release();
   }
 };
