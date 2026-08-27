@@ -8,7 +8,11 @@ import {readJson} from '../../src/core/json';
 import {createReelProject} from '../../src/project/workspace';
 import {scanInputs} from '../../src/project/ingest';
 import {StyleConfigSchema, type FontAsset} from '../../src/style/contracts';
-import {applyStylePreset, materializeCatalogFont} from '../../src/style/library';
+import {
+  applyStylePreset,
+  listStyleLibrary,
+  materializeCatalogFont,
+} from '../../src/style/library';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
 const expectedBytes = new TextEncoder().encode('verified-font-fixture');
@@ -29,6 +33,20 @@ const fixtureAsset: FontAsset = {
 };
 
 describe('style library', () => {
+  it('lists every catalog font with cache, script, role, and license metadata', async () => {
+    const listing = await listStyleLibrary(repositoryRoot);
+    expect(listing.fonts).toHaveLength(5);
+    expect(listing.fonts).toContainEqual(
+      expect.objectContaining({
+        id: 'noto-sans-tagalog-regular',
+        scripts: ['Tagalog'],
+        roles: ['display', 'body', 'metadata'],
+        license: expect.objectContaining({id: 'OFL-1.1'}),
+        cache: expect.stringMatching(/^(cached|missing|corrupt)$/),
+      }),
+    );
+  });
+
   it('reuses only an exact cached font', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'style-cache-'));
     const cachePath = path.join(root, fixtureAsset.cacheFile);

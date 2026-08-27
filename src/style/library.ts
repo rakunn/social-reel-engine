@@ -151,6 +151,16 @@ export const listStyleLibrary = async (engineRoot: string) => {
   );
   return {
     schemaVersion: styles.schemaVersion,
+    fonts: fonts.fonts.map((asset) => ({
+      id: asset.id,
+      family: asset.family,
+      style: asset.style,
+      weight: asset.weight,
+      roles: asset.roles,
+      scripts: asset.scripts,
+      license: asset.license,
+      cache: statusById[asset.id],
+    })),
     presets: styles.presets.map((preset) => ({
       id: preset.id,
       name: preset.name,
