@@ -4,7 +4,10 @@ import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {fileURLToPath} from 'node:url';
 import {describe, expect, it} from 'vitest';
-import {createReelProject} from '../../src/project/workspace';
+import {
+  acquireProjectNameReservation,
+  createReelProject,
+} from '../../src/project/workspace';
 import {writeJson} from '../../src/core/json';
 import {hashFile} from '../../src/core/hash';
 import {beginMediaOperation, completeMediaOperation} from '../../src/project/operation';
@@ -65,6 +68,33 @@ const writeVariantReadyEdit = async (projectPath: string, reelName: string): Pro
 };
 
 describe('reel project variants', () => {
+  it('does not publish over a target name reserved by another creator', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-reservation-'));
+    const projectsRoot = path.join(temporaryRoot, 'projects');
+    const sourcePath = await createReelProject({
+      engineRoot: repositoryRoot,
+      projectsRoot,
+      reelName: 'reservation-source',
+    });
+    await writeVariantReadyEdit(sourcePath, 'reservation-source');
+    const reservation = await acquireProjectNameReservation(projectsRoot, 'reserved-variant');
+    const module = await loadVariantModule();
+    if (!module?.createProjectVariant) throw new Error('Variant module is unavailable');
+    try {
+      await expect(
+        module.createProjectVariant({
+          engineRoot: repositoryRoot,
+          projectsRoot,
+          sourceName: 'reservation-source',
+          targetName: 'reserved-variant',
+        }),
+      ).rejects.toThrow(/reserved|being created/i);
+      await expect(access(path.join(projectsRoot, 'reserved-variant'))).rejects.toThrow();
+    } finally {
+      await reservation.release();
+    }
+  });
+
   it('keeps the target unpublished until its complete staged snapshot is ready', async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-publication-'));
     const projectsRoot = path.join(temporaryRoot, 'projects');

@@ -24,7 +24,11 @@ import {readRightsConfirmationStatus} from '../edit/rights';
 import type {GradedClipReport} from '../media/grade';
 import type {ArtifactIndex} from './artifacts';
 import {runWithStatusScanLock} from './operation';
-import {assertProjectScaffold, createReelProject} from './workspace';
+import {
+  acquireProjectNameReservation,
+  assertProjectScaffold,
+  createReelProject,
+} from './workspace';
 
 export type CreateProjectVariantOptions = {
   engineRoot: string;
@@ -243,10 +247,15 @@ export const createProjectVariant = async ({
   const targetPath = path.join(resolvedProjectsRoot, safeTargetName);
   await assertProjectScaffold(sourcePath);
   await assertNoSymbolicLinks(sourcePath, sourcePath);
-  if (await exists(targetPath)) {
-    throw new Error(`Reel project "${safeTargetName}" already exists`);
-  }
-  const snapshot = await runWithStatusScanLock(sourcePath, async () => {
+  const targetReservation = await acquireProjectNameReservation(
+    resolvedProjectsRoot,
+    safeTargetName,
+  );
+  try {
+    if (await exists(targetPath)) {
+      throw new Error(`Reel project "${safeTargetName}" already exists`);
+    }
+    const snapshot = await runWithStatusScanLock(sourcePath, async () => {
     const stagingRoot = await mkdtemp(
       path.join(resolvedProjectsRoot, `.variant-${safeTargetName}.partial-`),
     );
@@ -364,9 +373,12 @@ export const createProjectVariant = async ({
       await rm(stagingRoot, {recursive: true, force: true});
       throw error;
     }
-  });
-  if (!snapshot.acquired) {
-    throw new Error('Cannot create a variant while the source project has active media work');
+    });
+    if (!snapshot.acquired) {
+      throw new Error('Cannot create a variant while the source project has active media work');
+    }
+    return snapshot.value;
+  } finally {
+    await targetReservation.release();
   }
-  return snapshot.value;
 };
