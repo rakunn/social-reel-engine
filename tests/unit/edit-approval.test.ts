@@ -379,6 +379,22 @@ describe('edit validation', () => {
 });
 
 describe('hash-bound approvals', () => {
+  it('binds the color manifest hash to referenced source bytes', async () => {
+    const {projectPath, edit, sourceId} = await makeFixture();
+    const lutsConfig = JSON.parse(
+      await readFile(path.join(projectPath, 'config/luts.json'), 'utf8'),
+    );
+    const manifest = SourceManifestSchema.parse(
+      JSON.parse(await readFile(path.join(projectPath, 'analysis/sources.json'), 'utf8')),
+    );
+    const originalHash = createColorHash(edit, lutsConfig.luts, manifest.sources);
+    const replacedSources = manifest.sources.map((source) =>
+      source.id === sourceId ? {...source, checksumSha256: 'f'.repeat(64)} : source,
+    );
+
+    expect(createColorHash(edit, lutsConfig.luts, replacedSources)).not.toBe(originalHash);
+  });
+
   it('makes rights confirmation stale when the referenced asset set changes', async () => {
     const {projectPath, edit} = await makeFixture();
     const confirmation = await confirmRights(

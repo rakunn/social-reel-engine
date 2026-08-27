@@ -63,6 +63,7 @@ export const createColorHash = (
       const source = sourcesById.get(sourceId);
       return {
         sourceId,
+        checksumSha256: source?.checksumSha256 ?? null,
         camera: source
           ? {
               confirmed: source.camera.confirmed,
