@@ -103,6 +103,40 @@ const cloneTree = async (
   return 1;
 };
 
+const assertTreeContainsNoSymbolicLinks = async (
+  sourceRoot: string,
+  source: string,
+): Promise<void> => {
+  await assertNoSymbolicLinks(sourceRoot, source);
+  const sourceStat = await lstat(source);
+  if (sourceStat.isDirectory()) {
+    for (const entry of await readdir(source)) {
+      await assertTreeContainsNoSymbolicLinks(sourceRoot, path.join(source, entry));
+    }
+    return;
+  }
+  if (!sourceStat.isFile()) {
+    throw new Error(`Variant source contains a non-regular file: ${source}`);
+  }
+};
+
+const assertReadTreesContainNoSymbolicLinks = async (sourcePath: string): Promise<void> => {
+  for (const relativePath of [
+    'brief.json',
+    'edits',
+    'input',
+    'config',
+    'analysis',
+    'previews/graded-stills',
+    'work/graded',
+  ]) {
+    const source = path.join(sourcePath, relativePath);
+    if (await exists(source)) {
+      await assertTreeContainsNoSymbolicLinks(sourcePath, source);
+    }
+  }
+};
+
 const cloneIfPresent = async (
   sourceRoot: string,
   source: string,
@@ -257,6 +291,7 @@ export const createProjectVariant = async ({
       throw new Error(`Reel project "${safeTargetName}" already exists`);
     }
     const snapshot = await runWithStatusScanLock(sourcePath, async () => {
+    await assertReadTreesContainNoSymbolicLinks(sourcePath);
     const stagingRoot = await mkdtemp(
       path.join(resolvedProjectsRoot, `.variant-${safeTargetName}.partial-`),
     );
