@@ -45,7 +45,6 @@ export const assertProjectScaffold = async (projectPath: string): Promise<void> 
     path.join(projectPath, 'brief.json'),
     path.join(projectPath, 'analysis'),
     path.join(projectPath, 'config'),
-    path.join(projectPath, 'config/style.json'),
     path.join(projectPath, 'edits/edit.json'),
   ];
   try {

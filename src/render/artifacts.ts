@@ -30,6 +30,8 @@ import {
   type OutputTarget,
 } from './policy';
 import {readPreviewStabilizationContext} from '../media/preview-stabilization-integrity';
+import {readProjectStyle, resolveStyleFontSources, styleForRenderFingerprint} from '../style/project';
+import type {StyleConfig} from '../style/contracts';
 
 export type RenderArtifactRecord = {
   fingerprint: string;
@@ -114,6 +116,7 @@ const renderSettingsFingerprintProjection = (
 export const referencedRenderSources = (
   edit: EditManifest,
   sourceManifest: SourceManifest,
+  style: StyleConfig,
 ): SourceEntry[] => {
   const sourceIds = new Set(edit.clips.map((clip) => clip.sourceId));
   if (edit.music) sourceIds.add(edit.music.sourceId);
@@ -123,13 +126,7 @@ export const referencedRenderSources = (
     );
     if (caption) sourceIds.add(caption.id);
   }
-  const font = sourceManifest.sources
-    .filter(
-      (source) =>
-        source.mediaType === 'font' && /\.(woff2?|ttf|otf)$/i.test(source.relativePath),
-    )
-    .sort((left, right) => left.relativePath.localeCompare(right.relativePath))[0];
-  if (font) sourceIds.add(font.id);
+  for (const font of resolveStyleFontSources(style, sourceManifest)) sourceIds.add(font.id);
   return sourceManifest.sources.filter((source) => sourceIds.has(source.id));
 };
 
@@ -187,7 +184,8 @@ export const expectedRenderFingerprint = async (
     ]);
   const luts = LutDefinitionsSchema.parse(lutsConfig.luts);
   const parsedBrief = ReelBriefSchema.parse(brief);
-  const renderSources = referencedRenderSources(edit, sourceManifest);
+  const style = await readProjectStyle(projectPath, sourceManifest);
+  const renderSources = referencedRenderSources(edit, sourceManifest, style);
   const renderLuts = referencedRenderLuts(target, edit, renderSources, luts);
   const renderInputPaths = new Set([
     ...renderSources.map((source) => source.relativePath),
@@ -234,6 +232,7 @@ export const expectedRenderFingerprint = async (
       target === 'preview' ? 'not-required' : stabilizationReviewContext.reviewContextHash,
     luts: renderLuts,
     settings: renderSettingsFingerprintProjection(target, settings),
+    style: styleForRenderFingerprint(style),
     rightsConfirmation:
       target === 'preview'
         ? 'not-required'

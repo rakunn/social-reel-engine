@@ -36,6 +36,7 @@ import {
 import {getProjectStatus} from '../../src/project/workspace';
 import {RenderInterruptedError} from '../../src/render/errors';
 import {renderPreview} from '../../src/render/remotion';
+import {CINEMATIC_MINIMAL_STYLE} from '../../src/style/contracts';
 
 const makeFixture = async () => {
   const projectPath = await mkdtemp(path.join(tmpdir(), 'reel-approval-'));
@@ -489,6 +490,26 @@ describe('hash-bound approvals', () => {
       'first-font-bytes',
       'font',
     );
+    const stylePath = path.join(projectPath, 'config/style.json');
+    const selectedFontStyle = (relativePath: string, assetId: string) => ({
+      ...CINEMATIC_MINIMAL_STYLE,
+      presetId: 'explicit-custom-font',
+      catalogFingerprint: assetId === 'director-b' ? 'b'.repeat(64) : 'a'.repeat(64),
+      typography: Object.fromEntries(
+        (['display', 'body', 'metadata'] as const).map((role) => [
+          role,
+          {
+            assetId,
+            relativePath,
+            family: 'ReelDisplay',
+            weight: 500,
+            style: 'normal',
+            fallback: ['sans-serif'],
+          },
+        ]),
+      ),
+    });
+    await writeJson(stylePath, selectedFontStyle('input/fonts/B-Director.ttf', 'director-b'));
     await confirmRights(projectPath);
 
     await addAnalyzedInput(
@@ -497,6 +518,7 @@ describe('hash-bound approvals', () => {
       'replacement-font-bytes',
       'font',
     );
+    await writeJson(stylePath, selectedFontStyle('input/fonts/A-Director.ttf', 'director-a'));
 
     await expect(readRightsConfirmationStatus(projectPath)).resolves.toEqual(
       expect.objectContaining({confirmed: false, reason: expect.stringMatching(/asset set/i)}),

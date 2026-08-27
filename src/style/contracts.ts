@@ -156,7 +156,10 @@ const RendererFamilySchema = z.enum(['ReelDisplay', 'ReelBody', 'ReelMetadata'])
 export const ProjectFontRoleSchema = z
   .object({
     assetId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).nullable(),
-    relativePath: z.string().regex(/^input\/fonts\/[a-zA-Z0-9._-]+\.ttf$/).nullable(),
+    relativePath: z
+      .string()
+      .regex(/^input\/fonts\/[a-zA-Z0-9._-]+\.(?:woff2?|ttf|otf)$/i)
+      .nullable(),
     family: RendererFamilySchema,
     weight: z.number().int().min(100).max(900),
     style: z.enum(['normal', 'italic']),
