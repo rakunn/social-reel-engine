@@ -1,4 +1,4 @@
-import {access, mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {access, mkdir, mkdtemp, readFile, rm, symlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -26,7 +26,112 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const loadVariantModule = async () =>
   await import('../../src/project/variant').catch(() => null);
 
+const writeVariantReadyEdit = async (projectPath: string, reelName: string): Promise<void> => {
+  await writeJson(path.join(projectPath, 'edits/edit.json'), {
+    schemaVersion: '1.0.0',
+    reelName,
+    output: {width: 1080, height: 1920, fps: 30},
+    clips: [
+      {
+        id: 'hero',
+        sourceId: 'video-source',
+        inSeconds: 1,
+        outSeconds: 5.5,
+        playbackRate: 1,
+        crop: {
+          start: {x: 0.5, y: 0.5, scale: 1},
+          end: {x: 0.5, y: 0.5, scale: 1},
+        },
+        stabilization: {enabled: false, strength: 0, fallbackToUnstabilized: false},
+        grade: {
+          exposureStops: 0,
+          whiteBalanceKelvin: 6500,
+          tint: 0,
+          technicalLutId: null,
+          creativeLutId: null,
+          combinedLutId: null,
+          creativeMix: 0,
+        },
+        audio: {muted: true, gainDb: -60},
+        textOverlay: null,
+        transitionAfter: {type: 'none', durationSeconds: 0},
+      },
+    ],
+    titles: [],
+    music: null,
+    captions: null,
+  });
+};
+
 describe('reel project variants', () => {
+  it('caps the generated variant title at the brief schema limit', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-title-'));
+    const projectsRoot = path.join(temporaryRoot, 'projects');
+    const sourcePath = await createReelProject({
+      engineRoot: repositoryRoot,
+      projectsRoot,
+      reelName: 'long-title-source',
+      title: 'T'.repeat(160),
+    });
+    await writeVariantReadyEdit(sourcePath, 'long-title-source');
+
+    const module = await loadVariantModule();
+    if (!module?.createProjectVariant) throw new Error('Variant module is unavailable');
+    const result = await module.createProjectVariant({
+      engineRoot: repositoryRoot,
+      projectsRoot,
+      sourceName: 'long-title-source',
+      targetName: 'long-title-variant',
+    });
+
+    const targetBrief = JSON.parse(
+      await readFile(path.join(result.targetPath, 'brief.json'), 'utf8'),
+    );
+    expect(targetBrief.identity.title).toBe(`${'T'.repeat(152)} variant`);
+    expect(targetBrief.identity.title).toHaveLength(160);
+  });
+
+  it('rejects cached artifacts reached through a symlinked directory', async () => {
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-symlink-'));
+    const projectsRoot = path.join(temporaryRoot, 'projects');
+    const sourcePath = await createReelProject({
+      engineRoot: repositoryRoot,
+      projectsRoot,
+      reelName: 'symlink-source',
+    });
+    await writeVariantReadyEdit(sourcePath, 'symlink-source');
+    const externalCache = path.join(temporaryRoot, 'external-cache');
+    const externalFile = path.join(externalCache, 'escaped.mp4');
+    await mkdir(externalCache, {recursive: true});
+    await writeFile(externalFile, 'external-cache-bytes');
+    await mkdir(path.join(sourcePath, 'work'), {recursive: true});
+    await symlink(externalCache, path.join(sourcePath, 'work/proxies'));
+    const relativePath = 'work/proxies/escaped.mp4';
+    await writeJson(path.join(sourcePath, 'analysis/artifacts.json'), {
+      schemaVersion: '1.0.0',
+      artifacts: {
+        escaped: {
+          fingerprint: 'a'.repeat(64),
+          generatedAt: '2026-08-27T00:00:00.000Z',
+          files: [relativePath],
+          checksums: {[relativePath]: await hashFile(externalFile)},
+        },
+      },
+    });
+
+    const module = await loadVariantModule();
+    if (!module?.createProjectVariant) throw new Error('Variant module is unavailable');
+    await expect(
+      module.createProjectVariant({
+        engineRoot: repositoryRoot,
+        projectsRoot,
+        sourceName: 'symlink-source',
+        targetName: 'symlink-variant',
+      }),
+    ).rejects.toThrow(/symbolic link/i);
+    await expect(access(path.join(projectsRoot, 'symlink-variant'))).rejects.toThrow();
+  });
+
   it('creates an isolated derivative that preserves inputs, source facts, edit corrections, and LUT choices', async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-variant-'));
     const projectsRoot = path.join(temporaryRoot, 'projects');
