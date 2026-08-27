@@ -24,6 +24,7 @@ import {
 } from '../../src/render/artifacts';
 import {prepareRenderProps} from '../../src/render/stage';
 import {pruneRenderStages} from '../../src/render/scratch';
+import {CINEMATIC_MINIMAL_STYLE} from '../../src/style/contracts';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const identityCube = `TITLE "Identity"\nLUT_3D_SIZE 2\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 1 1 1\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n`;
@@ -429,13 +430,28 @@ describe('strict color gating', () => {
 
   it('grades approved selections to reusable 10-bit ProRes intermediates', async () => {
     await confirmSyntheticColor();
-    const nestedFontPath = path.join(
-      projectPath,
-      'input/fonts/campaign/NestedDirector.ttf',
-    );
-    await mkdir(path.dirname(nestedFontPath), {recursive: true});
-    await writeFile(nestedFontPath, 'synthetic nested font');
+    const customFontPath = path.join(projectPath, 'input/fonts/NestedDirector.ttf');
+    await mkdir(path.dirname(customFontPath), {recursive: true});
+    await writeFile(customFontPath, 'synthetic custom font');
     const manifest = await analyzeSources(projectPath);
+    const customFont = manifest.sources.find((entry) => entry.mediaType === 'font')!;
+    const fontRole = {
+      assetId: 'nested-director',
+      relativePath: customFont.relativePath,
+      weight: 500,
+      style: 'normal',
+      fallback: ['Arial', 'sans-serif'],
+    } as const;
+    await writeJson(path.join(projectPath, 'config/style.json'), {
+      ...CINEMATIC_MINIMAL_STYLE,
+      presetId: 'nested-director-test',
+      catalogFingerprint: 'f'.repeat(64),
+      typography: {
+        display: {...fontRole, family: 'ReelDisplay'},
+        body: {...fontRole, family: 'ReelBody'},
+        metadata: {...fontRole, family: 'ReelMetadata'},
+      },
+    });
     const source = manifest.sources.find((entry) => entry.mediaType === 'video')!;
     await writeJson(path.join(projectPath, 'edits/edit.json'), {
       schemaVersion: '1.0.0',
@@ -473,13 +489,32 @@ describe('strict color gating', () => {
     const stagedPreview = await prepareRenderProps(projectPath, repositoryRoot, 'preview');
     expect(stagedPreview.props.trimBeforeFramesByClip?.['shot-1']).toBe(0);
     expect(stagedPreview.props.media['shot-1']).toMatch(/^media\/shot-1\./);
-    expect(stagedPreview.props.fontUrl).toMatch(/^fonts\/NestedDirector\.ttf$/);
+    expect(stagedPreview.props.fonts).toEqual({
+      display: {
+        url: 'fonts/NestedDirector.ttf',
+        family: 'ReelDisplay',
+        weight: 500,
+        style: 'normal',
+      },
+      body: {
+        url: 'fonts/NestedDirector.ttf',
+        family: 'ReelBody',
+        weight: 500,
+        style: 'normal',
+      },
+      metadata: {
+        url: 'fonts/NestedDirector.ttf',
+        family: 'ReelMetadata',
+        weight: 500,
+        style: 'normal',
+      },
+    });
     expect(
       await readFile(
-        path.join(stagedPreview.stageRoot, stagedPreview.props.fontUrl!),
+        path.join(stagedPreview.stageRoot, stagedPreview.props.fonts.display!.url),
         'utf8',
       ),
-    ).toBe('synthetic nested font');
+    ).toBe('synthetic custom font');
     const previewStabilization = JSON.parse(
       await readFile(path.join(projectPath, 'analysis/preview-stabilization.json'), 'utf8'),
     );
