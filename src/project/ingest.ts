@@ -145,41 +145,61 @@ export const ingestFilesWithinStatusScanLock = async (
     }
   }
 
-  for (const sourcePath of sourcePaths) {
-    const sourceStat = await stat(sourcePath);
-    if (!sourceStat.isFile()) {
-      throw new Error(`Input is not a regular file: ${sourcePath}`);
-    }
-    const targetPath = path.join(targetDirectory, path.basename(sourcePath));
-    const relativePath = path.relative(projectPath, targetPath).split(path.sep).join('/');
-    const sourceHash = await hashFile(sourcePath);
-    const expectedChecksum = options.expectedChecksums?.get(path.resolve(sourcePath));
-    if (expectedChecksum && sourceHash !== expectedChecksum) {
-      throw new Error(`Input checksum does not match the verified catalog bytes: ${sourcePath}`);
-    }
-    try {
-      await copyFile(sourcePath, targetPath, fsConstants.COPYFILE_EXCL);
-      const copiedHash = await hashFile(targetPath);
-      if (copiedHash !== sourceHash || (expectedChecksum && copiedHash !== expectedChecksum)) {
-        await unlink(targetPath);
-        throw new Error(`Checksum verification failed after copying ${sourcePath}`);
+  try {
+    for (const sourcePath of sourcePaths) {
+      const sourceStat = await stat(sourcePath);
+      if (!sourceStat.isFile()) {
+        throw new Error(`Input is not a regular file: ${sourcePath}`);
       }
-      added.push(relativePath);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
-        throw error;
+      const targetPath = path.join(targetDirectory, path.basename(sourcePath));
+      const relativePath = path.relative(projectPath, targetPath).split(path.sep).join('/');
+      const sourceHash = await hashFile(sourcePath);
+      const expectedChecksum = options.expectedChecksums?.get(path.resolve(sourcePath));
+      if (expectedChecksum && sourceHash !== expectedChecksum) {
+        throw new Error(`Input checksum does not match the verified catalog bytes: ${sourcePath}`);
       }
-      const existingHash = await hashFile(targetPath);
-      if (existingHash !== sourceHash) {
-        throw new Error(`Refusing to overwrite existing input ${relativePath} with different bytes`);
+      try {
+        await copyFile(sourcePath, targetPath, fsConstants.COPYFILE_EXCL);
+        const copiedHash = await hashFile(targetPath);
+        if (copiedHash !== sourceHash || (expectedChecksum && copiedHash !== expectedChecksum)) {
+          await unlink(targetPath);
+          throw new Error(`Checksum verification failed after copying ${sourcePath}`);
+        }
+        added.push(relativePath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+          throw error;
+        }
+        const existingHash = await hashFile(targetPath);
+        if (existingHash !== sourceHash) {
+          throw new Error(`Refusing to overwrite existing input ${relativePath} with different bytes`);
+        }
+        unchanged.push(relativePath);
       }
-      unchanged.push(relativePath);
     }
-  }
 
-  const manifest = await scanInputs(projectPath);
-  await writeJson(path.join(projectPath, 'analysis/ingest.json'), manifest);
-  return {added, unchanged};
+    const manifest = await scanInputs(projectPath);
+    await writeJson(path.join(projectPath, 'analysis/ingest.json'), manifest);
+    return {added, unchanged};
+  } catch (error) {
+    const rollbackErrors: unknown[] = [];
+    for (const relativePath of added.reverse()) {
+      try {
+        await unlink(resolveInside(projectPath, relativePath));
+      } catch (rollbackError) {
+        if ((rollbackError as NodeJS.ErrnoException).code !== 'ENOENT') {
+          rollbackErrors.push(rollbackError);
+        }
+      }
+    }
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError(
+        [error, ...rollbackErrors],
+        `Input ingest failed and ${rollbackErrors.length} copied file(s) could not be rolled back`,
+      );
+    }
+    throw error;
+  }
 };
 
 export const ingestFiles = async (
