@@ -130,6 +130,20 @@
         "run grade then render-carousel then qc-carousel",
         "deliver ordered MP4 paths plus analysis/qc-carousel.md and do not use the standard reel or photo-package render commands"
       ]
+    },
+    {
+      "id": "captioned-carousel-derivative",
+      "prompt": "My clean 1.91:1 carousel is fully approved, corrected, graded, rendered, and QC-passed. Create a separate subtle captioned version without overwriting it. Keep the approved corrections when safe. Explain the commands, what is reused, and which approvals must repeat.",
+      "mustCover": [
+        "use variant rather than new and keep the clean project untouched",
+        "inherit exact trims crops stabilization and per-shot color corrections by default",
+        "reuse only checksum-valid proxy rights and color artifacts",
+        "put copy in per-card textOverlay rather than carousel-global captions",
+        "render and explicitly approve the derivative rough preview",
+        "do not repeat color approval when status confirms the exact color projection and reviewed still bytes remain current",
+        "invalidate color for source interval crop stabilization grade LUT or output color dimension changes",
+        "render-carousel and qc-carousel to a separate ready-to-share package"
+      ]
     }
   ]
 }

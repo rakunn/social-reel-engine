@@ -22,6 +22,7 @@ Every runtime `projects/<reel-name>` job is local-only and ignored by Git, inclu
 ```text
 npm run reel -- new <name> --title "<title>"
 npm run reel -- new <name> --title "<title>" --format carousel-1.91:1
+npm run reel -- variant <source-name> <target-name> --title "<title>"
 npm run reel -- ingest <name> <clip-paths...> --kind clips
 npm run reel -- ingest <name> <music-path> --kind music
 npm run reel -- ingest <name> <caption-path> --kind captions
@@ -34,6 +35,8 @@ npm run reel -- confirm-rights <name>
 
 Use `--list-library` to inspect catalog declarations and `--library <id...>` to install verified catalog LUTs. Ingest performs immutable basename-preserving copies and checksum verification. A same-name file with different bytes is a conflict, not an overwrite opportunity.
 
+Use `variant` when the requested asset is a separate version of an existing project. It creates a new project identity with copy-on-write inputs and reusable checksum-validated caches, retains exact edit/color decisions, and omits source previews and outputs. Use `new` for unrelated footage or a genuinely independent treatment.
+
 ## Configuration records
 
 After ingest, run `analyze`. Write each explicit camera/profile confirmation into `config/sources.json`, keyed by the source's project-relative path, then rerun `analyze`. Do not edit generated checksums in `analysis/sources.json`.
@@ -44,4 +47,4 @@ Only one music file is accepted for deterministic beat analysis. Verify whether 
 
 ## Rights
 
-`brief.json` records the aggregate `rightsConfirmed` decision and the checksum fingerprint of the used asset set it covers. Explain that the decision covers all used footage, music, captions, LUTs, fonts, brand assets, and other supplied material. Never infer ownership or edit either rights field manually. After the user explicitly confirms the exact current used set, run `npm run reel -- confirm-rights <name>`; this records the user's statement rather than asserting rights on their behalf. `status` treats the decision as stale when a referenced asset changes. It stays current when only an unused asset is ingested or the used set is otherwise unchanged.
+`brief.json` records the aggregate `rightsConfirmed` decision and the checksum fingerprint of the used asset set it covers. Explain that the decision covers all used footage, music, captions, LUTs, fonts, brand assets, and other supplied material. Never infer ownership or edit either rights field manually. After the user explicitly confirms the exact current used set, run `npm run reel -- confirm-rights <name>`; this records the user's statement rather than asserting rights on their behalf. `status` treats the decision as stale when a referenced asset changes. It stays current when only an unused asset is ingested or the used set is otherwise unchanged. A variant preserves the confirmation only when the exact referenced fingerprint is unchanged; trust `status` and do not ask again in that case.

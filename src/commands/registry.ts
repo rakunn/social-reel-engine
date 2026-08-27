@@ -1,6 +1,7 @@
 export const COMMAND_NAMES = [
   'doctor',
   'new',
+  'variant',
   'ingest',
   'analyze',
   'proxy',

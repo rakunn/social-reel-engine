@@ -317,6 +317,14 @@ export const AnimatedCropSchema = z.object({
   end: CropPointSchema,
 });
 
+const CardTextOverlaySchema = z
+  .object({
+    heading: z.string().trim().min(1).max(100),
+    subheading: z.string().trim().min(1).max(100).nullable().default(null),
+    placement: z.literal('lower-left').default('lower-left'),
+  })
+  .strict();
+
 export const EditClipSchema = z
   .object({
     id: z.string().regex(/^[a-zA-Z0-9]+(?:[._-][a-zA-Z0-9]+)*$/),
@@ -344,6 +352,7 @@ export const EditClipSchema = z
       muted: z.boolean(),
       gainDb: z.number().min(-60).max(12),
     }),
+    textOverlay: CardTextOverlaySchema.nullable().optional().default(null),
     transitionAfter: z.object({
       type: z.enum(['none', 'fade', 'slide', 'wipe']),
       durationSeconds: z.number().min(0).max(1.5),
@@ -472,7 +481,8 @@ export const ApprovalStateSchema = z
     schemaVersion: SchemaVersion,
     edit: ApprovalRecordSchema.nullable(),
     color: ApprovalRecordSchema.extend({
-      editHash: z.string().regex(/^[a-f0-9]{64}$/),
+      editHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+      colorHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
     }).nullable(),
   })
   .strict();

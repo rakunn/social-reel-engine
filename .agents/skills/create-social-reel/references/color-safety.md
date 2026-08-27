@@ -46,6 +46,8 @@ The supplied Szatrasie guide establishes general technique, not a shot-to-look p
 
 Do not select or rank Polish-named looks by translating their filenames. Compare actual rendered, technically normalized reference frames on representative daylight, shadow, sky, and skin/neutral content when present. Start with a restrained mix only as a proposal, retain a neutral option, and bind the selected values to color approval.
 
+When creating a derivative from the same byte-identical sources and selections, keep approved per-shot exposure, white balance, tint, LUT choices, blends, and treatments by default. This is exact dependency reuse, not automatic grading: re-evaluate when the source, selected interval, crop, stabilization, output color dimensions, LUT declaration/bytes, or creative intent changes, and never copy those corrections to unrelated footage merely because it shares a log profile.
+
 ## Review failures
 
 Regenerate or reject a grade when reference frames show unintended clipping, channel imbalance, crushed shadows, blown highlights, inconsistent neutral/skin rendering, a double-transform look, or excessive creative intensity. Automated output tags do not substitute for visual color review on a suitable display.

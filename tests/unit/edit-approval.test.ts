@@ -1132,6 +1132,42 @@ describe('hash-bound approvals', () => {
     await expect(assertRenderApprovals(projectPath)).rejects.toThrow(/stale|approval/i);
   });
 
+  it('keeps exact-match color approval after a text-only edit gets a new rough approval', async () => {
+    const {projectPath, edit} = await makeFixture();
+    await approveEdit(projectPath, new Date('2026-08-10T00:01:00.000Z'));
+    await approveColor(projectPath, new Date('2026-08-10T00:02:00.000Z'));
+
+    await writeJson(path.join(projectPath, 'edits/edit.json'), {
+      ...edit,
+      clips: [
+        {
+          ...edit.clips[0],
+          textOverlay: {
+            heading: 'Chocolate Hills',
+            subheading: 'Bohol, Philippines',
+            placement: 'lower-left',
+          },
+        },
+      ],
+    });
+    const previewPath = path.join(projectPath, 'previews/preview.mp4');
+    await writeFile(previewPath, 'reviewed-captioned-rough-cut-preview');
+    await recordRenderArtifact(
+      projectPath,
+      'preview',
+      previewPath,
+      await expectedRenderFingerprint(projectPath, 'preview'),
+      new Date('2026-08-10T00:03:00.000Z'),
+    );
+
+    await approveEdit(projectPath, new Date('2026-08-10T00:04:00.000Z'));
+    await expect(readApprovalStatus(projectPath)).resolves.toEqual({
+      editApproved: true,
+      colorApproved: true,
+    });
+    await expect(assertRenderApprovals(projectPath)).resolves.toBeUndefined();
+  });
+
   it('invalidates only color when grade settings change', async () => {
     const {projectPath, edit} = await makeFixture();
     const approved = await approveEdit(projectPath, new Date('2026-08-10T00:01:00.000Z'));

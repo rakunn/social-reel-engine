@@ -17,6 +17,7 @@ import {probeFile, runFfmpeg} from '../../src/media/ffmpeg';
 import {approveColor, approveEdit, readApprovalStatus} from '../../src/edit/approve';
 import {ingestFiles} from '../../src/project/ingest';
 import {createReelProject} from '../../src/project/workspace';
+import {createProjectVariant} from '../../src/project/variant';
 import {
   expectedRenderFingerprint,
   recordRenderArtifact,
@@ -130,6 +131,84 @@ const confirmSyntheticColor = async () => {
 };
 
 describe('source analysis and viewing proxies', () => {
+  it('reuses checksum-valid proxy artifacts in a derivative and regenerates tampered copies', async () => {
+    const root = await makeTemporaryRoot('reel-variant-proxy-');
+    const projectsRoot = path.join(root, 'projects');
+    const sourceProject = await createReelProject({
+      engineRoot: repositoryRoot,
+      projectsRoot,
+      reelName: 'proxy-source',
+    });
+    const sourceClip = path.join(root, 'source.mp4');
+    await runFfmpeg([
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc2=size=160x90:rate=30:duration=1',
+      '-c:v',
+      'libx264',
+      '-preset',
+      'ultrafast',
+      '-pix_fmt',
+      'yuv420p',
+      sourceClip,
+    ]);
+    await ingestFiles(sourceProject, [sourceClip], 'clips');
+    const sourceManifest = await analyzeSources(sourceProject);
+    const videoSource = sourceManifest.sources.find((source) => source.mediaType === 'video');
+    if (!videoSource) throw new Error('Synthetic video source is missing');
+    await writeJson(path.join(sourceProject, 'edits/edit.json'), {
+      schemaVersion: '1.0.0',
+      reelName: 'proxy-source',
+      output: {width: 1080, height: 1920, fps: 30},
+      clips: [
+        {
+          id: 'proxy-shot',
+          sourceId: videoSource.id,
+          inSeconds: 0,
+          outSeconds: 0.9,
+          playbackRate: 1,
+          crop: {
+            start: {x: 0.5, y: 0.5, scale: 1},
+            end: {x: 0.5, y: 0.5, scale: 1},
+          },
+          stabilization: {enabled: false, strength: 0, fallbackToUnstabilized: true},
+          grade: {
+            exposureStops: 0,
+            whiteBalanceKelvin: 6500,
+            tint: 0,
+            technicalLutId: null,
+            creativeLutId: null,
+            combinedLutId: null,
+            creativeMix: 0,
+          },
+          audio: {muted: true, gainDb: 0},
+          textOverlay: null,
+          transitionAfter: {type: 'none', durationSeconds: 0},
+        },
+      ],
+      titles: [],
+      music: null,
+      captions: null,
+    });
+    expect((await generateProxies(sourceProject)).items[0].cached).toBe(false);
+
+    const {targetPath} = await createProjectVariant({
+      engineRoot: repositoryRoot,
+      projectsRoot,
+      sourceName: 'proxy-source',
+      targetName: 'proxy-source-captioned',
+    });
+    const reused = await generateProxies(targetPath);
+    expect(reused.items[0].cached).toBe(true);
+
+    await writeFile(
+      path.join(targetPath, reused.items[0].representativeFrame),
+      'tampered-derivative-frame',
+    );
+    expect((await generateProxies(targetPath)).items[0].cached).toBe(false);
+  }, 30_000);
+
   it('probes and checksums sources without mutating originals', async () => {
     const manifest = await analyzeSources(projectPath);
     const video = manifest.sources.find((source) => source.mediaType === 'video');

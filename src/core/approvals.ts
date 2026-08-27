@@ -55,8 +55,16 @@ export const createColorHash = (
     )
     .sort((left, right) => left.id.localeCompare(right.id));
   return hashValue({
-    editHash: createEditHash(edit),
-    grades: edit.clips.map((clip) => ({id: clip.id, grade: clip.grade})),
+    output: edit.output,
+    clips: edit.clips.map((clip) => ({
+      id: clip.id,
+      sourceId: clip.sourceId,
+      inSeconds: clip.inSeconds,
+      outSeconds: clip.outSeconds,
+      crop: clip.crop,
+      stabilization: clip.stabilization,
+      grade: clip.grade,
+    })),
     luts: selectedLuts,
   });
 };
@@ -83,12 +91,10 @@ export type ReviewedStillFingerprint = {
 };
 
 export const createColorReviewHash = (
-  editReviewHash: string,
   colorManifestHash: string,
   reviewedStills: readonly ReviewedStillFingerprint[],
 ): string =>
   hashValue({
-    editReviewHash,
     colorManifestHash,
     reviewedStills: [...reviewedStills].sort(
       (left, right) =>
@@ -99,12 +105,14 @@ export const createColorReviewHash = (
 export const approvalStatus = (
   approvals: ApprovalState,
   editReviewHash: string | null,
+  colorManifestHash: string | null,
   colorReviewHash: string | null,
 ): {editApproved: boolean; colorApproved: boolean} => {
   const editApproved = Boolean(editReviewHash && approvals.edit?.hash === editReviewHash);
   const colorApproved =
     editApproved &&
-    approvals.color?.editHash === editReviewHash &&
+    Boolean(colorManifestHash) &&
+    approvals.color?.colorHash === colorManifestHash &&
     approvals.color?.hash === colorReviewHash;
   return {editApproved, colorApproved};
 };

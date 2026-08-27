@@ -31,6 +31,7 @@ const defaultProps: ReelRenderProps = {
           creativeMix: 0,
         },
         audio: {muted: true, gainDb: 0},
+        textOverlay: null,
         transitionAfter: {type: 'none', durationSeconds: 0},
       },
     ],

@@ -28,3 +28,7 @@ The first production run of the Coron/Ngey Ngey reel exposed a crop failure that
 ## Landscape video carousel baseline
 
 Before the carousel extension, the engine's video contract was fixed to 1080×1920 and the skill routed every moving-image request through the single vertical-reel render. The only package-style alternative created still photos. A prompt requesting independent 1.91:1 videos therefore could not produce a correctly fingerprinted ordered package, per-card QC, or a carousel-specific delivery record regardless of how precisely the aspect ratio and duration were described. The `landscape-video-carousel` case requires the new project format and command path instead of treating a prompt as a substitute for engine support.
+
+## Captioned carousel derivative baseline
+
+A fresh-context, read-only agent evaluated an approved clean-carousel-to-captioned-variant request against the pre-update skill. It found three deterministic gaps: the skill did not mention `variant`, did not route carousel copy through per-card `textOverlay`, and said any caption change invalidated both editorial and color approval. A strictly skill-only run would therefore risk creating a redundant project workflow and repeat the color gate even though the engine's exact color projection and reviewed still bytes were unchanged. The agent could infer the optimal workflow only by going beyond the written skill: isolated variant, new rough approval, exact-match rights/color reuse, then separate carousel render and QC.

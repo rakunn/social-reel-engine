@@ -153,6 +153,69 @@ describe('carousel edit contract', () => {
 });
 
 describe('carousel card rendering model', () => {
+  it('rejects unsupported or unbounded card-local text', () => {
+    const unsupportedPlacement = EditManifestSchema.safeParse({
+      ...validEdit,
+      clips: [
+        {
+          ...clip('hero'),
+          textOverlay: {
+            heading: 'CHOCOLATE HILLS',
+            subheading: null,
+            placement: 'center',
+          },
+        },
+        clip('closer'),
+      ],
+    });
+    const excessiveText = EditManifestSchema.safeParse({
+      ...validEdit,
+      clips: [
+        {
+          ...clip('hero'),
+          textOverlay: {
+            heading: 'X'.repeat(101),
+            subheading: null,
+            placement: 'lower-left',
+          },
+        },
+        clip('closer'),
+      ],
+    });
+
+    expect(unsupportedPlacement.success).toBe(false);
+    expect(excessiveText.success).toBe(false);
+  });
+
+  it('keeps a card-local text overlay on its standalone card without leaking it to neighbors', () => {
+    const parsed = EditManifestSchema.safeParse({
+      ...validEdit,
+      clips: [
+        {
+          ...clip('hero'),
+          textOverlay: {
+            heading: 'CHOCOLATE HILLS',
+            subheading: 'Bohol, Philippines',
+            placement: 'lower-left',
+          },
+        },
+        clip('closer'),
+      ],
+    });
+
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+
+    const hero = buildCarouselCardEdit(parsed.data, 0);
+    const closer = buildCarouselCardEdit(parsed.data, 1);
+    expect(hero.clips[0].textOverlay).toEqual({
+      heading: 'CHOCOLATE HILLS',
+      subheading: 'Bohol, Philippines',
+      placement: 'lower-left',
+    });
+    expect(closer.clips[0].textOverlay).toBeNull();
+  });
+
   it('builds a standalone timeline without leaking neighboring cards or global media', () => {
     const card = buildCarouselCardEdit(validEdit, 1);
     expect(card).toEqual(
