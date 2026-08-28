@@ -14,6 +14,34 @@ Open this folder as the workspace, attach or provide paths to your clips/music/c
 
 The skill creates `projects/<reel-name>`, ingests local copies of the supplied files, analyzes them, and pauses at the two visual checkpoints. It never chooses an unconfirmed technical transform. Per-shot stabilization is baked into the rough preview, so the approved framing is the framing used downstream.
 
+### Recommended prompt context
+
+A short prompt is enough when the supplied paths and desired format are clear. The workflow should choose sensible editorial defaults, inspect the footage, and ask only for unresolved factual or rights information and the required visual approvals.
+
+Include these details when they are known:
+
+- output type: `9:16 reel` or `1.91:1 video carousel`
+- source paths and any music, captions, LUTs, fonts, or brand assets to use
+- camera model and exact recording profile, gamma, and gamut, such as `DJI Mini 4 Pro, D-Log M`; never guess these from appearance alone
+- location, subject, mood, platform, and intended audience
+- target duration, or card duration and preferred number of cards
+- editorial preferences such as calm movement, varied adjacent compositions, hero/closing shots, text language, or whether the engine should choose them
+- a reusable style preset, such as `philippines-island-editorial`, or a concise visual direction
+- optional photo aspect ratios and still count
+- rights status when already known; the exact used asset set is still checksum-bound through `confirm-rights`
+
+You normally do not need to prescribe exact trims, crop coordinates, stabilization values, exposure stops, contrast, white balance, creative-LUT intensity, or the strongest available LUT. The workflow should evaluate these per shot, keep corrections when they materially improve the footage while remaining natural, and present the resulting composition and color for approval. It must still identify the correct technical normalization transform from confirmed source metadata rather than creative preference.
+
+Copy-ready vertical example:
+
+> Use $create-social-reel to make a 20–30 second 9:16 reel from the supplied clips. They were recorded on a DJI Mini 4 Pro in D-Log M. The story is a quiet Philippines sunset for Instagram. Avoid abrupt movement, vary wide and close compositions, choose the hero and closing shots, normalize and naturally improve the footage, and apply `philippines-island-editorial`. Use subtle English titles and no generated captions. I have rights to the supplied footage and LUTs.
+
+Copy-ready carousel example:
+
+> Use $create-social-reel to create an ordered 1.91:1 video carousel from the supplied D-Log M clips. Make each independently shareable card 4–5 seconds, avoid sudden camera movement, and vary adjacent compositions. Choose the strongest opening hero and a calm closing card. Correct exposure, contrast, white balance, and color where useful; keep improvements that look natural. Apply `philippines-island-editorial` with subtle burned-in location captions. I have rights to the supplied footage, LUTs, fonts, and music.
+
+If a choice is intentionally open, say so directly—for example, “choose the best LUT,” “choose the captions,” or “choose the hero and final shot.” That delegates the creative choice without authorizing the workflow to invent missing camera-profile facts, language translations, rights, or technical-transform semantics.
+
 To request an optional shareable-stills package after the approved reel, add this to the prompt:
 
 > After final master and delivery QC, export the five best clean photo stills in 9:16 and 4:5. Reuse the approved framing for 9:16, and present proposed reframes for 4:5 before final export.
