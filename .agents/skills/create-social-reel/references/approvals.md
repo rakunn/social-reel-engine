@@ -14,7 +14,9 @@ Only an explicit user decision after seeing the exact current artifact authorize
 6. Stop and wait.
 7. After the user explicitly approves that version, run `approve-edit`.
 
-Trim, order, crop, playback, transitions, title, music, camera audio, captions, stabilization, source-profile confirmation, or preview-normalization changes make editorial approval stale. Because color approval is bound to the edit hash, they make color approval stale too.
+Trim, order, crop, playback, transitions, title, music, camera audio, captions, card text, stabilization, source-profile confirmation, or preview-normalization changes make editorial approval stale. A separate derivative always requires its own rough preview and explicit edit approval.
+
+Color approval has a narrower dependency boundary. Source selection/interval, crop, stabilization, output color dimensions, exposure, white balance, tint, technical/combined/creative LUT choice or declaration, LUT bytes, treatment, and creative blend make it stale. Text, title, audio, music, captions, and transitions do not by themselves invalidate color when the color projection and reviewed-still checksums remain exact. Trust `status`; never preserve color merely from matching filenames or visual similarity.
 
 ## Gate 2: color
 
@@ -24,12 +26,12 @@ Trim, order, crop, playback, transitions, title, music, camera audio, captions, 
 4. Stop and wait.
 5. After the user explicitly approves those frames, run `approve-color`.
 
-Exposure, white balance, tint, technical/combined LUT, creative LUT, creative blend, LUT declaration, or LUT bytes changes make color approval stale. Reference-frame checksums must still match the files that were shown.
+Reference-frame checksums must still match the files that were shown. Graded reference frames isolate color; review card-text styling and contrast in the rough preview.
 
 ## Revisions and resuming
 
 Approval and rights records can remain on disk while becoming logically stale. Trust `status`, hash comparison, and QC rather than the mere presence of timestamps, `rightsConfirmed: true`, or output files. A changed used-asset fingerprint requires explicit rights confirmation and a new `confirm-rights`; an unchanged fingerprint does not require another question.
 
-After an editorial change, repeat both gates. After a grade-only change, retain the current edit approval but regenerate and repeat the color gate. Never reuse a previously rendered preview or still merely because its filename is unchanged.
+After an editorial-only change, regenerate and repeat the rough gate, then retain color only when `status` still reports it current. After a grade-only change, retain the current edit approval but regenerate and repeat the color gate. Changes such as trim, crop, source, or stabilization affect both and require both gates. Never reuse a previously rendered preview or still merely because its filename is unchanged.
 
 If the user says “approved” ambiguously, tie the response back to the artifact paths and current checkpoint. Do not interpret approval of a rough cut as approval of color or final rights.

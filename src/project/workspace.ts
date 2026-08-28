@@ -1,4 +1,5 @@
-import {access, cp, mkdir, readFile} from 'node:fs/promises';
+import {createHash, randomUUID} from 'node:crypto';
+import {access, cp, mkdir, readFile, rename, rm} from 'node:fs/promises';
 import path from 'node:path';
 import {
   ApprovalStateSchema,
@@ -11,9 +12,13 @@ import {assertSafeReelName} from '../core/paths';
 import {validateEdit} from '../edit/validate';
 import {scanInputs} from './ingest';
 import {
+  isProcessIdentityAlive,
   isMediaOperationLockActive,
   isMediaOperationAlive,
+  reclaimLockWithClaim,
+  readProcessStartMarker,
   readMediaOperation,
+  runWithLockClaim,
   runWithStatusScanLock,
   type MediaOperationRecord,
 } from './operation';
@@ -36,6 +41,200 @@ const exists = async (filePath: string): Promise<boolean> => {
   } catch {
     return false;
   }
+};
+
+type ProjectNameReservationOwner = {
+  schemaVersion: '1.0.0';
+  id: string;
+  pid: number;
+  processStartMarker: string | null;
+  leaseExpiresAt: string | null;
+  acquiredAt: string;
+};
+
+export type ProjectNameReservation = {
+  assertOwnership(): Promise<void>;
+  release(): Promise<void>;
+};
+
+const MAX_PATH_COMPONENT_BYTES = 255;
+const MAX_PROJECT_RESERVATION_SUFFIX_BYTES = 112;
+
+const reservationPathToken = (value: string): string =>
+  createHash('sha256').update(value).digest('hex');
+
+const projectNameReservationPath = (projectsRoot: string, safeName: string): string => {
+  const readableName = `.project-${safeName}.reservation`;
+  const basename =
+    Buffer.byteLength(readableName) <=
+    MAX_PATH_COMPONENT_BYTES - MAX_PROJECT_RESERVATION_SUFFIX_BYTES
+      ? readableName
+      : `.project-${reservationPathToken(safeName)}.reservation`;
+  return path.join(projectsRoot, basename);
+};
+
+const MARKERLESS_PROJECT_RESERVATION_LEASE_MS = 5 * 60_000;
+const MARKERLESS_PROJECT_RESERVATION_HEARTBEAT_MS = Math.floor(
+  MARKERLESS_PROJECT_RESERVATION_LEASE_MS / 3,
+);
+
+const projectNameReservationClaimPath = (
+  reservationPath: string,
+  ownerId: string,
+): string =>
+  path.join(
+    path.dirname(reservationPath),
+    `.project-claim-${reservationPathToken(`${path.basename(reservationPath)}\0${ownerId}`)}.json`,
+  );
+
+const projectNameReservationOwnershipLost = (): Error =>
+  new Error('Project name reservation ownership was lost');
+
+const readReservationOwner = async (
+  reservationPath: string,
+): Promise<ProjectNameReservationOwner | null> => {
+  try {
+    const owner = await readJson<ProjectNameReservationOwner>(
+      path.join(reservationPath, 'owner.json'),
+    );
+    return owner.schemaVersion === '1.0.0' &&
+      typeof owner.id === 'string' &&
+      owner.id.length > 0 &&
+      Number.isInteger(owner.pid) &&
+      owner.pid > 0 &&
+      (owner.processStartMarker === null || typeof owner.processStartMarker === 'string') &&
+      (owner.leaseExpiresAt === null || typeof owner.leaseExpiresAt === 'string') &&
+      typeof owner.acquiredAt === 'string'
+      ? owner
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+const reclaimStaleProjectNameReservation = async (
+  reservationPath: string,
+): Promise<boolean> => {
+  const owner = await readReservationOwner(reservationPath);
+  if (!owner || isProcessIdentityAlive(owner)) return false;
+  const identity = owner.id;
+  return await reclaimLockWithClaim({
+    claimPath: projectNameReservationClaimPath(reservationPath, identity),
+    lockPath: reservationPath,
+    canReclaim: async () => {
+      const current = await readReservationOwner(reservationPath);
+      return current?.id === identity && !isProcessIdentityAlive(current);
+    },
+    tombstonePath: (claimId) =>
+      `${reservationPath}.reclaimed-${reservationPathToken(identity)}-${claimId}`,
+  });
+};
+
+export const acquireProjectNameReservation = async (
+  projectsRoot: string,
+  reelName: string,
+): Promise<ProjectNameReservation> => {
+  const safeName = assertSafeReelName(reelName);
+  const resolvedProjectsRoot = path.resolve(projectsRoot);
+  await mkdir(resolvedProjectsRoot, {recursive: true});
+  const reservationPath = projectNameReservationPath(resolvedProjectsRoot, safeName);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const id = randomUUID();
+    const candidatePath = `${reservationPath}.initializing-${id}`;
+    const acquiredAt = new Date();
+    const processStartMarker = readProcessStartMarker(process.pid);
+    const owner: ProjectNameReservationOwner = {
+      schemaVersion: '1.0.0',
+      id,
+      pid: process.pid,
+      processStartMarker,
+      leaseExpiresAt: processStartMarker
+        ? null
+        : new Date(
+            acquiredAt.getTime() + MARKERLESS_PROJECT_RESERVATION_LEASE_MS,
+          ).toISOString(),
+      acquiredAt: acquiredAt.toISOString(),
+    };
+    await mkdir(candidatePath);
+    await writeJson(path.join(candidatePath, 'owner.json'), owner);
+    try {
+      await rename(candidatePath, reservationPath);
+      let released = false;
+      let ownershipFailure: Error | null = null;
+      const claimPath = projectNameReservationClaimPath(reservationPath, id);
+      const assertOwnership = async (): Promise<ProjectNameReservationOwner> => {
+        if (ownershipFailure) throw ownershipFailure;
+        const current = await readReservationOwner(reservationPath);
+        if (!current || current.id !== id || !isProcessIdentityAlive(current)) {
+          ownershipFailure = projectNameReservationOwnershipLost();
+          throw ownershipFailure;
+        }
+        return current;
+      };
+      const renewLease = async (): Promise<void> => {
+        const claimed = await runWithLockClaim(claimPath, async () => {
+          const current = await assertOwnership();
+          if (current.processStartMarker) return;
+          const leaseExpiresAt = new Date(
+            Date.now() + MARKERLESS_PROJECT_RESERVATION_LEASE_MS,
+          ).toISOString();
+          await writeJson(path.join(reservationPath, 'owner.json'), {
+            ...current,
+            leaseExpiresAt,
+          } satisfies ProjectNameReservationOwner);
+          await assertOwnership();
+        });
+        if (!claimed.acquired) {
+          ownershipFailure = projectNameReservationOwnershipLost();
+          throw ownershipFailure;
+        }
+      };
+      let renewalQueue: Promise<void> = Promise.resolve();
+      const enqueueRenewal = (): void => {
+        const renewal = renewalQueue.then(async () => await renewLease());
+        renewalQueue = renewal.then(
+          () => undefined,
+          (error) => {
+            ownershipFailure =
+              error instanceof Error ? error : projectNameReservationOwnershipLost();
+          },
+        );
+      };
+      const heartbeat =
+        processStartMarker === null
+          ? setInterval(() => {
+              enqueueRenewal();
+            }, MARKERLESS_PROJECT_RESERVATION_HEARTBEAT_MS)
+          : null;
+      heartbeat?.unref();
+      return {
+        assertOwnership: async () => {
+          await renewalQueue;
+          await assertOwnership();
+        },
+        release: async () => {
+          if (released) return;
+          if (heartbeat) clearInterval(heartbeat);
+          await renewalQueue;
+          const claimed = await runWithLockClaim(claimPath, async () => {
+            await assertOwnership();
+            const retiredPath = `${reservationPath}.released-${id}`;
+            await rename(reservationPath, retiredPath);
+            await rm(retiredPath, {recursive: true, force: true});
+          });
+          if (!claimed.acquired) throw projectNameReservationOwnershipLost();
+          released = true;
+        },
+      };
+    } catch (error) {
+      await rm(candidatePath, {recursive: true, force: true});
+      const code = (error as NodeJS.ErrnoException).code;
+      if (!['EEXIST', 'ENOTEMPTY'].includes(code ?? '')) throw error;
+      if (attempt === 0 && (await reclaimStaleProjectNameReservation(reservationPath))) continue;
+      throw new Error(`Reel project "${safeName}" is reserved by another creator`);
+    }
+  }
+  throw new Error(`Reel project "${safeName}" is reserved by another creator`);
 };
 
 export const assertProjectScaffold = async (projectPath: string): Promise<void> => {
@@ -69,65 +268,71 @@ export const createReelProject = async ({
   if (!projectPath.startsWith(`${resolvedProjectsRoot}${path.sep}`)) {
     throw new Error('Project path escaped the configured projects root');
   }
-  if (await exists(projectPath)) {
-    throw new Error(`Reel project "${safeName}" already exists`);
+  const reservation = await acquireProjectNameReservation(resolvedProjectsRoot, safeName);
+  try {
+    if (await exists(projectPath)) {
+      throw new Error(`Reel project "${safeName}" already exists`);
+    }
+    const profile =
+      format === 'carousel-1.91:1'
+        ? {
+            projectType: 'carousel' as const,
+            target: {minSeconds: 4, idealSeconds: 4.5, maxSeconds: 5},
+            output: {width: 1910 as const, height: 1000 as const, fps: 30 as const},
+            preview: {width: 764 as const, height: 400 as const},
+            options: {music: false, captions: false, cameraAudio: false},
+          }
+        : {
+            projectType: 'reel' as const,
+            target: {minSeconds: 20, idealSeconds: 25, maxSeconds: 30},
+            output: {width: 1080 as const, height: 1920 as const, fps: 30 as const},
+            preview: {width: 540 as const, height: 960 as const},
+            options: null,
+          };
+    const templateBriefPath = path.join(engineRoot, 'templates/reel/brief.json');
+    const templateBrief = await readJson<Record<string, unknown>>(templateBriefPath);
+    const templateOptions = templateBrief.options as Record<string, unknown> | undefined;
+    const brief = ReelBriefSchema.parse({
+      ...templateBrief,
+      projectType: profile.projectType,
+      target: profile.target,
+      output: profile.output,
+      options: profile.options ?? templateOptions,
+      identity: {
+        reelName: safeName,
+        title: title?.trim() || safeName.replaceAll('-', ' '),
+        createdAt: now.toISOString(),
+      },
+    });
+    await mkdir(resolvedProjectsRoot, {recursive: true});
+    await cp(path.join(engineRoot, 'templates/reel'), projectPath, {
+      recursive: true,
+      errorOnExist: true,
+      force: false,
+    });
+
+    const briefPath = path.join(projectPath, 'brief.json');
+    await writeJson(briefPath, brief);
+
+    const editPath = path.join(projectPath, 'edits/edit.json');
+    const edit = JSON.parse(await readFile(editPath, 'utf8')) as Record<string, unknown>;
+    await writeJson(editPath, {...edit, reelName: safeName, output: profile.output});
+
+    const settingsPath = path.join(projectPath, 'config/settings.json');
+    const settings = await readJson<Record<string, unknown>>(settingsPath);
+    const previewSettings = settings.preview as Record<string, unknown>;
+    const masterSettings = settings.master as Record<string, unknown>;
+    const nextSettings = RenderSettingsSchema.parse({
+      ...settings,
+      preview: {...previewSettings, ...profile.preview},
+      master: {...masterSettings, ...profile.output},
+    });
+    await writeJson(settingsPath, nextSettings);
+    await reservation.assertOwnership();
+    return projectPath;
+  } finally {
+    await reservation.release();
   }
-  const profile =
-    format === 'carousel-1.91:1'
-      ? {
-          projectType: 'carousel' as const,
-          target: {minSeconds: 4, idealSeconds: 4.5, maxSeconds: 5},
-          output: {width: 1910 as const, height: 1000 as const, fps: 30 as const},
-          preview: {width: 764 as const, height: 400 as const},
-          options: {music: false, captions: false, cameraAudio: false},
-        }
-      : {
-          projectType: 'reel' as const,
-          target: {minSeconds: 20, idealSeconds: 25, maxSeconds: 30},
-          output: {width: 1080 as const, height: 1920 as const, fps: 30 as const},
-          preview: {width: 540 as const, height: 960 as const},
-          options: null,
-        };
-  const templateBriefPath = path.join(engineRoot, 'templates/reel/brief.json');
-  const templateBrief = await readJson<Record<string, unknown>>(templateBriefPath);
-  const templateOptions = templateBrief.options as Record<string, unknown> | undefined;
-  const brief = ReelBriefSchema.parse({
-    ...templateBrief,
-    projectType: profile.projectType,
-    target: profile.target,
-    output: profile.output,
-    options: profile.options ?? templateOptions,
-    identity: {
-      reelName: safeName,
-      title: title?.trim() || safeName.replaceAll('-', ' '),
-      createdAt: now.toISOString(),
-    },
-  });
-  await mkdir(resolvedProjectsRoot, {recursive: true});
-  await cp(path.join(engineRoot, 'templates/reel'), projectPath, {
-    recursive: true,
-    errorOnExist: true,
-    force: false,
-  });
-
-  const briefPath = path.join(projectPath, 'brief.json');
-  await writeJson(briefPath, brief);
-
-  const editPath = path.join(projectPath, 'edits/edit.json');
-  const edit = JSON.parse(await readFile(editPath, 'utf8')) as Record<string, unknown>;
-  await writeJson(editPath, {...edit, reelName: safeName, output: profile.output});
-
-  const settingsPath = path.join(projectPath, 'config/settings.json');
-  const settings = await readJson<Record<string, unknown>>(settingsPath);
-  const previewSettings = settings.preview as Record<string, unknown>;
-  const masterSettings = settings.master as Record<string, unknown>;
-  const nextSettings = RenderSettingsSchema.parse({
-    ...settings,
-    preview: {...previewSettings, ...profile.preview},
-    master: {...masterSettings, ...profile.output},
-  });
-  await writeJson(settingsPath, nextSettings);
-  return projectPath;
 };
 
 export type ProjectStatus = {

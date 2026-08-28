@@ -1,5 +1,5 @@
 import type {Caption} from '@remotion/captions';
-import {mkdir, readFile} from 'node:fs/promises';
+import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {
   EditManifestSchema,
@@ -27,7 +27,7 @@ import {
 } from '../media/source-integrity';
 import {parseCaptionContent} from '../remotion/captions';
 import {
-  pruneRenderStages,
+  prepareFreshRenderStage,
   removeRenderStage,
   renderStageRoot,
   stageImmutableFile,
@@ -80,8 +80,7 @@ export const prepareRenderProps = async (
   }).slice(0, 16);
   const publicRelativeRoot = `jobs/${edit.reelName}/${fingerprint}`;
   const stageRoot = renderStageRoot(engineRoot, edit.reelName, fingerprint);
-  await pruneRenderStages(engineRoot, edit.reelName, stageRoot);
-  await mkdir(stageRoot, {recursive: true});
+  await prepareFreshRenderStage(engineRoot, edit.reelName, stageRoot);
   try {
     const media: Record<string, string> = {};
     const trimBeforeFramesByClip: Record<string, number> = {};
@@ -167,6 +166,7 @@ export const prepareRenderProps = async (
         stageRoot,
         `music/${path.basename(input)}`,
         musicSource.checksumSha256,
+        {copy: true},
       );
       music = staged;
     }

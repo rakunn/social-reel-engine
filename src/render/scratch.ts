@@ -200,6 +200,21 @@ export const pruneRenderStages = async (
   );
 };
 
+export const prepareFreshRenderStage = async (
+  engineRoot: string,
+  reelName: string,
+  stageRoot: string,
+): Promise<void> => {
+  const safeReelName = assertSafeReelName(reelName);
+  const validated = exactRenderStage(engineRoot, stageRoot);
+  if (validated.reelName !== safeReelName) {
+    throw new Error(`Render stage ${stageRoot} does not belong to reel ${safeReelName}`);
+  }
+  await removeRenderStage(engineRoot, validated.stageRoot);
+  await pruneRenderStages(engineRoot, safeReelName);
+  await mkdir(validated.stageRoot, {recursive: true});
+};
+
 const fileChecksumIfPresent = async (filePath: string): Promise<string | null> => {
   try {
     return await hashFile(filePath);
@@ -225,6 +240,7 @@ export const stageImmutableFile = async (
   stageRoot: string,
   relativeTarget: string,
   sourceChecksumSha256?: string,
+  options: {copy?: boolean} = {},
 ): Promise<string> => {
   const target = resolveInside(stageRoot, relativeTarget);
   await mkdir(path.dirname(target), {recursive: true});
@@ -233,7 +249,11 @@ export const stageImmutableFile = async (
     await writeAtomically(
       target,
       async (temporaryOutput) => {
-        await linkOrCopy(source, temporaryOutput);
+        if (options.copy) {
+          await copyFile(source, temporaryOutput);
+        } else {
+          await linkOrCopy(source, temporaryOutput);
+        }
       },
       async (temporaryOutput) => {
         if ((await hashFile(temporaryOutput)) !== checksumSha256) {

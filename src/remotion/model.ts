@@ -23,6 +23,12 @@ export const secondsToMediaFrames = (seconds: number, fps: number): number =>
 export const fontFaceRule = (fontUrl: string): string =>
   `@font-face{font-family:ReelCustom;src:url(${JSON.stringify(fontUrl)});font-display:block;}`;
 
+export const cardTextContainerStyle = () => ({
+  maxWidth: '100%' as const,
+  overflowWrap: 'anywhere' as const,
+  wordBreak: 'break-word' as const,
+});
+
 export const titleOpacity = (frame: number, durationInFrames: number): number => {
   const finalFrame = Math.max(0, durationInFrames - 1);
   if (finalFrame === 0) return 0;

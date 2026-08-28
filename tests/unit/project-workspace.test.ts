@@ -1,14 +1,17 @@
+import {createHash} from 'node:crypto';
 import {access, mkdir, mkdtemp, readFile, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {describe, expect, it} from 'vitest';
 import {
+  acquireProjectNameReservation,
   createReelProject,
   getProjectStatus,
   type ProjectStatus,
 } from '../../src/project/workspace';
 import {ingestFiles, scanInputs} from '../../src/project/ingest';
+import {runWithStatusScanLock} from '../../src/project/operation';
 import {
   artifactFingerprint,
   isArtifactFresh,
@@ -25,6 +28,129 @@ const makeProjectsRoot = async (): Promise<string> => {
 };
 
 describe('reel project workspace', () => {
+  it('honors an existing atomic reservation for a project name', async () => {
+    const projectsRoot = await makeProjectsRoot();
+    const reservation = await acquireProjectNameReservation(projectsRoot, 'reserved-project');
+    try {
+      await expect(
+        createReelProject({
+          engineRoot: repositoryRoot,
+          projectsRoot,
+          reelName: 'reserved-project',
+        }),
+      ).rejects.toThrow(/reserved|being created/i);
+      await expect(access(path.join(projectsRoot, 'reserved-project'))).rejects.toThrow();
+    } finally {
+      await reservation.release();
+    }
+  });
+
+  it('supports reel names whose reservation staging suffix would exceed a path component', async () => {
+    const projectsRoot = await makeProjectsRoot();
+    const longReelName = 'a'.repeat(200);
+
+    const reservation = await acquireProjectNameReservation(projectsRoot, longReelName);
+    await expect(reservation.assertOwnership()).resolves.toBeUndefined();
+    await expect(reservation.release()).resolves.toBeUndefined();
+  });
+
+  it('reclaims a stale auxiliary claim for a long hashed reservation path', async () => {
+    const projectsRoot = await makeProjectsRoot();
+    await mkdir(projectsRoot, {recursive: true});
+    const longReelName = 'b'.repeat(200);
+    const reservationPath = path.join(
+      projectsRoot,
+      `.project-${createHash('sha256').update(longReelName).digest('hex')}.reservation`,
+    );
+    const reservationOwnerId = 'stale-reservation-owner';
+    await mkdir(reservationPath);
+    await writeFile(
+      path.join(reservationPath, 'owner.json'),
+      JSON.stringify({
+        schemaVersion: '1.0.0',
+        id: reservationOwnerId,
+        pid: 2_147_483_647,
+        processStartMarker: null,
+        leaseExpiresAt: '2026-08-27T00:00:00.000Z',
+        acquiredAt: '2026-08-27T00:00:00.000Z',
+      }),
+    );
+    const claimPath = path.join(
+      projectsRoot,
+      `.project-claim-${createHash('sha256').update(`${path.basename(reservationPath)}\0${reservationOwnerId}`).digest('hex')}.json`,
+    );
+    await writeFile(
+      claimPath,
+      JSON.stringify({
+        schemaVersion: '1.0.0',
+        id: '00000000-0000-4000-8000-000000000000',
+        state: 'active',
+        pid: 2_147_483_647,
+        processStartMarker: null,
+        leaseExpiresAt: '2026-08-27T00:00:00.000Z',
+        acquiredAt: '2026-08-27T00:00:00.000Z',
+        releasedAt: null,
+      }),
+    );
+
+    const reservation = await acquireProjectNameReservation(projectsRoot, longReelName);
+    await expect(access(claimPath)).rejects.toThrow();
+    await expect(reservation.assertOwnership()).resolves.toBeUndefined();
+    await expect(reservation.release()).resolves.toBeUndefined();
+  });
+
+  it('reclaims a project-name reservation whose owner process is gone', async () => {
+    const projectsRoot = await makeProjectsRoot();
+    const reservationPath = path.join(projectsRoot, '.project-stale-project.reservation');
+    await mkdir(reservationPath, {recursive: true});
+    await writeFile(
+      path.join(reservationPath, 'owner.json'),
+      JSON.stringify({
+        schemaVersion: '1.0.0',
+        id: 'stale-owner',
+        pid: 2_147_483_647,
+        processStartMarker: null,
+        leaseExpiresAt: '2026-08-27T00:00:00.000Z',
+        acquiredAt: '2026-08-27T00:00:00.000Z',
+      }),
+    );
+
+    await expect(
+      createReelProject({
+        engineRoot: repositoryRoot,
+        projectsRoot,
+        reelName: 'stale-project',
+      }),
+    ).resolves.toBe(path.join(projectsRoot, 'stale-project'));
+    await expect(access(reservationPath)).rejects.toThrow();
+  });
+
+  it('reclaims a project-name reservation after its PID has been reused', async () => {
+    const projectsRoot = await makeProjectsRoot();
+    const reservationPath = path.join(projectsRoot, '.project-reused-pid-project.reservation');
+    await mkdir(reservationPath, {recursive: true});
+    await writeFile(
+      path.join(reservationPath, 'owner.json'),
+      JSON.stringify({
+        schemaVersion: '1.0.0',
+        id: 'stale-reused-pid-owner',
+        pid: process.pid,
+        processStartMarker: 'a different process start marker',
+        leaseExpiresAt: null,
+        acquiredAt: '2026-08-27T00:00:00.000Z',
+      }),
+    );
+
+    await expect(
+      createReelProject({
+        engineRoot: repositoryRoot,
+        projectsRoot,
+        reelName: 'reused-pid-project',
+      }),
+    ).resolves.toBe(path.join(projectsRoot, 'reused-pid-project'));
+    await expect(access(reservationPath)).rejects.toThrow();
+  });
+
   it('creates the complete isolated folder structure and personalized records', async () => {
     const projectsRoot = await makeProjectsRoot();
     const projectPath = await createReelProject({
@@ -184,6 +310,27 @@ describe('reel project workspace', () => {
 });
 
 describe('immutable ingest', () => {
+  it('does not mutate inputs while a snapshot scan holds the project lock', async () => {
+    const projectsRoot = await makeProjectsRoot();
+    const projectPath = await createReelProject({
+      engineRoot: repositoryRoot,
+      projectsRoot,
+      reelName: 'ingest-snapshot-lock',
+    });
+    const sourceRoot = await mkdtemp(path.join(tmpdir(), 'reel-source-'));
+    const source = path.join(sourceRoot, 'locked.MP4');
+    await writeFile(source, 'locked input bytes');
+
+    const snapshot = await runWithStatusScanLock(projectPath, async () => {
+      await expect(ingestFiles(projectPath, [source], 'clips')).rejects.toThrow(
+        /snapshot|status|lock|media work/i,
+      );
+    });
+
+    expect(snapshot.acquired).toBe(true);
+    await expect(access(path.join(projectPath, 'input/clips/locked.MP4'))).rejects.toThrow();
+  });
+
   it('copies inputs, records checksums, and leaves originals unchanged', async () => {
     const projectsRoot = await makeProjectsRoot();
     const projectPath = await createReelProject({

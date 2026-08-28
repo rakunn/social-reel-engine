@@ -73,6 +73,24 @@ export const createCli = (): Command => {
     });
 
   program
+    .command('variant')
+    .argument('<source-name>')
+    .argument('<target-name>')
+    .option('--title <title>')
+    .description('Create an isolated derivative project while preserving reusable source decisions')
+    .action(async (sourceName: string, targetName: string, options: {title?: string}) => {
+      const {createProjectVariant} = await import('./project/variant');
+      print(
+        await createProjectVariant({
+          engineRoot: ENGINE_ROOT,
+          sourceName,
+          targetName,
+          title: options.title,
+        }),
+      );
+    });
+
+  program
     .command('ingest')
     .argument('<reel-name>')
     .argument('[files...]')

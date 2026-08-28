@@ -68,7 +68,6 @@ const invalidLutReason = async (
 const readCurrentGradedStillReview = async (
   projectPath: string,
   edit: Awaited<ReturnType<typeof loadState>>['edit'],
-  editReviewHash: string,
   colorManifestHash: string,
 ): Promise<{items: ReviewedStillFingerprint[] | null; reason: string | null}> => {
   let report: {
@@ -83,12 +82,8 @@ const readCurrentGradedStillReview = async (
   } catch {
     return {items: null, reason: 'Graded reference-frame report is missing or invalid'};
   }
-  if (
-    report.editManifestHash !== createEditHash(edit) ||
-    report.editReviewHash !== editReviewHash ||
-    report.colorManifestHash !== colorManifestHash
-  ) {
-    return {items: null, reason: 'Graded reference frames are stale for the current edit or grade'};
+  if (report.colorManifestHash !== colorManifestHash) {
+    return {items: null, reason: 'Graded reference frames are stale for the current color treatment'};
   }
   const expected = edit.clips.map((clip) => ({
     clipId: clip.id,
@@ -141,6 +136,7 @@ const currentReviewHashes = async (
     return {
       ...loaded,
       editReviewHash: null,
+      colorManifestHash: null,
       colorReviewHash: null,
       previewReason: (error as Error).message,
       colorReason: (error as Error).message,
@@ -154,6 +150,7 @@ const currentReviewHashes = async (
     return {
       ...loaded,
       editReviewHash: null,
+      colorManifestHash: null,
       colorReviewHash: null,
       previewReason: freshness.reason,
       colorReason: freshness.reason,
@@ -164,13 +161,19 @@ const currentReviewHashes = async (
     return {
       ...loaded,
       editReviewHash: null,
+      colorManifestHash: null,
       colorReviewHash: null,
       previewReason: 'Preview artifact record is missing',
       colorReason: 'Preview artifact record is missing',
     };
   }
   const editReviewHash = createEditReviewHash(createEditHash(loaded.edit), preview);
-  const colorManifestHash = createColorHash(loaded.edit, loaded.luts);
+  const manifest = await readValidatedSourceManifest(projectPath, options.integrity);
+  const colorManifestHash = createColorHash(
+    loaded.edit,
+    loaded.luts,
+    manifest.sources,
+  );
   const invalidLut = await invalidLutReason(
     projectPath,
     selectedColorLuts(loaded.edit, loaded.luts),
@@ -180,16 +183,16 @@ const currentReviewHashes = async (
     : await readCurrentGradedStillReview(
         projectPath,
         loaded.edit,
-        editReviewHash,
         colorManifestHash,
       );
   const colorReason = invalidLut ?? stillReview.reason;
   return {
     ...loaded,
     editReviewHash,
+    colorManifestHash,
     colorReviewHash: colorReason || !stillReview.items
       ? null
-      : createColorReviewHash(editReviewHash, colorManifestHash, stillReview.items),
+      : createColorReviewHash(colorManifestHash, stillReview.items),
     previewReason: null,
     colorReason,
   };
@@ -213,10 +216,17 @@ export const approveEdit = async (
   }
   const {approvals} = state;
   const hash = state.editReviewHash;
+  const reusableColor =
+    state.colorManifestHash &&
+    state.colorReviewHash &&
+    approvals.color?.colorHash === state.colorManifestHash &&
+    approvals.color.hash === state.colorReviewHash
+      ? approvals.color
+      : null;
   const next = ApprovalStateSchema.parse({
     schemaVersion: '1.0.0',
     edit: {hash, approvedAt: now.toISOString(), approvedBy: 'user'},
-    color: approvals.color?.editHash === hash ? approvals.color : null,
+    color: reusableColor,
   });
   await assertVerifiedInputSnapshotUnchanged(projectPath, integrity);
   await writeJson(path.join(projectPath, 'analysis/approvals.json'), next);
@@ -255,6 +265,7 @@ export const approveColor = async (
     color: {
       hash: colorHash,
       editHash,
+      colorHash: state.colorManifestHash,
       approvedAt: now.toISOString(),
       approvedBy: 'user',
     },
@@ -270,7 +281,12 @@ export const readApprovalReadiness = async (
 ) => {
   const state = await currentReviewHashes(projectPath, undefined, options);
   return {
-    ...approvalStatus(state.approvals, state.editReviewHash, state.colorReviewHash),
+    ...approvalStatus(
+      state.approvals,
+      state.editReviewHash,
+      state.colorManifestHash,
+      state.colorReviewHash,
+    ),
     colorReviewReady: state.colorReviewHash !== null,
     colorReason: state.colorReason,
   };

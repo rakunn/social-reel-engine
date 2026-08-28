@@ -164,4 +164,14 @@ describe('data-driven Remotion model', () => {
     expect(titleOpacity?.(10, 11)).toBe(0);
     expect(titleOpacity?.(0, 1)).toBe(0);
   });
+
+  it('keeps a schema-valid unbroken card label inside the safe area', () => {
+    expect(remotionModel.cardTextContainerStyle()).toEqual(
+      expect.objectContaining({
+        maxWidth: '100%',
+        overflowWrap: 'anywhere',
+        wordBreak: 'break-word',
+      }),
+    );
+  });
 });

@@ -18,6 +18,7 @@ import {
 import type {EditManifest} from '../contracts/schemas';
 import {
   buildShotTimings,
+  cardTextContainerStyle,
   captionFrameRange,
   cropTransform,
   fontFaceRule,
@@ -78,6 +79,61 @@ const Shot: React.FC<{
           ...crop,
         }}
       />
+      {clip.textOverlay ? (
+        <CardTextOverlay overlay={clip.textOverlay} durationInFrames={durationInFrames} />
+      ) : null}
+    </AbsoluteFill>
+  );
+};
+
+const CardTextOverlay: React.FC<{
+  overlay: NonNullable<EditManifest['clips'][number]['textOverlay']>;
+  durationInFrames: number;
+}> = ({overlay, durationInFrames}) => {
+  const frame = useCurrentFrame();
+  return (
+    <AbsoluteFill
+      style={{
+        justifyContent: 'flex-end',
+        alignItems: 'flex-start',
+        opacity: titleOpacity(frame, durationInFrames),
+        padding: '0 96px 76px',
+        pointerEvents: 'none',
+      }}
+    >
+      <div
+        style={{
+          ...cardTextContainerStyle(),
+          color: '#fffaf2',
+          fontFamily: 'ReelCustom, Helvetica Neue, Arial, sans-serif',
+          textShadow: '0 2px 18px rgba(0,0,0,0.78)',
+        }}
+      >
+        <div
+          style={{
+            fontSize: 46,
+            fontWeight: 600,
+            letterSpacing: '0.075em',
+            lineHeight: 1.05,
+          }}
+        >
+          {overlay.heading}
+        </div>
+        {overlay.subheading ? (
+          <div
+            style={{
+              fontSize: 27,
+              fontWeight: 400,
+              letterSpacing: '0.035em',
+              lineHeight: 1.15,
+              marginTop: 10,
+              opacity: 0.9,
+            }}
+          >
+            {overlay.subheading}
+          </div>
+        ) : null}
+      </div>
     </AbsoluteFill>
   );
 };

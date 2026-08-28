@@ -15,6 +15,7 @@ describe('stable command interface', () => {
     expect(COMMAND_NAMES).toEqual([
       'doctor',
       'new',
+      'variant',
       'ingest',
       'analyze',
       'proxy',

@@ -7,7 +7,10 @@ import {
   createSourceIntegrityContext,
   readVerifiedInputSnapshot,
 } from '../../src/media/source-integrity';
-import {ingestFiles} from '../../src/project/ingest';
+import {
+  ingestFiles,
+  readValidatedIngestManifest,
+} from '../../src/project/ingest';
 import {createReelProject} from '../../src/project/workspace';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
@@ -62,5 +65,22 @@ describe('source integrity context', () => {
     await expect(
       readVerifiedInputSnapshot(projectPath, createSourceIntegrityContext()),
     ).rejects.toThrow(/stale or inconsistent/i);
+  });
+
+  it('rejects a LUT whose bytes changed after analysis', async () => {
+    const projectPath = await makeProject();
+    const sourcePath = path.join(path.dirname(projectPath), 'normalizer.cube');
+    await writeFile(sourcePath, 'TITLE "Original"\nLUT_3D_SIZE 2\n');
+    await ingestFiles(projectPath, [sourcePath], 'technical-lut');
+    await analyzeSources(projectPath);
+
+    await writeFile(
+      path.join(projectPath, 'input/luts/technical/normalizer.cube'),
+      'TITLE "Changed"\nLUT_3D_SIZE 2\n',
+    );
+
+    await expect(
+      readValidatedIngestManifest(projectPath),
+    ).rejects.toThrow(/stale|inconsistent|ingest|checksum/i);
   });
 });

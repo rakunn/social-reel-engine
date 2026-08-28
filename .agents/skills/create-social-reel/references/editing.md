@@ -10,7 +10,9 @@ Use `analysis/sources.json` IDs. For every ordered clip, set verified in/out sec
 
 Target 20–30 seconds and normally aim near 25 seconds. Favor a clear opening hook, readable visual progression, and restrained transitions. Snap cuts to useful musical events only when that improves the scene; do not sacrifice narrative or motion continuity to hit every beat.
 
-For a `carousel-1.91:1` project, each ordered clip is one standalone card and must last 4–5 seconds after playback-rate adjustment. Use at least two cards, set every `transitionAfter` to `none`, and leave timeline-global titles, music, and captions empty. The first card is the hero/hook; the final card must provide visual closure. The combined preview exists to review the exact card order, composition, and boundaries, while `render-carousel` publishes one MP4 per card.
+For a `carousel-1.91:1` project, each ordered clip is one standalone card and must last 4–5 seconds after playback-rate adjustment. Use at least two cards, set every `transitionAfter` to `none`, and leave timeline-global titles, music, and captions empty. Optional carousel copy belongs in that clip's `textOverlay`; use the bounded heading/subheading fields and supported `lower-left` placement so text cannot leak into neighboring cards. The first card is the hero/hook; the final card must provide visual closure. The combined preview exists to review the exact card order, composition, text contrast, and boundaries, while `render-carousel` publishes one MP4 per card.
+
+For a derivative, begin from the inherited edit and make only the requested observable changes. Preserve approved trims, crops, stabilization, exposure, white balance, tint, LUT choices, blends, and treatments when source bytes and selections are unchanged. Change them when the new copy, aspect, or creative direction demonstrably conflicts; do not treat “preserve” as a blanket grade preset for other footage.
 
 ## Subject and composition contract
 

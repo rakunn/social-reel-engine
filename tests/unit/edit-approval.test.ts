@@ -249,7 +249,7 @@ const makeFixture = async () => {
     generatedAt: '2026-08-10T00:00:00.000Z',
     editManifestHash: createEditHash(edit),
     editReviewHash,
-    colorManifestHash: createColorHash(edit, parsedLuts),
+    colorManifestHash: createColorHash(edit, parsedLuts, sources.sources),
     stills: ['previews/graded-stills/shot-1.png'],
     checksums: {
       'previews/graded-stills/shot-1.png': await hashFile(stillPath),
@@ -378,6 +378,22 @@ describe('edit validation', () => {
 });
 
 describe('hash-bound approvals', () => {
+  it('binds the color manifest hash to referenced source bytes', async () => {
+    const {projectPath, edit, sourceId} = await makeFixture();
+    const lutsConfig = JSON.parse(
+      await readFile(path.join(projectPath, 'config/luts.json'), 'utf8'),
+    );
+    const manifest = SourceManifestSchema.parse(
+      JSON.parse(await readFile(path.join(projectPath, 'analysis/sources.json'), 'utf8')),
+    );
+    const originalHash = createColorHash(edit, lutsConfig.luts, manifest.sources);
+    const replacedSources = manifest.sources.map((source) =>
+      source.id === sourceId ? {...source, checksumSha256: 'f'.repeat(64)} : source,
+    );
+
+    expect(createColorHash(edit, lutsConfig.luts, replacedSources)).not.toBe(originalHash);
+  });
+
   it('makes rights confirmation stale when the referenced asset set changes', async () => {
     const {projectPath, edit} = await makeFixture();
     const confirmation = await confirmRights(
@@ -1127,6 +1143,93 @@ describe('hash-bound approvals', () => {
     });
     expect(await readApprovalStatus(projectPath)).toEqual({
       editApproved: false,
+      colorApproved: false,
+    });
+    await expect(assertRenderApprovals(projectPath)).rejects.toThrow(/stale|approval/i);
+  });
+
+  it('keeps exact-match color approval after a text-only edit gets a new rough approval', async () => {
+    const {projectPath, edit} = await makeFixture();
+    await approveEdit(projectPath, new Date('2026-08-10T00:01:00.000Z'));
+    await approveColor(projectPath, new Date('2026-08-10T00:02:00.000Z'));
+
+    await writeJson(path.join(projectPath, 'edits/edit.json'), {
+      ...edit,
+      clips: [
+        {
+          ...edit.clips[0],
+          textOverlay: {
+            heading: 'Chocolate Hills',
+            subheading: 'Bohol, Philippines',
+            placement: 'lower-left',
+          },
+        },
+      ],
+    });
+    const previewPath = path.join(projectPath, 'previews/preview.mp4');
+    await writeFile(previewPath, 'reviewed-captioned-rough-cut-preview');
+    await recordRenderArtifact(
+      projectPath,
+      'preview',
+      previewPath,
+      await expectedRenderFingerprint(projectPath, 'preview'),
+      new Date('2026-08-10T00:03:00.000Z'),
+    );
+
+    await approveEdit(projectPath, new Date('2026-08-10T00:04:00.000Z'));
+    await expect(readApprovalStatus(projectPath)).resolves.toEqual({
+      editApproved: true,
+      colorApproved: true,
+    });
+    await expect(assertRenderApprovals(projectPath)).resolves.toBeUndefined();
+  });
+
+  it('invalidates color approval when a referenced source profile becomes unconfirmed', async () => {
+    const {projectPath, sourceId} = await makeFixture();
+    await approveEdit(projectPath, new Date('2026-08-10T00:01:00.000Z'));
+    await approveColor(projectPath, new Date('2026-08-10T00:02:00.000Z'));
+
+    const unconfirmedCamera = {
+      manufacturer: null,
+      model: null,
+      gamma: null,
+      gamut: null,
+      profileId: null,
+      confirmed: false,
+    };
+    const configPath = path.join(projectPath, 'config/sources.json');
+    const config = JSON.parse(await readFile(configPath, 'utf8'));
+    await writeJson(configPath, {
+      ...config,
+      sources: {
+        ...config.sources,
+        'input/clips/clip.mp4': unconfirmedCamera,
+      },
+    });
+    const manifestPath = path.join(projectPath, 'analysis/sources.json');
+    const manifest = SourceManifestSchema.parse(
+      JSON.parse(await readFile(manifestPath, 'utf8')),
+    );
+    await writeJson(manifestPath, {
+      ...manifest,
+      sources: manifest.sources.map((source) =>
+        source.id === sourceId ? {...source, camera: unconfirmedCamera} : source,
+      ),
+    });
+
+    const previewPath = path.join(projectPath, 'previews/preview.mp4');
+    await writeFile(previewPath, 'reviewed-unconfirmed-profile-preview');
+    await recordRenderArtifact(
+      projectPath,
+      'preview',
+      previewPath,
+      await expectedRenderFingerprint(projectPath, 'preview'),
+      new Date('2026-08-10T00:03:00.000Z'),
+    );
+    await approveEdit(projectPath, new Date('2026-08-10T00:04:00.000Z'));
+
+    await expect(readApprovalStatus(projectPath)).resolves.toEqual({
+      editApproved: true,
       colorApproved: false,
     });
     await expect(assertRenderApprovals(projectPath)).rejects.toThrow(/stale|approval/i);
