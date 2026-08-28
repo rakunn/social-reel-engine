@@ -40,7 +40,7 @@ export const createCli = (): Command => {
 
   program
     .command('doctor')
-    .description('Verify Node, Remotion, FFmpeg, librosa, and the local LUT library')
+    .description('Verify the render toolchain plus local LUT and style libraries')
     .action(async () => {
       const {runDoctor} = await import('./commands/doctor');
       const report = await runDoctor(ENGINE_ROOT);
@@ -121,6 +121,30 @@ export const createCli = (): Command => {
           installed.push(await installCatalogLut(projectPath, ENGINE_ROOT, id));
         }
         print({...result, installed});
+      },
+    );
+
+  program
+    .command('style')
+    .argument('[reel-name]')
+    .option('--list', 'List reusable style presets and font cache state')
+    .option('--apply <preset-id>', 'Apply one reusable style preset to a project')
+    .description('List or apply checksum-pinned typography and visual-style presets')
+    .action(
+      async (
+        reelName: string | undefined,
+        options: {list?: boolean; apply?: string},
+      ) => {
+        const {applyStylePreset, listStyleLibrary} = await import('./style/library');
+        if (options.list && !reelName && !options.apply) {
+          print(await listStyleLibrary(ENGINE_ROOT));
+          return;
+        }
+        if (reelName && options.apply && !options.list) {
+          print(await applyStylePreset(project(reelName), ENGINE_ROOT, options.apply));
+          return;
+        }
+        throw new Error('Use either style --list or style <reel-name> --apply <preset-id>');
       },
     );
 

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.0.0",
+  "presetId": "cinematic-minimal",
+  "catalogFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+  "typography": {
+    "display": {"assetId": null, "relativePath": null, "family": "ReelDisplay", "weight": 700, "style": "normal", "fallback": ["-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"]},
+    "body": {"assetId": null, "relativePath": null, "family": "ReelBody", "weight": 500, "style": "normal", "fallback": ["-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"]},
+    "metadata": {"assetId": null, "relativePath": null, "family": "ReelMetadata", "weight": 500, "style": "normal", "fallback": ["-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"]}
+  },
+  "palette": {"primary": "#FFFFFF", "dark": "#142B33", "coolAccent": "#287A78", "warmAccent": "#E7A15B", "humanAccent": "#C96859", "earthAccent": "#56382D"},
+  "profiles": {
+    "carousel": {"headingSize": 50, "bodySize": 29, "captionSize": 34, "metadataSize": 22, "horizontalPadding": 0.05, "bottomPadding": 0.076, "maxTextWidth": 0.62, "headingTrackingEm": 0.045, "bodyTrackingEm": 0.02, "headingLineHeight": 1.05, "bodyLineHeight": 1.15, "gap": 10, "fadeFrames": 8, "shadow": "0 2px 20px rgba(8,15,14,0.72)", "scrimOpacity": 0.28, "scrimHeight": 0.34},
+    "reel": {"headingSize": 68, "bodySize": 36, "captionSize": 48, "metadataSize": 26, "horizontalPadding": 0.056, "bottomPadding": 0.076, "maxTextWidth": 0.7, "headingTrackingEm": 0.045, "bodyTrackingEm": 0.02, "headingLineHeight": 1.05, "bodyLineHeight": 1.15, "gap": 12, "fadeFrames": 8, "shadow": "0 2px 20px rgba(8,15,14,0.72)", "scrimOpacity": 0.3, "scrimHeight": 0.3}
+  }
+}

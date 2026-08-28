@@ -14,9 +14,9 @@ Only an explicit user decision after seeing the exact current artifact authorize
 6. Stop and wait.
 7. After the user explicitly approves that version, run `approve-edit`.
 
-Trim, order, crop, playback, transitions, title, music, camera audio, captions, card text, stabilization, source-profile confirmation, or preview-normalization changes make editorial approval stale. A separate derivative always requires its own rough preview and explicit edit approval.
+Trim, order, crop, playback, transitions, title, music, camera audio, captions, card text, typography/style preset, stabilization, source-profile confirmation, or preview-normalization changes make editorial approval stale. A separate derivative always requires its own rough preview and explicit edit approval. Report the chosen preset and display/body/metadata pairing at this gate.
 
-Color approval has a narrower dependency boundary. Source selection/interval, crop, stabilization, output color dimensions, exposure, white balance, tint, technical/combined/creative LUT choice or declaration, LUT bytes, treatment, and creative blend make it stale. Text, title, audio, music, captions, and transitions do not by themselves invalidate color when the color projection and reviewed-still checksums remain exact. Trust `status`; never preserve color merely from matching filenames or visual similarity.
+Color approval has a narrower dependency boundary. Source selection/interval, crop, stabilization, output color dimensions, exposure, white balance, tint, technical/combined/creative LUT choice or declaration, LUT bytes, treatment, and creative blend make it stale. Text, title, typography/style presets, audio, music, captions, and transitions do not by themselves invalidate color when the color projection and reviewed-still checksums remain exact. Style changes do change the rough/render and the used-font rights fingerprint. Trust `status`; never preserve color merely from matching filenames or visual similarity.
 
 ## Gate 2: color
 

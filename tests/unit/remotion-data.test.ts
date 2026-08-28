@@ -12,6 +12,9 @@ import {
 } from '../../src/remotion/model';
 import * as remotionModel from '../../src/remotion/model';
 import * as remotionReel from '../../src/remotion/Reel';
+import {CINEMATIC_MINIMAL_STYLE, StyleConfigSchema} from '../../src/style/contracts';
+import {readJson} from '../../src/core/json';
+import path from 'node:path';
 
 vi.mock('@remotion/fonts', () => ({
   loadFont: vi.fn(async () => undefined),
@@ -67,6 +70,8 @@ const props: ReelRenderProps = {
   music: null,
   captions: [],
   watermark: null,
+  visualStyle: CINEMATIC_MINIMAL_STYLE,
+  fonts: {display: null, body: null, metadata: null},
 };
 
 describe('data-driven Remotion model', () => {
@@ -134,7 +139,7 @@ describe('data-driven Remotion model', () => {
     );
   });
 
-  it('blocks Remotion rendering until a staged custom font has loaded', () => {
+  it('maps a legacy staged font URL onto every active typography role', () => {
     const mockedLoadFont = vi.mocked(loadFont);
     mockedLoadFont.mockClear();
 
@@ -143,12 +148,14 @@ describe('data-driven Remotion model', () => {
       fontUrl: "jobs/remotion-test/fonts/Director's Cut.ttf",
     });
 
-    expect(mockedLoadFont).toHaveBeenCalledTimes(1);
-    expect(mockedLoadFont).toHaveBeenCalledWith({
-      family: 'ReelCustom',
-      url: "/jobs/remotion-test/fonts/Director%27s%20Cut.ttf",
-      display: 'block',
-    });
+    expect(mockedLoadFont).toHaveBeenCalledTimes(3);
+    for (const family of ['ReelDisplay', 'ReelBody', 'ReelMetadata']) {
+      expect(mockedLoadFont).toHaveBeenCalledWith({
+        family,
+        url: "/jobs/remotion-test/fonts/Director%27s%20Cut.ttf",
+        display: 'block',
+      });
+    }
   });
 
   it('fades a title to zero on its final rendered frame', () => {
@@ -165,10 +172,108 @@ describe('data-driven Remotion model', () => {
     expect(titleOpacity?.(0, 1)).toBe(0);
   });
 
+  it('uses carousel tokens and role families for card copy', async () => {
+    const islandStyle = StyleConfigSchema.parse(
+      await readJson(
+        path.resolve(import.meta.dirname, '../fixtures/styles/philippines-island-editorial.json'),
+      ),
+    );
+    const profile = remotionModel.styleProfileForOutput(islandStyle, {
+      width: 1910,
+      height: 1000,
+      fps: 30,
+    });
+    expect(profile).toEqual(
+      expect.objectContaining({headingSize: 50, bodySize: 29, fadeFrames: 8}),
+    );
+    expect(remotionModel.cardTextStyles(islandStyle, profile)).toEqual(
+      expect.objectContaining({
+        heading: expect.objectContaining({fontFamily: expect.stringContaining('ReelDisplay'), color: '#FFF6E8'}),
+        body: expect.objectContaining({fontFamily: expect.stringContaining('ReelBody'), fontSize: 29}),
+      }),
+    );
+  });
+
+  it('derives the overlay scrim from the preset dark color and opacity', () => {
+    expect(remotionModel.colorWithOpacity('#2A4C6E', 0.28)).toBe('rgba(42,76,110,0.28)');
+  });
+
+  it('computes caption bottom padding from frame height', () => {
+    const captionContainerStyle = (
+      remotionModel as typeof remotionModel & {
+        captionContainerStyle?: (
+          profile: typeof CINEMATIC_MINIMAL_STYLE.profiles.reel,
+          outputHeight: number,
+        ) => {paddingBottom: number};
+      }
+    ).captionContainerStyle;
+
+    expect(captionContainerStyle).toBeTypeOf('function');
+    expect(
+      captionContainerStyle?.(CINEMATIC_MINIMAL_STYLE.profiles.reel, 1920).paddingBottom,
+    ).toBeCloseTo(1920 * CINEMATIC_MINIMAL_STYLE.profiles.reel.bottomPadding);
+  });
+
+  it('loads each distinct role font once', () => {
+    const mockedLoadFont = vi.mocked(loadFont);
+    mockedLoadFont.mockClear();
+    const fraunces = {
+      url: 'jobs/remotion-test/fonts/fraunces.ttf',
+      family: 'ReelDisplay',
+      weight: 600,
+      style: 'normal',
+    } as const;
+    const manrope = {
+      url: 'jobs/remotion-test/fonts/manrope.ttf',
+      family: 'ReelBody',
+      weight: 450,
+      style: 'normal',
+    } as const;
+    remotionReel.SocialReel({
+      ...props,
+      fonts: {display: fraunces, body: manrope, metadata: manrope},
+    });
+    expect(mockedLoadFont).toHaveBeenCalledTimes(2);
+  });
+
+  it('honors a preset-specific fade duration', () => {
+    expect(remotionModel.titleOpacity(4, 17, 8)).toBeGreaterThan(0);
+    expect(remotionModel.titleOpacity(16, 17, 8)).toBe(0);
+  });
+
   it('keeps a schema-valid unbroken card label inside the safe area', () => {
     expect(remotionModel.cardTextContainerStyle()).toEqual(
       expect.objectContaining({
         maxWidth: '100%',
+        overflowWrap: 'anywhere',
+        wordBreak: 'break-word',
+      }),
+    );
+  });
+
+  it('constrains timeline titles to the selected profile width', () => {
+    expect(remotionModel.cardTextContainerStyle(0.7)).toEqual(
+      expect.objectContaining({
+        maxWidth: '70%',
+        overflowWrap: 'anywhere',
+        wordBreak: 'break-word',
+      }),
+    );
+  });
+
+  it('constrains captions to the selected profile width', () => {
+    const captionTextContainerStyle = (
+      remotionModel as typeof remotionModel & {
+        captionTextContainerStyle?: (
+          profile: typeof CINEMATIC_MINIMAL_STYLE.profiles.reel,
+        ) => {maxWidth: string; overflowWrap: string; wordBreak: string};
+      }
+    ).captionTextContainerStyle;
+
+    expect(captionTextContainerStyle).toBeTypeOf('function');
+    expect(captionTextContainerStyle?.(CINEMATIC_MINIMAL_STYLE.profiles.reel)).toEqual(
+      expect.objectContaining({
+        maxWidth: `${CINEMATIC_MINIMAL_STYLE.profiles.reel.maxTextWidth * 100}%`,
         overflowWrap: 'anywhere',
         wordBreak: 'break-word',
       }),

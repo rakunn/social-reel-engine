@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {writeFileSync} from 'node:fs';
 import {access, mkdir, mkdtemp, readFile, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
@@ -19,6 +20,7 @@ import {
 } from '../../src/project/artifacts';
 import {hashFile} from '../../src/core/hash';
 import {analyzeSources} from '../../src/media/analyze';
+import {StyleConfigSchema} from '../../src/style/contracts';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -204,6 +206,11 @@ describe('reel project workspace', () => {
       count: 5,
       jpegQuality: 95,
     });
+    expect(
+      StyleConfigSchema.parse(
+        JSON.parse(await readFile(path.join(projectPath, 'config/style.json'), 'utf8')),
+      ).presetId,
+    ).toBe('cinematic-minimal');
 
     await expect(
       createReelProject({
@@ -376,6 +383,45 @@ describe('immutable ingest', () => {
     await writeFile(right, 'right');
     await ingestFiles(projectPath, [left], 'clips');
     await expect(ingestFiles(projectPath, [right], 'clips')).rejects.toThrow(/refusing to overwrite/i);
+  });
+
+  it('rolls back earlier copies when a later expected checksum fails', async () => {
+    const projectsRoot = await makeProjectsRoot();
+    const projectPath = await createReelProject({
+      engineRoot: repositoryRoot,
+      projectsRoot,
+      reelName: 'ingest-checksum-rollback',
+    });
+    const sourceRoot = await mkdtemp(path.join(tmpdir(), 'reel-ingest-rollback-'));
+    const first = path.join(sourceRoot, 'first.ttf');
+    const second = path.join(sourceRoot, 'second.ttf');
+    await writeFile(first, 'verified first font');
+    await writeFile(second, 'verified second font');
+    const secondKey = path.resolve(second);
+    let secondChecksumReads = 0;
+    const expectedChecksums = new Map([
+      [path.resolve(first), await hashFile(first)],
+      [secondKey, await hashFile(second)],
+    ]);
+    const mutatingExpectedChecksums: ReadonlyMap<string, string> = {
+      ...expectedChecksums,
+      get: (key: string) => {
+        if (key === secondKey && (secondChecksumReads += 1) === 2) {
+          writeFileSync(second, 'replacement second font');
+        }
+        return expectedChecksums.get(key);
+      },
+    };
+
+    await expect(
+      ingestFiles(projectPath, [first, second], 'fonts', {
+        expectedChecksums: mutatingExpectedChecksums,
+      }),
+    ).rejects.toThrow(/checksum/i);
+
+    await expect(access(path.join(projectPath, 'input/fonts/first.ttf'))).rejects.toThrow();
+    await expect(access(path.join(projectPath, 'input/fonts/second.ttf'))).rejects.toThrow();
+    expect((await scanInputs(projectPath)).files.filter((file) => file.kind === 'fonts')).toHaveLength(0);
   });
 
   it('ignores macOS filesystem metadata during recursive input scans', async () => {

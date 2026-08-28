@@ -16,6 +16,7 @@ import {
 } from '../media/source-integrity';
 import {referencedRenderLuts, referencedRenderSources} from '../render/artifacts';
 import {validateEdit} from './validate';
+import {readProjectStyle} from '../style/project';
 
 type RightsAsset = {
   kind: 'video' | 'audio' | 'caption' | 'font' | 'lut';
@@ -44,7 +45,8 @@ const currentRightsAssets = async (
     readJson<{luts?: unknown[]}>(path.join(projectPath, 'config/luts.json')),
   ]);
   const luts = LutDefinitionsSchema.parse(lutsConfig.luts ?? []);
-  const sources = referencedRenderSources(edit, sourceManifest);
+  const style = await readProjectStyle(projectPath, sourceManifest);
+  const sources = referencedRenderSources(edit, sourceManifest, style);
   const selectedLuts = referencedRenderLuts('master', edit, sources, luts);
   const assets: RightsAsset[] = sources.map((source) => ({
     kind: source.mediaType as RightsAsset['kind'],

@@ -19,30 +19,65 @@ import type {EditManifest} from '../contracts/schemas';
 import {
   buildShotTimings,
   cardTextContainerStyle,
+  cardTextStyles,
+  captionContainerStyle,
+  captionTextContainerStyle,
   captionFrameRange,
+  colorWithOpacity,
   cropTransform,
-  fontFaceRule,
+  fontFaceRules,
   secondsToMediaFrames,
+  styleProfileForOutput,
   titleOpacity,
   type ReelRenderProps,
+  type StagedFontRoles,
 } from './model';
+import type {OutputStyleTokens, StyleConfig} from '../style/contracts';
+import {CINEMATIC_MINIMAL_STYLE} from '../style/contracts';
 
 const dbToGain = (db: number): number => 10 ** (db / 20);
 
 const customFontLoads = new Map<string, Promise<void>>();
 
-export const ensureCustomFontLoaded = (fontUrl: string): Promise<void> => {
-  const assetUrl = staticFile(fontUrl).replaceAll("'", '%27');
-  const existing = customFontLoads.get(assetUrl);
-  if (existing) return existing;
-  const loading = loadFont({
-    family: 'ReelCustom',
-    url: assetUrl,
-    display: 'block',
-  });
-  customFontLoads.set(assetUrl, loading);
-  return loading;
+export const ensureCustomFontsLoaded = (fonts: StagedFontRoles): Promise<void[]> => {
+  const distinct = new Map<string, NonNullable<StagedFontRoles[keyof StagedFontRoles]>>();
+  for (const font of Object.values(fonts)) {
+    if (!font) continue;
+    distinct.set(`${font.family}\0${font.url}`, font);
+  }
+  return Promise.all(
+    [...distinct.values()].map((font) => {
+      const assetUrl = staticFile(font.url).replaceAll("'", '%27');
+      const key = `${font.family}\0${assetUrl}`;
+      const existing = customFontLoads.get(key);
+      if (existing) return existing;
+      const loading = loadFont({family: font.family, url: assetUrl, display: 'block'});
+      customFontLoads.set(key, loading);
+      return loading;
+    }),
+  );
 };
+
+const legacyFontRoles = (fontUrl: string, visualStyle: StyleConfig): StagedFontRoles => ({
+  display: {
+    url: fontUrl,
+    family: visualStyle.typography.display.family,
+    weight: visualStyle.typography.display.weight,
+    style: visualStyle.typography.display.style,
+  },
+  body: {
+    url: fontUrl,
+    family: visualStyle.typography.body.family,
+    weight: visualStyle.typography.body.weight,
+    style: visualStyle.typography.body.style,
+  },
+  metadata: {
+    url: fontUrl,
+    family: visualStyle.typography.metadata.family,
+    weight: visualStyle.typography.metadata.weight,
+    style: visualStyle.typography.metadata.style,
+  },
+});
 
 const transitionPresentation = (
   type: EditManifest['clips'][number]['transitionAfter']['type'],
@@ -61,7 +96,8 @@ const Shot: React.FC<{
   durationInFrames: number;
   src: string;
   trimBeforeFrames: number;
-}> = ({clip, durationInFrames, src, trimBeforeFrames}) => {
+  visualStyle: StyleConfig;
+}> = ({clip, durationInFrames, src, trimBeforeFrames, visualStyle}) => {
   const frame = useCurrentFrame();
   const crop = cropTransform(clip.crop, frame, durationInFrames);
   return (
@@ -80,7 +116,11 @@ const Shot: React.FC<{
         }}
       />
       {clip.textOverlay ? (
-        <CardTextOverlay overlay={clip.textOverlay} durationInFrames={durationInFrames} />
+        <CardTextOverlay
+          overlay={clip.textOverlay}
+          durationInFrames={durationInFrames}
+          visualStyle={visualStyle}
+        />
       ) : null}
     </AbsoluteFill>
   );
@@ -89,44 +129,51 @@ const Shot: React.FC<{
 const CardTextOverlay: React.FC<{
   overlay: NonNullable<EditManifest['clips'][number]['textOverlay']>;
   durationInFrames: number;
-}> = ({overlay, durationInFrames}) => {
+  visualStyle: StyleConfig;
+}> = ({overlay, durationInFrames, visualStyle}) => {
   const frame = useCurrentFrame();
+  const output = useVideoConfig();
+  const profile = styleProfileForOutput(visualStyle, output);
+  const text = cardTextStyles(visualStyle, profile);
   return (
     <AbsoluteFill
       style={{
         justifyContent: 'flex-end',
         alignItems: 'flex-start',
-        opacity: titleOpacity(frame, durationInFrames),
-        padding: '0 96px 76px',
+        opacity: titleOpacity(frame, durationInFrames, profile.fadeFrames),
+        paddingLeft: output.width * profile.horizontalPadding,
+        paddingRight: output.width * profile.horizontalPadding,
+        paddingBottom: output.height * profile.bottomPadding,
         pointerEvents: 'none',
       }}
     >
       <div
         style={{
-          ...cardTextContainerStyle(),
-          color: '#fffaf2',
-          fontFamily: 'ReelCustom, Helvetica Neue, Arial, sans-serif',
-          textShadow: '0 2px 18px rgba(0,0,0,0.78)',
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: `${profile.scrimHeight * 100}%`,
+          backgroundColor: colorWithOpacity(visualStyle.palette.dark, profile.scrimOpacity),
+          zIndex: 0,
+        }}
+      />
+      <div
+        style={{
+          ...cardTextContainerStyle(profile.maxTextWidth),
+          color: visualStyle.palette.primary,
+          textShadow: profile.shadow,
+          zIndex: 1,
         }}
       >
-        <div
-          style={{
-            fontSize: 46,
-            fontWeight: 600,
-            letterSpacing: '0.075em',
-            lineHeight: 1.05,
-          }}
-        >
+        <div style={text.heading}>
           {overlay.heading}
         </div>
         {overlay.subheading ? (
           <div
             style={{
-              fontSize: 27,
-              fontWeight: 400,
-              letterSpacing: '0.035em',
-              lineHeight: 1.15,
-              marginTop: 10,
+              ...text.body,
+              marginTop: profile.gap,
               opacity: 0.9,
             }}
           >
@@ -138,7 +185,7 @@ const CardTextOverlay: React.FC<{
   );
 };
 
-const Titles: React.FC<{edit: EditManifest}> = ({edit}) => {
+const Titles: React.FC<{edit: EditManifest; visualStyle: StyleConfig}> = ({edit, visualStyle}) => {
   const {fps} = useVideoConfig();
   return (
     <>
@@ -147,7 +194,7 @@ const Titles: React.FC<{edit: EditManifest}> = ({edit}) => {
         const durationInFrames = Math.max(1, Math.round(title.durationSeconds * fps));
         return (
           <Sequence key={`${title.text}-${index}`} from={from} durationInFrames={durationInFrames}>
-            <TitleCard title={title} durationInFrames={durationInFrames} />
+            <TitleCard title={title} durationInFrames={durationInFrames} visualStyle={visualStyle} />
           </Sequence>
         );
       })}
@@ -158,9 +205,13 @@ const Titles: React.FC<{edit: EditManifest}> = ({edit}) => {
 const TitleCard: React.FC<{
   title: EditManifest['titles'][number];
   durationInFrames: number;
-}> = ({title, durationInFrames}) => {
+  visualStyle: StyleConfig;
+}> = ({title, durationInFrames, visualStyle}) => {
   const frame = useCurrentFrame();
-  const opacity = titleOpacity(frame, durationInFrames);
+  const output = useVideoConfig();
+  const profile = styleProfileForOutput(visualStyle, output);
+  const text = cardTextStyles(visualStyle, profile);
+  const opacity = titleOpacity(frame, durationInFrames, profile.fadeFrames);
   const align =
     title.position === 'top'
       ? {justifyContent: 'flex-start', paddingTop: 180}
@@ -173,21 +224,17 @@ const TitleCard: React.FC<{
         ...align,
         alignItems: 'center',
         opacity,
-        paddingLeft: 90,
-        paddingRight: 90,
+        paddingLeft: output.width * profile.horizontalPadding,
+        paddingRight: output.width * profile.horizontalPadding,
         pointerEvents: 'none',
       }}
     >
       <div
         style={{
-          color: '#fffaf2',
-          fontFamily: 'ReelCustom, Helvetica Neue, Arial, sans-serif',
-          fontSize: 74,
-          fontWeight: 500,
-          letterSpacing: '-0.035em',
-          lineHeight: 1.02,
+          ...text.heading,
+          ...cardTextContainerStyle(profile.maxTextWidth),
           textAlign: 'center',
-          textShadow: '0 2px 24px rgba(0,0,0,0.7)',
+          textShadow: profile.shadow,
           whiteSpace: 'pre-wrap',
         }}
       >
@@ -197,43 +244,53 @@ const TitleCard: React.FC<{
   );
 };
 
-const CaptionCard: React.FC<{caption: Caption}> = ({caption}) => (
-  <AbsoluteFill
-    style={{
-      justifyContent: 'flex-end',
-      alignItems: 'center',
-      padding: '0 70px 190px',
-      pointerEvents: 'none',
-    }}
-  >
-    <div
+const CaptionCard: React.FC<{
+  caption: Caption;
+  visualStyle: StyleConfig;
+  profile: OutputStyleTokens;
+}> = ({caption, visualStyle, profile}) => {
+  const output = useVideoConfig();
+  return (
+    <AbsoluteFill
       style={{
-        color: 'white',
-        backgroundColor: 'rgba(0,0,0,0.72)',
-        borderRadius: 12,
-        fontFamily: 'ReelCustom, Helvetica Neue, Arial, sans-serif',
-        fontSize: 48,
-        fontWeight: 600,
-        lineHeight: 1.15,
-        padding: '14px 22px 18px',
-        textAlign: 'center',
-        whiteSpace: 'pre-wrap',
+        justifyContent: 'flex-end',
+        alignItems: 'center',
+        ...captionContainerStyle(profile, output.height),
+        pointerEvents: 'none',
       }}
     >
-      {caption.text.trim()}
-    </div>
-  </AbsoluteFill>
-);
+      <div
+        style={{
+          ...captionTextContainerStyle(profile),
+          color: visualStyle.palette.primary,
+          backgroundColor: 'rgba(0,0,0,0.72)',
+          borderRadius: 12,
+          fontFamily: [visualStyle.typography.body.family, ...visualStyle.typography.body.fallback].join(', '),
+          fontSize: profile.captionSize,
+          fontWeight: visualStyle.typography.body.weight,
+          lineHeight: profile.bodyLineHeight,
+          padding: '14px 22px 18px',
+          textAlign: 'center',
+          whiteSpace: 'pre-wrap',
+        }}
+      >
+        {caption.text.trim()}
+      </div>
+    </AbsoluteFill>
+  );
+};
 
-const Captions: React.FC<{captions: Caption[]}> = ({captions}) => {
-  const {fps} = useVideoConfig();
+const Captions: React.FC<{captions: Caption[]; visualStyle: StyleConfig}> = ({captions, visualStyle}) => {
+  const output = useVideoConfig();
+  const {fps} = output;
+  const profile = styleProfileForOutput(visualStyle, output);
   return (
     <>
       {captions.map((caption, index) => {
         const range = captionFrameRange(caption, fps);
         return (
           <Sequence key={`${caption.startMs}-${index}`} {...range}>
-            <CaptionCard caption={caption} />
+            <CaptionCard caption={caption} visualStyle={visualStyle} profile={profile} />
           </Sequence>
         );
       })}
@@ -242,15 +299,24 @@ const Captions: React.FC<{captions: Caption[]}> = ({captions}) => {
 };
 
 export const SocialReel: React.FC<ReelRenderProps> = (props) => {
-  if (props.fontUrl) {
-    void ensureCustomFontLoaded(props.fontUrl);
-  }
+  const visualStyle = props.visualStyle ?? CINEMATIC_MINIMAL_STYLE;
+  const suppliedFonts = props.fonts ?? {display: null, body: null, metadata: null};
+  const fonts =
+    props.fontUrl && Object.values(suppliedFonts).every((font) => font === null)
+      ? legacyFontRoles(props.fontUrl, visualStyle)
+      : suppliedFonts;
+  void ensureCustomFontsLoaded(fonts);
+  const staticFonts = Object.fromEntries(
+    Object.entries(fonts).map(([role, font]) => [
+      role,
+      font ? {...font, url: staticFile(font.url)} : null,
+    ]),
+  ) as StagedFontRoles;
+  const roleRules = fontFaceRules(staticFonts);
   const timings = buildShotTimings(props.edit);
   return (
     <AbsoluteFill style={{backgroundColor: '#050505'}}>
-      {props.fontUrl ? (
-        <style>{fontFaceRule(staticFile(props.fontUrl))}</style>
-      ) : null}
+      {roleRules ? <style>{roleRules}</style> : null}
       <TransitionSeries>
         {props.edit.clips.map((clip, index) => {
           const timing = timings[index];
@@ -265,6 +331,7 @@ export const SocialReel: React.FC<ReelRenderProps> = (props) => {
                 durationInFrames={timing.durationInFrames}
                 src={src}
                 trimBeforeFrames={props.trimBeforeFramesByClip?.[clip.id] ?? 0}
+                visualStyle={visualStyle}
               />
             </TransitionSeries.Sequence>,
           ];
@@ -287,8 +354,8 @@ export const SocialReel: React.FC<ReelRenderProps> = (props) => {
           volume={dbToGain(props.edit.music.gainDb)}
         />
       ) : null}
-      <Titles edit={props.edit} />
-      <Captions captions={props.captions} />
+      <Titles edit={props.edit} visualStyle={visualStyle} />
+      <Captions captions={props.captions} visualStyle={visualStyle} />
       {props.watermark ? (
         <AbsoluteFill
           style={{

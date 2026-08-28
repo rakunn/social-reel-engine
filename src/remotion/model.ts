@@ -1,6 +1,11 @@
 import type {Caption} from '@remotion/captions';
 import {interpolate} from 'remotion';
 import type {EditManifest, AnimatedCrop} from '../contracts/schemas';
+import type {
+  FontRole,
+  OutputStyleTokens,
+  StyleConfig,
+} from '../style/contracts';
 import {
   clipDurationSeconds,
   secondsToFrames,
@@ -14,8 +19,19 @@ export type ReelRenderProps = {
   captions: Caption[];
   watermark: string | null;
   trimBeforeFramesByClip?: Record<string, number>;
+  visualStyle: StyleConfig;
+  fonts: Record<FontRole, StagedFontAsset | null>;
   fontUrl?: string | null;
 };
+
+export type StagedFontAsset = {
+  url: string;
+  family: 'ReelDisplay' | 'ReelBody' | 'ReelMetadata';
+  weight: number;
+  style: 'normal' | 'italic';
+};
+
+export type StagedFontRoles = Record<FontRole, StagedFontAsset | null>;
 
 export const secondsToMediaFrames = (seconds: number, fps: number): number =>
   secondsToFrames(seconds, fps);
@@ -23,16 +39,84 @@ export const secondsToMediaFrames = (seconds: number, fps: number): number =>
 export const fontFaceRule = (fontUrl: string): string =>
   `@font-face{font-family:ReelCustom;src:url(${JSON.stringify(fontUrl)});font-display:block;}`;
 
-export const cardTextContainerStyle = () => ({
-  maxWidth: '100%' as const,
+export const cardTextContainerStyle = (maxTextWidth = 1) => ({
+  maxWidth: `${maxTextWidth * 100}%`,
   overflowWrap: 'anywhere' as const,
   wordBreak: 'break-word' as const,
 });
 
-export const titleOpacity = (frame: number, durationInFrames: number): number => {
+export const captionContainerStyle = (
+  profile: OutputStyleTokens,
+  outputHeight: number,
+) => ({
+  paddingLeft: `${profile.horizontalPadding * 100}%`,
+  paddingRight: `${profile.horizontalPadding * 100}%`,
+  paddingBottom: outputHeight * profile.bottomPadding,
+});
+
+export const captionTextContainerStyle = (profile: OutputStyleTokens) =>
+  cardTextContainerStyle(profile.maxTextWidth);
+
+export const colorWithOpacity = (hexColor: string, opacity: number): string => {
+  const match = /^#([a-f0-9]{2})([a-f0-9]{2})([a-f0-9]{2})$/i.exec(hexColor);
+  if (!match) throw new Error(`Expected a six-digit hexadecimal color: ${hexColor}`);
+  const channels = match.slice(1).map((channel) => Number.parseInt(channel, 16));
+  return `rgba(${channels[0]},${channels[1]},${channels[2]},${opacity})`;
+};
+
+export const fontFaceRules = (fonts: StagedFontRoles): string => {
+  const seen = new Set<string>();
+  const rules: string[] = [];
+  for (const font of Object.values(fonts)) {
+    if (!font) continue;
+    const key = `${font.family}\0${font.url}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rules.push(
+      `@font-face{font-family:${font.family};src:url(${JSON.stringify(font.url)});font-weight:${font.weight};font-style:${font.style};font-display:block;}`,
+    );
+  }
+  return rules.join('');
+};
+
+export const styleProfileForOutput = (
+  style: StyleConfig,
+  output: {width: number; height: number; fps: number},
+): OutputStyleTokens =>
+  output.width === 1910 && output.height === 1000 ? style.profiles.carousel : style.profiles.reel;
+
+const fontStack = (style: StyleConfig, role: FontRole): string =>
+  [style.typography[role].family, ...style.typography[role].fallback]
+    .map((family) => (/^[a-zA-Z][a-zA-Z0-9-]*$/.test(family) ? family : JSON.stringify(family)))
+    .join(', ');
+
+export const cardTextStyles = (style: StyleConfig, profile: OutputStyleTokens) => ({
+  heading: {
+    fontFamily: fontStack(style, 'display'),
+    color: style.palette.primary,
+    fontSize: profile.headingSize,
+    fontWeight: style.typography.display.weight,
+    letterSpacing: `${profile.headingTrackingEm}em`,
+    lineHeight: profile.headingLineHeight,
+  },
+  body: {
+    fontFamily: fontStack(style, 'body'),
+    color: style.palette.primary,
+    fontSize: profile.bodySize,
+    fontWeight: style.typography.body.weight,
+    letterSpacing: `${profile.bodyTrackingEm}em`,
+    lineHeight: profile.bodyLineHeight,
+  },
+});
+
+export const titleOpacity = (
+  frame: number,
+  durationInFrames: number,
+  requestedFadeFrames = 10,
+): number => {
   const finalFrame = Math.max(0, durationInFrames - 1);
   if (finalFrame === 0) return 0;
-  const fadeDuration = Math.min(10, finalFrame / 2);
+  const fadeDuration = Math.min(requestedFadeFrames, finalFrame / 2);
   const interpolationOptions = {
     extrapolateLeft: 'clamp' as const,
     extrapolateRight: 'clamp' as const,

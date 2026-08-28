@@ -26,3 +26,7 @@ public/jobs/**
 # Local licensed LUT/PDF library. The tracked catalog retains checksums and semantics.
 library/luts/**/*.cube
 library/guides/**/*.pdf
+
+# Checksum-pinned Google Fonts are downloaded into a local cache.
+library/fonts/**/*.ttf
+!library/fonts/.gitkeep

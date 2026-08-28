@@ -11,6 +11,7 @@ import {readJson, writeJson} from '../core/json';
 import {assertSafeReelName} from '../core/paths';
 import {validateEdit} from '../edit/validate';
 import {scanInputs} from './ingest';
+import {StyleConfigSchema} from '../style/contracts';
 import {
   isProcessIdentityAlive,
   isMediaOperationLockActive,
@@ -310,6 +311,8 @@ export const createReelProject = async ({
       errorOnExist: true,
       force: false,
     });
+
+    await readJson(path.join(projectPath, 'config/style.json'), StyleConfigSchema);
 
     const briefPath = path.join(projectPath, 'brief.json');
     await writeJson(briefPath, brief);
