@@ -52,13 +52,14 @@ Include what you know about:
 
 Camera profile information matters for log footage and cannot be inferred safely from appearance. It is fine to leave editorial choices open with directions such as “choose the best LUT” or “choose the opening and closing shots.”
 
-Codex creates a local job under `projects/<reel-name>/`, copies the supplied assets into it, analyzes the media, and builds the rough cut. It then pauses for:
+Codex creates a local job under `projects/<reel-name>/`, copies the supplied assets into it, analyzes the media, and builds the rough cut. It pauses twice for visual review:
 
 1. rough-cut approval for timing, order, framing, and stabilization
 2. color approval based on graded reference stills
-3. confirmation that you have the rights to the exact assets used in the edit
 
-After those checks, it renders the final files and runs quality control. Use this command at any time to see the current checkpoint and next action:
+Before the final render, your rights confirmation is bound to the exact assets used by the edit. If you already confirmed those rights in the request, this does not add another pause.
+
+After those checks, Codex renders the final files and runs quality control. Use this command at any time to see the current checkpoint and next action:
 
 ```bash
 npm run reel -- status <reel-name>
