@@ -1,62 +1,26 @@
 # Social Reel Engine
 
-A local macOS workflow for turning supplied MP4/MOV footage into cinematic 9:16 social reels or ordered 1.91:1 landscape video carousel packages with Codex, FFmpeg, Remotion, and librosa. Originals remain unchanged. Every generated artifact is checksum-bound, color transforms are explicit, and final exports require current edit, color, and user-confirmed asset-rights records.
+Create vertical social reels and landscape video carousels from local MP4 or MOV footage. Codex manages the edit, FFmpeg and Remotion handle the video pipeline, and librosa analyzes music timing.
 
-## Pipeline at a glance
+Source files stay unchanged. The project records the exact files, edit, color settings, and approvals used for each export.
 
 ![Music, clips, LUT, and captions become an edited reel](public/reel-pipeline-natural.webp)
 
-## Start a reel in a new Codex task
+## Before you start
 
-Open this folder as the workspace, attach or provide paths to your clips/music/captions, then ask:
+This project is built for local use on macOS and is tested on Apple silicon. You need:
 
-> Use $create-social-reel to create a 20–30 second cinematic vertical reel from the clips, music, captions, and LUTs I provide.
+- Codex with this repository open as the workspace
+- Node.js 24.12.0 and npm 11.6.2
+- Python 3.11
+- FFmpeg and ffprobe available on your `PATH`
+- enough free disk space for ProRes intermediates
 
-The skill creates `projects/<reel-name>`, ingests local copies of the supplied files, analyzes them, and pauses at the two visual checkpoints. It never chooses an unconfirmed technical transform. Per-shot stabilization is baked into the rough preview, so the approved framing is the framing used downstream.
+The Node version is pinned in `.nvmrc` and `.node-version`. Python packages are pinned for macOS arm64 in `requirements.txt`.
 
-### Recommended prompt context
+## Setup
 
-A short prompt is enough when the supplied paths and desired format are clear. The workflow should choose sensible editorial defaults, inspect the footage, and ask only for unresolved factual or rights information and the required visual approvals.
-
-Include these details when they are known:
-
-- output type: `9:16 reel` or `1.91:1 video carousel`
-- source paths and any music, captions, LUTs, fonts, or brand assets to use
-- camera model and exact recording profile, gamma, and gamut, such as `DJI Mini 4 Pro, D-Log M`; never guess these from appearance alone
-- location, subject, mood, platform, and intended audience
-- target duration, or card duration and preferred number of cards
-- editorial preferences such as calm movement, varied adjacent compositions, hero/closing shots, text language, or whether the engine should choose them
-- a reusable style preset, such as `philippines-island-editorial`, or a concise visual direction
-- optional photo aspect ratios and still count
-- rights status when already known; the exact used asset set is still checksum-bound through `confirm-rights`
-
-You normally do not need to prescribe exact trims, crop coordinates, stabilization values, exposure stops, contrast, white balance, creative-LUT intensity, or the strongest available LUT. The workflow should evaluate these per shot, keep corrections when they materially improve the footage while remaining natural, and present the resulting composition and color for approval. It must still identify the correct technical normalization transform from confirmed source metadata rather than creative preference.
-
-Copy-ready vertical example:
-
-> Use $create-social-reel to make a 20–30 second 9:16 reel from the supplied clips. They were recorded on a DJI Mini 4 Pro in D-Log M. The story is a quiet Philippines sunset for Instagram. Avoid abrupt movement, vary wide and close compositions, choose the hero and closing shots, normalize and naturally improve the footage, and apply `philippines-island-editorial`. Use subtle English titles and no generated captions. I have rights to the supplied footage and LUTs.
-
-Copy-ready carousel example:
-
-> Use $create-social-reel to create an ordered 1.91:1 video carousel from the supplied D-Log M clips. Make each independently shareable card 4–5 seconds, avoid sudden camera movement, and vary adjacent compositions. Choose the strongest opening hero and a calm closing card. Correct exposure, contrast, white balance, and color where useful; keep improvements that look natural. Apply `philippines-island-editorial` with subtle burned-in location captions. I have rights to the supplied footage, LUTs, fonts, and music.
-
-If a choice is intentionally open, say so directly—for example, “choose the best LUT,” “choose the captions,” or “choose the hero and final shot.” That delegates the creative choice without authorizing the workflow to invent missing camera-profile facts, language translations, rights, or technical-transform semantics.
-
-To request an optional shareable-stills package after the approved reel, add this to the prompt:
-
-> After final master and delivery QC, export the five best clean photo stills in 9:16 and 4:5. Reuse the approved framing for 9:16, and present proposed reframes for 4:5 before final export.
-
-The reel remains a 9:16 vertical video. Photo packages support `9:16`, `4:5`, `1:1`, and `16:9`; they reuse the approved moving crop as their anchor rather than changing the reel edit.
-
-For independently shareable landscape video cards, create the job as a carousel:
-
-```bash
-npm run reel -- new loboc-river --title "Loboc River" --format carousel-1.91:1
-```
-
-Each ordered edit clip becomes one 1910×1000 MP4 card and must last 4–5 seconds. The combined rough preview is used to approve order, trim, and composition; the final `render-carousel` command publishes separate files and `qc-carousel` verifies every card.
-
-## One-time local setup
+Run this once from the repository root:
 
 ```bash
 nvm use
@@ -67,30 +31,82 @@ npx remotion browser ensure
 npm run reel -- doctor
 ```
 
-Pinned runtime:
+Before creating the virtual environment, check that `python3 --version` reports Python 3.11. If you do not use nvm, select the Node version from `.node-version` with your preferred version manager.
 
-- Node.js 24.12.0 and npm 11.6.2
-- Remotion packages 4.0.507
-- Python 3.11 virtual environment with librosa 0.11.0
-- Local FFmpeg/ffprobe with LUT, zscale, stabilization, H.264, ProRes, AAC, and loudness support
+`doctor` checks the runtime versions, available disk space, Remotion compositor, FFmpeg filters and encoders, Python environment, LUT catalog, and style catalog. Fix any failed check before rendering.
 
-## Workflow and checkpoints
+## Create your first reel
+
+The normal way to use this repository is through its Codex skill. Open a new Codex task in this workspace, attach your media or provide its local paths, and ask:
+
+> Use $create-social-reel to create a 20–30 second 9:16 reel from my clips and music. The footage was recorded on a DJI Mini 4 Pro in D-Log M. Make it a calm Philippines sunset edit for Instagram, use `philippines-island-editorial`, and choose the shots and captions. I have the rights to use the supplied footage, music, and LUTs.
+
+Include what you know about:
+
+- the output: `9:16 reel` or `1.91:1 video carousel`
+- paths to clips, music, captions, LUTs, fonts, and brand assets
+- camera model and recording profile, gamma, and gamut
+- subject, location, mood, platform, audience, and target duration
+- preferred style, captions, shot order, or choices Codex may make
+- your right to use the supplied assets
+
+Camera profile information matters for log footage and cannot be inferred safely from appearance. It is fine to leave editorial choices open with directions such as “choose the best LUT” or “choose the opening and closing shots.”
+
+Codex creates a local job under `projects/<reel-name>/`, copies the supplied assets into it, analyzes the media, and builds the rough cut. It then pauses for:
+
+1. rough-cut approval for timing, order, framing, and stabilization
+2. color approval based on graded reference stills
+3. confirmation that you have the rights to the exact assets used in the edit
+
+After those checks, it renders the final files and runs quality control. Use this command at any time to see the current checkpoint and next action:
+
+```bash
+npm run reel -- status <reel-name>
+```
+
+## Other output formats
+
+### Landscape carousel
+
+Ask for a `1.91:1 video carousel` when you want ordered, independently shareable video cards. Each card is 1910×1000 and must be 4–5 seconds long. The rough preview covers the full sequence; the final package is published under:
+
+```text
+projects/<reel-name>/output/carousel/ready-to-share/
+```
+
+Example request:
+
+> Use $create-social-reel to create a 1.91:1 video carousel from these D-Log M clips. Make each card 4–5 seconds, vary adjacent compositions, and use a calm final shot.
+
+### Photo stills
+
+Add this to a reel request when you also want still images:
+
+> After final video QC, export the five best clean stills in 9:16 and 4:5.
+
+Available photo formats are `9:16`, `4:5`, `1:1`, and `16:9`. A 9:16 still reuses the approved video crop. Other formats need a separate reframe review before export.
+
+## Checkpoints
 
 ```text
 new → ingest → analyze → proxy → beats → rough edit → validate → preview
                                                          ↓
-                                                approve-edit (pause 1)
+                                                    approve edit
                                                          ↓
-                                  grade-stills → approve-color (pause 2)
+                                           grade stills → approve color
                                                          ↓
-                              confirm-rights → grade → render → master QC → delivery QC
-                                                                            ↓
-                                           optional: photos (9:16 exports automatically)
-                                                                            ↓
-                                     optional non-9:16 contact sheet → approve-photos → export
+                                       confirm rights → grade → render
+                                                         ↓
+                                             master QC → delivery QC
+                                                         ↓
+                                              optional photo exports
 ```
 
-Typical commands:
+Approvals are tied to checksums. If a referenced file or relevant setting changes, `status` reports which approval or output is stale.
+
+## Command-line reference
+
+Codex normally runs these commands for you. The CLI is useful when developing the engine, inspecting a job, or repeating a known step.
 
 ```bash
 npm run reel -- new island-sunrise --title "Island Sunrise"
@@ -102,6 +118,11 @@ npm run reel -- style island-sunrise --apply philippines-island-editorial
 npm run reel -- analyze island-sunrise
 npm run reel -- proxy island-sunrise
 npm run reel -- beats island-sunrise
+```
+
+The edit is stored in `projects/island-sunrise/edits/edit.json`. Once it is ready, continue with:
+
+```bash
 npm run reel -- validate-edit island-sunrise
 npm run reel -- preview island-sunrise
 npm run reel -- approve-edit island-sunrise
@@ -112,14 +133,16 @@ npm run reel -- grade island-sunrise
 npm run reel -- render island-sunrise
 npm run reel -- qc island-sunrise --target master
 npm run reel -- qc island-sunrise --target delivery
-npm run reel -- photos island-sunrise --aspect 9:16 4:5 --count 5
-# Review previews/photo-candidates/4x5/contact-sheet.jpg, then after explicit approval:
-npm run reel -- approve-photos island-sunrise
-npm run reel -- photos island-sunrise
 npm run reel -- status island-sunrise
 ```
 
-Carousel finalization uses the same ingest, preview, edit approval, graded-still, color approval, rights, and grade commands, followed by:
+Create a carousel job with:
+
+```bash
+npm run reel -- new loboc-river --title "Loboc River" --format carousel-1.91:1
+```
+
+After the common edit, color, rights, and grading steps, finish it with:
 
 ```bash
 npm run reel -- render-carousel loboc-river
@@ -127,36 +150,60 @@ npm run reel -- qc-carousel loboc-river
 npm run reel -- status loboc-river
 ```
 
-Use `npm run reel -- ingest <name> --list-library` to inspect the local LUT catalog. Catalog installation copies the LUT into the job, verifies its SHA-256 checksum, and writes its declared semantics into `config/luts.json`.
+Create photo stills after the master and delivery outputs pass QC:
 
-Use `npm run reel -- style --list` to inspect reusable typography and palette presets. Applying a preset downloads only its required Google Fonts from commit-pinned URLs, verifies their SHA-256 checksums, caches them locally under `library/fonts/`, ingests exact project copies, and writes `config/style.json`. Run `analyze` afterward. The included fonts use OFL-1.1; selected font checksums participate in rights and render identity. Typography changes require a new rough review, but they do not invalidate an otherwise exact color approval. Presets never alter exposure, white balance, tint, contrast, or LUT choices, and the optional Tagalog-script font never authorizes generated or inferred Baybayin copy.
+```bash
+npm run reel -- photos island-sunrise --aspect 9:16 4:5 --count 5
+# Review previews/photo-candidates/4x5/contact-sheet.jpg.
+npm run reel -- approve-photos island-sunrise
+npm run reel -- photos island-sunrise
+```
 
-Run `confirm-rights` only after the user explicitly confirms the exact current used asset set. The command records that decision and its asset-checksum fingerprint in `brief.json`; `status` blocks final export if a referenced asset later changes, without invalidating confirmation for unused inputs.
+Useful catalog commands:
 
-## Color safety
+```bash
+npm run reel -- ingest <reel-name> --list-library
+npm run reel -- style --list
+```
 
-The enforced order is:
+Installing a catalog LUT copies it into the job and checks its SHA-256 checksum and declared color spaces. Applying a style preset downloads its required commit-pinned Google Fonts, verifies them, and copies them into the job. Run `analyze` again after adding either one.
+
+For the complete command list:
+
+```bash
+npm run reel -- --help
+```
+
+## Color and asset safety
+
+Color processing follows this order:
 
 ```text
-shot exposure/white balance/tint
-→ exact technical normalization LUT
-→ optional creative LUT at an approved blend
+shot exposure, white balance, and tint
+→ technical normalization LUT
+→ optional creative LUT at the approved strength
 → Rec.709 output
 ```
 
-A combined technical/creative LUT replaces the technical and creative stages; it is never stacked with a second normalizer. Grading and final export stop when camera model, canonical input gamma, canonical input gamut, profile ID, LUT metadata, file checksum, or transform semantics are missing or mismatched. A rough-cut proxy may still be made, but it is visibly marked as an unnormalized log preview.
+A combined technical and creative LUT replaces both LUT stages. It is not stacked with another normalizer.
 
-The supplied local library contains:
+Final grading stops when the source camera profile or LUT color-space declaration is missing or inconsistent. You can still make a watermarked proxy from unresolved log footage, but it is not suitable for color approval.
 
-- DJI Mini 4 Pro D-Log M → Rec.709 technical transform
-- Sony S-Log3/S-Gamut3.Cine → Rec.709 technical transform
-- Sony S-Log3/S-Gamut3 → Rec.709 technical transform
-- 18 Szatrasie creative looks, applied after normalization with a default 50% blend
-- `HDR CONVERSION LUT.cube`, intentionally blocked until its input/output spaces and semantics are confirmed
+The local catalog includes:
 
-The supplied Szatrasie guide recommends tuning creative LUT intensity per shot, generally within 20–80%, and does not prescribe a fixed look by scene. The workflow therefore compares reference frames and asks for approval.
+- DJI Mini 4 Pro D-Log M → Rec.709
+- Sony S-Log3/S-Gamut3.Cine → Rec.709
+- Sony S-Log3/S-Gamut3 → Rec.709
+- 18 Szatrasie creative looks, normally adjusted per shot
+- `HDR CONVERSION LUT.cube`, blocked until its input, output, and purpose are known
 
-## Job structure
+Style presets affect typography, palette, spacing, shadows, and fades. They do not change exposure, white balance, contrast, or LUT selection. See [`library/README.md`](library/README.md) for catalog details.
+
+Run `confirm-rights` only after confirming the assets used by the current edit. The confirmation is tied to their checksums and becomes stale if that set changes.
+
+## Project layout
+
+Each job is self-contained:
 
 ```text
 projects/<reel-name>/
@@ -181,22 +228,28 @@ projects/<reel-name>/
 └── output/
 ```
 
-Every runtime `projects/<reel-name>` job is local-only and ignored by Git, including media, metadata, edit manifests, approvals, analysis, previews, QC reports, and renders. Only `projects/.gitkeep` is tracked; reusable scaffold changes belong in `templates/reel/`.
+Runtime jobs are local and ignored by Git. This includes media, edit manifests, approvals, analysis, previews, QC reports, and rendered files. Reusable defaults live under `templates/reel/`.
 
-## Output contracts
+## Outputs
 
-- Preview: 540×960, 30 fps, H.264/yuv420p, AAC, BT.709
-- Master: 1080×1920, 30 fps, ProRes 422 HQ, 10-bit 4:2:2, PCM-16/48 kHz, PNG source frames, BT.709
-- Delivery: H.264/yuv420p CRF 17, AAC requested at 256 kbps, fast-start, BT.709, measured two-pass normalization to −14 LUFS and −1.5 dBTP; intentionally silent edits retain a valid AAC track without invalid loudness processing
-- Carousel package: one independently encoded 1910×1000, 30 fps, H.264/yuv420p MP4 per ordered 4–5 second card, using the delivery audio, fast-start, color-tag, and loudness policy; `analysis/carousel.json` records order, paths, checksums, sizes, durations, and package freshness
-- Carousel QC: consolidated JSON and Markdown reports under `analysis/qc-carousel.*`; a failure on any card blocks package completion
-- Optional photo package: five clean, quality-95 JPEG stills per requested profile by default, tagged with the macOS sRGB profile; `9:16` uses the approved crop exactly, while `4:5`, `1:1`, and `16:9` require reframe review before publication
+For a vertical reel, the main files are:
 
-QC writes `analysis/qc-<target>.json` and `analysis/qc-<target>.md` with approval status, artifact freshness, missing media, duration, dimensions, frame rate, codec/profile, color tags, pixel format, audio codec/rate/observed average bitrate, MP4 fast-start placement, loudness, black sections, frozen sections, and readability. AAC average bitrate is content-dependent, so a positive value outside tolerance is surfaced as a warning while the requested encoder setting remains enforced by the render fingerprint.
+- `output/master.mov`: 1080×1920, 30 fps, ProRes 422 HQ, 10-bit 4:2:2, PCM audio
+- `output/delivery.mp4`: H.264, AAC, fast-start, BT.709, normalized to −14 LUFS and −1.5 dBTP
 
-Photo output is gated on current edit/color approvals, used-asset rights, graded intermediates, and passing current master and delivery QC reports that are bound to their exact render artifacts. Candidate contact sheets are written to `previews/photo-candidates/`; final files are atomically published as `output/photos/<profile>/01.jpg` through `05.jpg`. `analysis/photos.json` and `analysis/photo-qc.{json,md}` record the selections, crop, checksums, dimensions, and freshness evidence.
+The preview is 540×960 H.264. Carousel cards are 1910×1000 H.264 files. Photo exports are quality-95 JPEGs with an sRGB profile.
 
-## Verification
+QC reports are written to `analysis/` in JSON and Markdown. They cover freshness, missing media, dimensions, duration, frame rate, codecs, color tags, audio, fast-start placement, loudness, black or frozen sections, and text readability. A failed check blocks completion.
+
+## Development checks
+
+Run the full project verification with:
+
+```bash
+npm run verify
+```
+
+Or run each check separately:
 
 ```bash
 npm run typecheck
@@ -205,4 +258,4 @@ npm run test:e2e
 npm run reel -- doctor
 ```
 
-`npm run test:e2e` creates temporary synthetic media and exercises audible and intentionally silent two-clip reels. It uses non-zero video/music offsets, renders preview/master/delivery outputs, validates all three through QC, generates an automatic 9:16 photo package plus an approved 4:5 reframe package, and verifies that source checksums did not change.
+The end-to-end suite builds temporary synthetic media, renders preview, master, delivery, carousel, and photo outputs, runs QC, and confirms that the source files remain unchanged.
