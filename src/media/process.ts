@@ -7,6 +7,8 @@ import {
   type OwnedProcess,
 } from '../render/process-group';
 import {RenderInterruptedError, type WorkerSignal} from '../render/errors';
+import {subscribeProcessSignals, type ProcessSignalTarget} from './signals';
+export type {ProcessSignalTarget} from './signals';
 
 export type ProcessResult = {
   command: string;
@@ -32,11 +34,6 @@ type ProcessTermination =
   | {type: 'timeout'; kind: 'wall' | 'idle'}
   | {type: 'abort'; reason: unknown}
   | {type: 'interrupt'; signal: WorkerSignal};
-
-export type ProcessSignalTarget = {
-  on(signal: WorkerSignal, listener: () => void): unknown;
-  off(signal: WorkerSignal, listener: () => void): unknown;
-};
 
 type ProcessErrorContext = ProcessResult & {pgid: number | null};
 
@@ -280,12 +277,9 @@ export const runProcess = async (
   if (options.signal?.aborted) abortListener();
 
   const signalTarget = options.signalTarget ?? process;
-  const signalListeners = new Map<WorkerSignal, () => void>();
-  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
-    const listener = () => beginTermination({type: 'interrupt', signal});
-    signalListeners.set(signal, listener);
-    signalTarget.on(signal, listener);
-  }
+  const unsubscribeSignals = subscribeProcessSignals(signalTarget, (signal) =>
+    beginTermination({type: 'interrupt', signal}),
+  );
 
   const closedOutcome: Promise<
     | {kind: 'closed'; exitCode: number | null; signal: NodeJS.Signals | null}
@@ -319,9 +313,7 @@ export const runProcess = async (
   } catch (error) {
     cleanupError ??= error;
   } finally {
-    for (const [signal, listener] of signalListeners) {
-      signalTarget.off(signal, listener);
-    }
+    unsubscribeSignals();
   }
 
   const result = resultFor(command, args, stdout, stderr, outcome.exitCode);

@@ -38,7 +38,18 @@ export const installCatalogLut = async (
       throw new Error(`Unknown catalog LUT "${id}"`);
     }
     const sourcePath = path.join(engineRoot, entry.file);
-    if ((await hashFile(sourcePath)) !== entry.checksumSha256) {
+    let checksum: string;
+    try {
+      checksum = await hashFile(sourcePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      throw new Error(
+        `Catalog LUT ${id} is not installed locally. Ask the user to supply the matching LUT, ` +
+        `then ingest it with --kind ${entry.kind === 'creative' ? 'creative-lut' : 'technical-lut'} ` +
+        'and record its verified transform metadata in config/luts.json. Catalog entries do not include LUT files.',
+      );
+    }
+    if (checksum !== entry.checksumSha256) {
       throw new Error(`Catalog LUT checksum mismatch: ${entry.file}`);
     }
     const kind = entry.kind === 'creative' ? 'creative-lut' : 'technical-lut';

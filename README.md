@@ -6,40 +6,43 @@ Source files stay unchanged. The project records the exact files, edit, color se
 
 ![Music, clips, LUT, and captions become an edited reel](public/reel-pipeline-natural.webp)
 
-## Before you start
-
-This project is built for local use on macOS and is tested on Apple silicon. You need:
-
-- Codex with this repository open as the workspace
-- Node.js 24.12.0 and npm 11.6.2
-- Python 3.11
-- FFmpeg and ffprobe available on your `PATH`
-- enough free disk space for ProRes intermediates
-
-The Node version is pinned in `.nvmrc` and `.node-version`. Python packages are pinned for macOS arm64 in `requirements.txt`.
-
 ## Setup
 
-Run this once from the repository root:
+Use macOS and keep this repository and its dependencies fully downloaded, preferably outside an iCloud/Dropbox/OneDrive-managed folder. Setup needs internet access for pinned dependencies and the Remotion browser. Allow at least 8 GiB of free space; 40 GiB or more is recommended for repeated ProRes renders.
+
+The Node version is pinned in `.nvmrc` and `.node-version`. Install these prerequisites before running setup:
+
+- Node.js 24.12.0 with npm 11.6.2. If you use nvm, install/load nvm first, then run `nvm install` and `nvm use` in this repository. If npm differs, run `npm install --global npm@11.6.2` in that selected Node runtime.
+- Python 3.11 with `python3.11` on your PATH. The pinned Python requirements target macOS arm64 / Python 3.11; other architectures are not covered by this setup verification.
+- FFmpeg and ffprobe on your PATH, with libx264, ProRes, AAC, LUT, zscale, drawtext, stabilization (`vidstabdetect`/`vidstabtransform`), and loudness support. `doctor` checks the complete required filter/encoder set. Custom binaries can be selected with `REEL_FFMPEG_PATH` and `REEL_FFPROBE_PATH`.
+- Codex with this repository opened as its workspace for the guided workflow. The repository includes `.agents/skills/create-social-reel/`; no separate skill download is needed.
+
+From the repository root:
 
 ```bash
-nvm use
+bash scripts/setup.sh --check  # Report all missing prerequisites without installing anything
+bash scripts/setup.sh         # Install project dependencies, browser, and run doctor
+```
+
+`npm run setup` runs the same script. It does not install or change system tools. To perform its installation steps manually after checking prerequisites:
+
+```bash
 npm ci
-python3 -m venv .venv
+python3.11 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 npx remotion browser ensure
 npm run reel -- doctor
 ```
 
-Before creating the virtual environment, check that `python3 --version` reports Python 3.11. If you do not use nvm, select the Node version from `.node-version` with your preferred version manager.
+Success is `"ok": true` from `doctor`. An absent optional LUT library is normal: **LUTs are supplied by the user**, copied into individual jobs, and validated against the recording profile. Catalog metadata alone does not mean a LUT file is installed. Remotion packages are pinned to 4.0.507 and librosa to 0.11.0.
 
-`doctor` checks the runtime versions, available disk space, Remotion compositor, FFmpeg filters and encoders, Python environment, LUT catalog, and style catalog. Fix any failed check before rendering.
+If `doctor` reports dataless/offloaded dependencies, use a fully local copy of the repository and rerun setup there. Preserve your original media and local `projects/` jobs; they are not in Git. If an existing `.venv` uses another Python version, move it aside before setup. If FFmpeg capabilities are missing, select a build containing the reported requirements and rerun `doctor`.
 
 ## Create your first reel
 
 The normal way to use this repository is through its Codex skill. Open a new Codex task in this workspace, attach your media or provide its local paths, and ask:
 
-> Use $create-social-reel to create a 20–30 second 9:16 reel from my clips and music. The footage was recorded on a DJI Mini 4 Pro in D-Log M. Make it a calm Philippines sunset edit for Instagram, use `philippines-island-editorial`, and choose the shots and captions. I have the rights to use the supplied footage, music, and LUTs.
+> Use $create-social-reel to create a 20–30 second 9:16 reel from my clips and music. The footage was recorded on a DJI Mini 4 Pro in D-Log M. Make it a calm Philippines sunset edit for Instagram, use `philippines-island-editorial`, and choose the shots and captions. Ask for any missing required LUTs or technical facts, and ask me to explicitly confirm usage rights.
 
 Include what you know about:
 
@@ -52,12 +55,16 @@ Include what you know about:
 
 Camera profile information matters for log footage and cannot be inferred safely from appearance. It is fine to leave editorial choices open with directions such as “choose the best LUT” or “choose the opening and closing shots.”
 
+Before expensive media work, Codex checks `status` and collects missing inputs, profile/transform facts, and explicit rights confirmation in one intake request. A required missing LUT is requested from you, then copied with `ingest` into the job's `input/luts/technical/` or `input/luts/creative/`. If the file is already supplied, Codex requests only unresolved transform facts. Creative LUTs are optional.
+
+Codex writes `config/sources.json`, `config/luts.json`, and `edits/edit.json`; you do not need to author JSON or prescribe every creative setting. It chooses sensible trims, crops, corrections, and typography from your brief and presents the results for review. An unresolved technical profile or transform permits only the watermarked proxy/rough path until resolved.
+
+Rights always require an explicit user statement covering the assets used. Supplying files, selecting a style, or having a license label does not count. Codex presents the inventory and asks for confirmation; after your response covers the current used set, it runs `confirm-rights`. A valid existing confirmation remains usable while that exact used set is unchanged.
+
 Codex creates a local job under `projects/<reel-name>/`, copies the supplied assets into it, analyzes the media, and builds the rough cut. It pauses twice for visual review:
 
 1. rough-cut approval for timing, order, framing, and stabilization
 2. color approval based on graded reference stills
-
-Before the final render, your rights confirmation is bound to the exact assets used by the edit. If you already confirmed those rights in the request, this does not add another pause.
 
 After those checks, Codex renders the final files and runs quality control. Use this command at any time to see the current checkpoint and next action:
 
@@ -107,29 +114,40 @@ Approvals are tied to checksums. If a referenced file or relevant setting change
 
 ## Command-line reference
 
-Codex normally runs these commands for you. The CLI is useful when developing the engine, inspecting a job, or repeating a known step.
+Codex normally runs these commands for you. This is a staged reference, not an unattended copy-and-paste script: replace the example paths and complete the configuration and review steps between commands.
+
+`status` returns structured `intake.requirements`: `ask-user` items need missing facts/files or explicit rights; `configure` items are work Codex can do from verified information. Its rights inventory is labeled as supplied or used assets and includes checksums. Active media jobs return only lightweight activity status.
 
 ```bash
 npm run reel -- new island-sunrise --title "Island Sunrise"
 npm run reel -- ingest island-sunrise /path/to/clip-1.mp4 /path/to/clip-2.mov --kind clips
 npm run reel -- ingest island-sunrise /path/to/music.wav --kind music
-npm run reel -- ingest island-sunrise --library dji-mini-4-pro-dlogm-rec709-v1
+npm run reel -- ingest island-sunrise /path/to/normalizer.cube --kind technical-lut
+# Optional: ingest /path/to/look.cube with --kind creative-lut.
 npm run reel -- style --list
 npm run reel -- style island-sunrise --apply philippines-island-editorial
+npm run reel -- status island-sunrise
+# Resolve the consolidated intake: confirm recording facts, LUT semantics, and rights.
+# Write verified source profiles to config/sources.json and LUT declarations to config/luts.json.
 npm run reel -- analyze island-sunrise
 npm run reel -- proxy island-sunrise
-npm run reel -- beats island-sunrise
+npm run reel -- beats island-sunrise # Only when one music track is supplied.
 ```
 
-The edit is stored in `projects/island-sunrise/edits/edit.json`. Once it is ready, continue with:
+Codex authors `projects/island-sunrise/edits/edit.json` using analyzed source IDs, trims, crops, audio, and selected LUT IDs. `analyze` does not select shots or create an edit. For manual JSON authoring, see the [input configuration guidance](.agents/skills/create-social-reel/references/inputs.md), [editing guidance](.agents/skills/create-social-reel/references/editing.md), and [validated schemas](src/contracts/schemas.ts). Rerun `analyze` after changing source confirmations or LUT declarations. Once the edit is ready, continue with:
 
 ```bash
 npm run reel -- validate-edit island-sunrise
-npm run reel -- preview island-sunrise
-npm run reel -- approve-edit island-sunrise
-npm run reel -- grade-stills island-sunrise
-npm run reel -- approve-color island-sunrise
+# Only after explicit user rights confirmation covers the current used set:
 npm run reel -- confirm-rights island-sunrise
+npm run reel -- preview island-sunrise
+npm run reel -- qc island-sunrise --target preview
+# Present previews/preview.mp4. Stop until the user explicitly approves this rough cut.
+npm run reel -- approve-edit island-sunrise
+# Source profiles and the normalization transform must be resolved before color work.
+npm run reel -- grade-stills island-sunrise
+# Present previews/graded-stills/. Stop until the user explicitly approves this grade.
+npm run reel -- approve-color island-sunrise
 npm run reel -- grade island-sunrise
 npm run reel -- render island-sunrise
 npm run reel -- qc island-sunrise --target master
@@ -155,7 +173,7 @@ Create photo stills after the master and delivery outputs pass QC:
 
 ```bash
 npm run reel -- photos island-sunrise --aspect 9:16 4:5 --count 5
-# Review previews/photo-candidates/4x5/contact-sheet.jpg.
+# Review previews/photo-candidates/4x5/contact-sheet.jpg; wait for explicit reframe approval.
 npm run reel -- approve-photos island-sunrise
 npm run reel -- photos island-sunrise
 ```
@@ -167,7 +185,7 @@ npm run reel -- ingest <reel-name> --list-library
 npm run reel -- style --list
 ```
 
-Installing a catalog LUT copies it into the job and checks its SHA-256 checksum and declared color spaces. Applying a style preset downloads its required commit-pinned Google Fonts, verifies them, and copies them into the job. Run `analyze` again after adding either one.
+Catalog metadata is optional and does not include LUT binaries. When its matching file is installed locally, `ingest <reel-name> --library <id>` copies it into the job and checks its SHA-256 checksum and declared color spaces. Otherwise supply the file through typed ingest and record verified metadata; the workflow does not download or substitute LUTs based on their names. Applying a style preset downloads its required commit-pinned Google Fonts, verifies them, and copies them into the job. Run `analyze` again after adding either one.
 
 For the complete command list:
 
@@ -190,7 +208,7 @@ A combined technical and creative LUT replaces both LUT stages. It is not stacke
 
 Final grading stops when the source camera profile or LUT color-space declaration is missing or inconsistent. You can still make a watermarked proxy from unresolved log footage, but it is not suitable for color approval.
 
-The local catalog includes:
+The optional local catalog describes these user-supplied LUTs; binaries and the guide are excluded from Git:
 
 - DJI Mini 4 Pro D-Log M → Rec.709
 - Sony S-Log3/S-Gamut3.Cine → Rec.709
@@ -200,7 +218,7 @@ The local catalog includes:
 
 Style presets affect typography, palette, spacing, shadows, and fades. They do not change exposure, white balance, contrast, or LUT selection. See [`library/README.md`](library/README.md) for catalog details.
 
-Run `confirm-rights` only after confirming the assets used by the current edit. The confirmation is tied to their checksums and becomes stale if that set changes.
+Run `confirm-rights` only after the user explicitly confirms permission to use the assets selected by the current edit; supplying files or license metadata does not count. The confirmation is tied to their checksums and becomes stale if that set changes.
 
 ## Project layout
 
@@ -253,10 +271,12 @@ npm run verify
 Or run each check separately:
 
 ```bash
+npm run reel -- doctor
 npm run typecheck
 npm run test
 npm run test:e2e
-npm run reel -- doctor
 ```
+
+Tests use synthetic fixtures and do not require your LUT library or footage. The real music-analysis test allows 120 seconds because a fresh Python environment can take over a minute on its first analysis. Tests need process inspection (`ps`) and local browser execution; restrictive agent sandboxes may require permission to run them.
 
 The end-to-end suite builds temporary synthetic media, renders preview, master, delivery, carousel, and photo outputs, runs QC, and confirms that the source files remain unchanged.

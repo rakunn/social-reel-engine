@@ -12,6 +12,7 @@ import {assertSafeReelName} from '../core/paths';
 import {validateEdit} from '../edit/validate';
 import {scanInputs} from './ingest';
 import {StyleConfigSchema} from '../style/contracts';
+import type {ProjectIntake} from './intake';
 import {
   isProcessIdentityAlive,
   isMediaOperationLockActive,
@@ -363,6 +364,7 @@ export type ProjectStatus = {
   colorApproved: boolean;
   shareDirectory?: string;
   shareFiles?: string[];
+  intake?: ProjectIntake;
   activity?: Pick<
     MediaOperationRecord,
     'command' | 'phase' | 'progress' | 'startedAt' | 'updatedAt' | 'finishedAt' | 'error'
@@ -666,7 +668,9 @@ export const getProjectStatus = async (projectPath: string): Promise<ProjectStat
   const locked = await runWithStatusScanLock(projectPath, async () => {
     const operationAfterLock = await readMediaOperation(projectPath);
     if (operationAfterLock) return statusFromOperation(operationAfterLock);
-    return await getProjectStatusWithoutOperation(projectPath);
+    const status = await getProjectStatusWithoutOperation(projectPath);
+    const {readProjectIntake} = await import('./intake');
+    return {...status, intake: await readProjectIntake(projectPath)};
   });
   if (locked.acquired) return locked.value;
 

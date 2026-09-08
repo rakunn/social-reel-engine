@@ -92,9 +92,18 @@ export const validateEdit = async (
   input?: unknown,
   options: ValidateEditOptions = {},
 ): Promise<EditValidation> => {
-  const edit = EditManifestSchema.parse(
+  const parsed = EditManifestSchema.safeParse(
     input ?? (await readJson(path.join(projectPath, 'edits/edit.json'))),
   );
+  if (!parsed.success) {
+    return {
+      valid: false,
+      durationSeconds: 0,
+      failures: parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`),
+      warnings: [],
+    };
+  }
+  const edit = parsed.data;
   const brief = ReelBriefSchema.parse(await readJson(path.join(projectPath, 'brief.json')));
   const failures = [
     ...validateTransitionDurations(edit),

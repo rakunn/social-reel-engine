@@ -83,6 +83,13 @@ const edit = {
 } as const;
 
 describe('versioned public contracts', () => {
+  it('reports an empty edit as a schema error without dereferencing a missing final clip', () => {
+    const result = EditManifestSchema.safeParse({...edit, clips: []});
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues).toContainEqual(expect.objectContaining({
+      path: ['clips'], message: expect.stringMatching(/No clips selected/),
+    }));
+  });
   it('accepts opt-in photo output profiles and rejects unsupported profile or count', () => {
     expect(
       PhotoConfigSchema.parse({

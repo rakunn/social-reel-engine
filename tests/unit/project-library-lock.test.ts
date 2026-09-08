@@ -1,8 +1,9 @@
-import {mkdtemp} from 'node:fs/promises';
+import {mkdir, mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {describe, expect, it, vi} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
+import {hashFile} from '../../src/core/hash';
 
 const lockState = vi.hoisted(() => ({depth: 0}));
 
@@ -39,10 +40,31 @@ import {installCatalogLut} from '../../src/project/library';
 import {createReelProject} from '../../src/project/workspace';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const temporaryRoots: string[] = [];
+afterEach(async () => {
+  await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, {recursive: true, force: true})));
+});
 
 describe('catalog LUT installation locking', () => {
   it('holds the snapshot interlock through LUT metadata publication', async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'reel-library-lock-'));
+    temporaryRoots.push(temporaryRoot);
+    await mkdir(path.join(temporaryRoot, 'library'), {recursive: true});
+    const file = 'library/identity.cube';
+    await writeFile(path.join(temporaryRoot, file),
+      'LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n');
+    await writeFile(path.join(temporaryRoot, 'library/lut-catalog.json'), JSON.stringify({
+      schemaVersion: '1.0.0',
+      technical: [{
+        id: 'synthetic-normalization', kind: 'technical', file,
+        checksumSha256: await hashFile(path.join(temporaryRoot, file)),
+        cameraModel: 'Test Generator', profileId: 'synthetic-log',
+        inputGamma: 'Synthetic Log', inputGamut: 'Synthetic Gamut',
+        inputColorSpace: 'Synthetic Log/Synthetic Gamut', outputColorSpace: 'Rec.709 Gamma 2.4',
+        transformSemantics: 'normalization', defaultMix: 1,
+      }],
+      creative: [], unclassified: [],
+    }));
     const projectPath = await createReelProject({
       engineRoot: repositoryRoot,
       projectsRoot: path.join(temporaryRoot, 'projects'),
@@ -50,7 +72,7 @@ describe('catalog LUT installation locking', () => {
     });
 
     await expect(
-      installCatalogLut(projectPath, repositoryRoot, 'dji-mini-4-pro-dlogm-rec709-v1'),
-    ).resolves.toEqual(expect.objectContaining({id: 'dji-mini-4-pro-dlogm-rec709-v1'}));
+      installCatalogLut(projectPath, temporaryRoot, 'synthetic-normalization'),
+    ).resolves.toEqual(expect.objectContaining({id: 'synthetic-normalization'}));
   });
 });

@@ -34,6 +34,7 @@ import {
   recordRenderArtifact,
 } from '../../src/render/artifacts';
 import {getProjectStatus} from '../../src/project/workspace';
+import {readProjectIntake} from '../../src/project/intake';
 import {RenderInterruptedError} from '../../src/render/errors';
 import {renderPreview} from '../../src/render/remotion';
 import {CINEMATIC_MINIMAL_STYLE} from '../../src/style/contracts';
@@ -405,6 +406,10 @@ describe('hash-bound approvals', () => {
       expect.objectContaining({rightsConfirmed: true, rightsConfirmation: confirmation}),
     );
     expect((await readRightsConfirmationStatus(projectPath)).confirmed).toBe(true);
+    const intake = await readProjectIntake(projectPath);
+    expect(intake.rights).toMatchObject({confirmed: true, requiresExplicitConfirmation: false, assetScope: 'used'});
+    expect(intake.rights.assets.some((asset) => asset.relativePath === 'input/clips/alternate.mp4')).toBe(false);
+    expect(intake.requirements.some((item) => item.code === 'rights-confirmation')).toBe(false);
 
     const manifest = SourceManifestSchema.parse(
       JSON.parse(await readFile(path.join(projectPath, 'analysis/sources.json'), 'utf8')),
@@ -424,6 +429,7 @@ describe('hash-bound approvals', () => {
         reason: expect.stringMatching(/asset set.*changed|changed.*asset set/i),
       }),
     );
+    expect((await readProjectIntake(projectPath)).rights).toMatchObject({confirmed: false, requiresExplicitConfirmation: true});
   });
 
   it('makes rights confirmation stale when selected music changes', async () => {
@@ -647,6 +653,9 @@ describe('hash-bound approvals', () => {
         reason: expect.stringMatching(/not bound.*asset set/i),
       }),
     );
+    expect((await readProjectIntake(projectPath)).requirements).toContainEqual(expect.objectContaining({
+      code: 'rights-confirmation', action: 'ask-user', blocks: 'export',
+    }));
   });
 
   it('reuses a supplied verified-input context while calculating render fingerprints', async () => {

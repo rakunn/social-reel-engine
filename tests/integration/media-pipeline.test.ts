@@ -610,7 +610,7 @@ describe('music analysis', () => {
     expect(JSON.parse(await readFile(path.join(projectPath, 'analysis/beats.json'), 'utf8'))).toEqual(
       expect.objectContaining({schemaVersion: '1.0.0'}),
     );
-  });
+  }, 120_000); // A fresh Python environment can take over a minute on its first analysis.
 
   it('uses recursive filtered discovery and regenerates malformed cached reports', async () => {
     const root = await makeTemporaryRoot('reel-beats-cache-');
