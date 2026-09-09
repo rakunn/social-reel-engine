@@ -380,6 +380,32 @@ describe('edit validation', () => {
 });
 
 describe('hash-bound approvals', () => {
+  it.each([false, true])('reports relevant undeclared LUTs with an unknown profile (declared selection: %s)', async (hasDeclaredSelection) => {
+    const {projectPath, edit, sourceId} = await makeFixture();
+    const configPath = path.join(projectPath, 'config/sources.json');
+    const config = JSON.parse(await readFile(configPath, 'utf8'));
+    config.sources['input/clips/clip.mp4'].confirmed = false;
+    await writeJson(configPath, config);
+    const manifestPath = path.join(projectPath, 'analysis/sources.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+    for (const source of manifest.sources) if (source.id === sourceId) source.camera.confirmed = false;
+    await writeJson(manifestPath, manifest);
+    if (!hasDeclaredSelection) {
+      const changed = structuredClone(edit);
+      changed.clips[0]!.grade.technicalLutId = null;
+      await writeJson(path.join(projectPath, 'edits/edit.json'), changed);
+    }
+    const lutPath = 'input/luts/technical/supplied.cube';
+    await writeFile(path.join(projectPath, lutPath), 'supplied transform bytes');
+    expect((await validateEdit(projectPath)).valid).toBe(true);
+    const status = await getProjectStatus(projectPath);
+    expect(status.intake?.scope).toBe('selected');
+    expect(status.intake?.requirements).toContainEqual(expect.objectContaining({code: 'source-profile', paths: ['input/clips/clip.mp4']}));
+    expect(status.intake?.requirements.some((item) => item.code === 'lut-metadata' && item.paths.includes(lutPath)))
+      .toBe(!hasDeclaredSelection);
+    expect(status.intake?.requirements.some((item) => item.code === 'normalization-lut')).toBe(false);
+  });
+
   it.each(['unselected normalizer', 'missing normalizer', 'unknown technical LUT', 'unknown creative LUT'])('defers rights while LUT decisions can change the used set: %s', async (failure) => {
     const {projectPath, edit} = await makeFixture();
     const briefPath = path.join(projectPath, 'brief.json');

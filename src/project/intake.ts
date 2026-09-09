@@ -151,6 +151,14 @@ export const readProjectIntake = async (
     if (!source.success || !source.data.camera.confirmed) {
       add({code: 'source-profile', action: 'ask-user', blocks: 'grading', paths: [file.relativePath],
         message: 'Confirm the camera model and exact recording gamma/gamut. Record these facts and the matching profile ID in config/sources.json; never guess from appearance or filenames.'});
+      const selections = edit?.clips.filter((clip) => clip.sourceId === sourceIdFor('video', file.relativePath, file.checksumSha256)) ?? [];
+      const declaredSelection = selections.length > 0 && selections.every((clip) => usableLuts.some((lut) =>
+        lut.kind !== 'creative' && lut.id === (clip.grade.combinedLutId ?? clip.grade.technicalLutId)));
+      const suppliedTransforms = undeclared.filter((asset) => asset.kind === 'technical-lut');
+      if (edit && !declaredSelection && suppliedTransforms.length) add({
+        code: 'lut-metadata', action: 'configure', blocks: 'grading', paths: suppliedTransforms.map((asset) => asset.relativePath),
+        message: 'A technical LUT is already supplied. Record its verified transform metadata and ask for any missing semantics together with the source-profile facts; do not request the file again.',
+      });
       // Request the missing file in the same intake as profile facts, when knowable.
       if (!usableLuts.some((lut) => lut.kind !== 'creative') &&
           !ingest.files.some((asset) => asset.kind === 'technical-lut') &&
