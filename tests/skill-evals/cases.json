@@ -164,7 +164,8 @@
       "prompt": "Make a 25-second reel from these DJI Mini 4 Pro D-Log M clips. I have supplied no LUTs, and this is a fresh checkout with only catalog metadata. Choose the crops and color corrections. I have not confirmed usage rights.",
       "mustCover": [
         "inspect status intake before expensive media work",
-        "request the missing compatible technical LUT and explicit user rights confirmation in one intake",
+        "request the missing compatible technical LUT with other currently knowable factual blockers",
+        "defer the rights prompt while intake reports indeterminate and request explicit confirmation once a valid edit resolves the nonempty used-asset inventory",
         "catalog metadata is not proof of an installed LUT",
         "ingest the supplied LUT into project input/luts/technical and record verified metadata",
         "creative LUT is optional and creative settings use reasonable defaults",
@@ -176,7 +177,7 @@
       "prompt": "Create a reel from my clips. I already supplied camera-profile facts and a LUT file called Cinematic.cube, but I do not know whether it normalizes the footage or just adds a look. Choose trims and framing. The music filename says licensed.",
       "mustCover": [
         "do not request the already supplied LUT file again",
-        "ask for unresolved LUT semantics and explicit usage-rights confirmation together",
+        "ask for unresolved LUT semantics and include rights confirmation only when status has a resolved used-asset inventory",
         "a licensed filename is not user rights confirmation",
         "write configuration from verified facts without asking the user to author JSON",
         "retain the proxy-only path until the transform is verified",

@@ -55,7 +55,7 @@ Include what you know about:
 
 Camera profile information matters for log footage and cannot be inferred safely from appearance. It is fine to leave editorial choices open with directions such as “choose the best LUT” or “choose the opening and closing shots.”
 
-Before expensive media work, Codex checks `status` and collects missing inputs, profile/transform facts, and explicit rights confirmation in one intake request. A required missing LUT is requested from you, then copied with `ingest` into the job's `input/luts/technical/` or `input/luts/creative/`. If the file is already supplied, Codex requests only unresolved transform facts. Creative LUTs are optional.
+Before expensive media work, Codex checks `status` and collects currently knowable missing inputs and profile/transform facts in one intake request. It includes explicit rights confirmation once a valid edit resolves the used assets. A required missing LUT is requested from you, then copied with `ingest` into the job's `input/luts/technical/` or `input/luts/creative/`. If the file is already supplied, Codex requests only unresolved transform facts. Creative LUTs are optional.
 
 Codex writes `config/sources.json`, `config/luts.json`, and `edits/edit.json`; you do not need to author JSON or prescribe every creative setting. It chooses sensible trims, crops, corrections, and typography from your brief and presents the results for review. An unresolved technical profile or transform permits only the watermarked proxy/rough path until resolved.
 
@@ -118,7 +118,7 @@ Codex normally runs these commands for you. This is a staged reference, not an u
 
 `status` returns structured `intake.requirements`: `ask-user` items need missing facts/files or explicit rights; `configure` items are work Codex can do from verified information. Its rights inventory is labeled as supplied or used assets and includes checksums. Active media jobs return only lightweight activity status.
 
-`intake.rights.status` is `confirmed`, `unconfirmed`, or `indeterminate`. When missing assets or configuration errors prevent resolving the used-asset inventory, repair the reported blocker and rerun `status`. Defer both first-time confirmation and reconfirmation until that inventory can be verified; preserve any existing confirmation during the repair.
+`intake.rights.status` is `confirmed`, `unconfirmed`, or `indeterminate`. Rights prompts require a valid edit and a nonempty, resolved used-asset inventory. When the project is empty, the edit is incomplete, or missing assets/configuration errors prevent resolving that inventory, finish intake and configuration, then rerun `status`. Defer both first-time confirmation and reconfirmation until the inventory can be verified; preserve any existing confirmation during the repair.
 
 If stage checks fail because configuration or review metadata is invalid, `status` preserves the intake report and returns `awaiting-configuration` with the underlying error and repair guidance.
 

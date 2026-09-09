@@ -54,6 +54,17 @@ const recordSources = async (project: string) => {
 };
 
 describe('project intake requirements', () => {
+  it('does not request confirmation immediately after creating an empty project', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'reel-empty-intake-'));
+    roots.push(root);
+    const project = await createReelProject({engineRoot: repositoryRoot, projectsRoot: path.join(root, 'projects'), reelName: 'empty-intake'});
+    const status = await getProjectStatus(project);
+    expect(status.stage).toBe('awaiting-inputs');
+    expect(status.intake?.rights).toMatchObject({status: 'indeterminate', assets: [], requiresExplicitConfirmation: false});
+    expect(status.intake?.requirements.some((item) => item.code === 'rights-confirmation')).toBe(false);
+    expect(status.intake?.requirements).toContainEqual(expect.objectContaining({code: 'clips', action: 'ask-user'}));
+  });
+
   it('hashes each input once per new-project status and refreshes the next snapshot', async () => {
     const {project} = await makeFixture();
     const clipPath = path.join(project, 'input/clips/clip.mp4');
@@ -71,17 +82,17 @@ describe('project intake requirements', () => {
       .not.toBe(first.intake?.rights.assets[0]?.checksumSha256);
   });
 
-  it('collects profile, LUT and explicit rights questions before analysis without asserting rights', async () => {
+  it('collects profile and LUT questions but defers rights until the edit resolves its used assets', async () => {
     const {root, project} = await makeFixture();
     const before = await readFile(path.join(project, 'brief.json'), 'utf8');
     const status = await getProjectStatus(project);
     expect(status.stage).toBe('awaiting-analysis');
     expect(status.intake?.requirements).toEqual(expect.arrayContaining([
       expect.objectContaining({code: 'source-profile', action: 'ask-user'}),
-      expect.objectContaining({code: 'rights-confirmation', action: 'ask-user', blocks: 'export'}),
       expect.objectContaining({code: 'edit', action: 'configure'}),
     ]));
-    expect(status.intake?.rights).toMatchObject({confirmed: false, requiresExplicitConfirmation: true, assetScope: 'supplied'});
+    expect(status.intake?.rights).toMatchObject({status: 'indeterminate', confirmed: false, requiresExplicitConfirmation: false, assetScope: 'supplied'});
+    expect(status.intake?.requirements.some((item) => item.code === 'rights-confirmation')).toBe(false);
     expect((await readProjectIntake(project, {engineRoot: root})).requirements)
       .toContainEqual(expect.objectContaining({code: 'normalization-lut', action: 'ask-user'}));
     expect(await readFile(path.join(project, 'brief.json'), 'utf8')).toBe(before);
