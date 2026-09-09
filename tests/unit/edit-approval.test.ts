@@ -404,12 +404,28 @@ describe('hash-bound approvals', () => {
     if (failure === 'missing style font') expect(intake.rights.reason).toMatch(/Selected style font is missing/);
     expect(intake.requirements.some((item) => item.code === 'rights-confirmation')).toBe(false);
     expect(intake.requirements).toContainEqual(expect.objectContaining({code: 'configuration', action: 'configure', blocks: 'export'}));
+    const status = await getProjectStatus(projectPath);
+    expect(status.intake?.rights).toMatchObject({status: 'indeterminate', requiresExplicitConfirmation: false});
+    expect(status.intake?.requirements).toContainEqual(expect.objectContaining({code: 'configuration', action: 'configure'}));
 
     if (original === null) await unlink(filePath);
     else await writeFile(filePath, original);
     const restored = await readProjectIntake(projectPath);
     expect(restored.rights).toMatchObject({status: 'confirmed', confirmed: true, requiresExplicitConfirmation: false});
     expect(JSON.parse(await readFile(path.join(projectPath, 'brief.json'), 'utf8')).rightsConfirmation).toEqual(confirmation);
+  });
+
+  it('returns intake and a configuration blocker when approval metadata is malformed', async () => {
+    const {projectPath} = await makeFixture();
+    await confirmRights(projectPath);
+    await writeFile(path.join(projectPath, 'analysis/approvals.json'), '{malformed');
+    const status = await getProjectStatus(projectPath);
+    expect(status.stage).toBe('awaiting-configuration');
+    expect(status.intake?.rights.confirmed).toBe(true);
+    expect(status.intake?.requirements).toContainEqual(expect.objectContaining({
+      code: 'configuration', action: 'configure', blocks: 'export', message: expect.stringMatching(/Stage checks failed/),
+    }));
+    expect(status.nextAction).toMatch(/Repair.*status/);
   });
 
   it('binds the color manifest hash to referenced source bytes', async () => {

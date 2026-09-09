@@ -344,6 +344,7 @@ export type ProjectStatus = {
   stage:
     | 'awaiting-inputs'
     | 'awaiting-analysis'
+    | 'awaiting-configuration'
     | 'awaiting-edit'
     | 'awaiting-preview'
     | 'awaiting-edit-approval'
@@ -674,9 +675,26 @@ export const getProjectStatus = async (projectPath: string): Promise<ProjectStat
     if (operationAfterLock) return statusFromOperation(operationAfterLock);
     const ingest = await scanInputs(projectPath);
     const integrity = createSourceIntegrityContext();
-    const status = await getProjectStatusWithoutOperation(projectPath, ingest, integrity);
     const {readProjectIntake} = await import('./intake');
-    return {...status, intake: await readProjectIntake(projectPath, {ingest, integrity})};
+    const intake = await readProjectIntake(projectPath, {ingest, integrity});
+    try {
+      const status = await getProjectStatusWithoutOperation(projectPath, ingest, integrity);
+      return {...status, intake};
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      intake.requirements.push({
+        code: 'configuration', action: 'configure', blocks: 'export', paths: ['config', 'analysis'],
+        message: `Stage checks failed: ${message}. Repair the project configuration or review metadata, then rerun status.`,
+      });
+      return {
+        stage: 'awaiting-configuration' as const,
+        inputs: ingest.files.filter((file) => file.kind === 'clips').length,
+        editApproved: false,
+        colorApproved: false,
+        nextAction: 'Repair the configuration blockers reported in intake, then rerun status.',
+        intake,
+      };
+    }
   });
   if (locked.acquired) return locked.value;
 

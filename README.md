@@ -120,6 +120,8 @@ Codex normally runs these commands for you. This is a staged reference, not an u
 
 `intake.rights.status` is `confirmed`, `unconfirmed`, or `indeterminate`. When configuration errors prevent checking an existing confirmation, repair the reported blocker and rerun `status`; do not ask for confirmation again until the current asset set can be verified.
 
+If stage checks fail because configuration or review metadata is invalid, `status` preserves the intake report and returns `awaiting-configuration` with the underlying error and repair guidance.
+
 ```bash
 npm run reel -- new island-sunrise --title "Island Sunrise"
 npm run reel -- ingest island-sunrise /path/to/clip-1.mp4 /path/to/clip-2.mov --kind clips
