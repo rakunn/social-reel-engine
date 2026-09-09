@@ -191,10 +191,14 @@ export const readProjectIntake = async (
   const brief = await readJson(path.join(projectPath, 'brief.json'), ReelBriefSchema).catch(recordRightsError);
   const rightsStatus = edit ? await readRightsConfirmationStatus(projectPath, {integrity}).catch(recordRightsError) : null;
   const usedAssets = edit ? await currentRightsAssets(projectPath, {integrity}).catch(recordRightsError) : null;
-  const rightsConfirmed = rightsStatus?.confirmed === true && usedAssets !== null;
-  const indeterminate = rightsErrors.length > 0 || !brief || !edit || !rightsStatus || !usedAssets?.length;
+  const unresolvedAssets = requirements.filter((requirement) =>
+    ['source-profile', 'normalization-lut', 'lut-metadata', 'lut-file', 'lut-selection', 'configuration'].includes(requirement.code));
+  const indeterminate = unresolvedAssets.length > 0 || rightsErrors.length > 0 || !brief || !edit || !rightsStatus || !usedAssets?.length;
+  const rightsConfirmed = !indeterminate && rightsStatus?.confirmed === true;
   const reason = indeterminate
-    ? rightsErrors.length ? [...new Set(rightsErrors)].join('; ') : 'A valid edit and a nonempty resolved used-asset set are required before requesting rights confirmation'
+    ? rightsErrors.length ? [...new Set(rightsErrors)].join('; ')
+      : unresolvedAssets.length ? `Resolve asset-affecting intake requirements before requesting rights confirmation: ${[...new Set(unresolvedAssets.map((requirement) => requirement.code))].join(', ')}`
+        : 'A valid edit and a nonempty resolved used-asset set are required before requesting rights confirmation'
     : rightsStatus?.reason ?? (rightsConfirmed ? null : 'Usage rights require explicit user confirmation');
   if (rightsErrors.length || indeterminate) add({
     code: 'configuration', action: 'configure', blocks: 'export',

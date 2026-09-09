@@ -118,7 +118,7 @@ Codex normally runs these commands for you. This is a staged reference, not an u
 
 `status` returns structured `intake.requirements`: `ask-user` items need missing facts/files or explicit rights; `configure` items are work Codex can do from verified information. Its rights inventory is labeled as supplied or used assets and includes checksums. Active media jobs return only lightweight activity status.
 
-`intake.rights.status` is `confirmed`, `unconfirmed`, or `indeterminate`. Rights prompts require a valid edit and a nonempty, resolved used-asset inventory. When the project is empty, the edit is incomplete, or missing assets/configuration errors prevent resolving that inventory, finish intake and configuration, then rerun `status`. Defer both first-time confirmation and reconfirmation until the inventory can be verified; preserve any existing confirmation during the repair.
+`intake.rights.status` is `confirmed`, `unconfirmed`, or `indeterminate`. Rights prompts require a valid edit and a nonempty, resolved used-asset inventory, including required LUT selections and verified profile/transform metadata. When the project is empty, the edit is incomplete, or missing assets/configuration errors prevent resolving that inventory, finish intake and configuration, then rerun `status`. Defer both first-time confirmation and reconfirmation until the inventory can be verified; preserve any existing confirmation during the repair.
 
 If stage checks fail because configuration or review metadata is invalid, `status` preserves the intake report and returns `awaiting-configuration` with the underlying error and repair guidance.
 

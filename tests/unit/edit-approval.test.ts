@@ -380,6 +380,34 @@ describe('edit validation', () => {
 });
 
 describe('hash-bound approvals', () => {
+  it.each(['unselected normalizer', 'missing normalizer', 'unknown technical LUT', 'unknown creative LUT'])('defers rights while LUT decisions can change the used set: %s', async (failure) => {
+    const {projectPath, edit} = await makeFixture();
+    const briefPath = path.join(projectPath, 'brief.json');
+    await writeJson(briefPath, {...JSON.parse(await readFile(briefPath, 'utf8')), rightsConfirmed: false, rightsConfirmation: null});
+    const lutsPath = path.join(projectPath, 'config/luts.json');
+    const originalLuts = await readFile(lutsPath, 'utf8');
+    const changed = structuredClone(edit);
+    if (failure === 'unknown technical LUT') changed.clips[0]!.grade.technicalLutId = 'unknown-technical';
+    else if (failure === 'unknown creative LUT') changed.clips[0]!.grade.creativeLutId = 'unknown-creative';
+    else changed.clips[0]!.grade.technicalLutId = null;
+    if (failure === 'missing normalizer') {
+      const luts = JSON.parse(originalLuts);
+      await writeJson(lutsPath, {...luts, luts: luts.luts.filter((lut: {kind: string}) => lut.kind === 'creative')});
+    }
+    await writeJson(path.join(projectPath, 'edits/edit.json'), changed);
+    expect((await validateEdit(projectPath)).valid).toBe(true);
+    const status = await getProjectStatus(projectPath);
+    expect(status.intake?.rights).toMatchObject({status: 'indeterminate', confirmed: false, requiresExplicitConfirmation: false});
+    expect(status.intake?.requirements.some((item) => ['normalization-lut', 'lut-metadata', 'lut-selection'].includes(item.code))).toBe(true);
+    expect(status.intake?.requirements.some((item) => item.code === 'rights-confirmation')).toBe(false);
+
+    await writeFile(lutsPath, originalLuts);
+    await writeJson(path.join(projectPath, 'edits/edit.json'), edit);
+    const restored = await getProjectStatus(projectPath);
+    expect(restored.intake?.rights).toMatchObject({status: 'unconfirmed', requiresExplicitConfirmation: true, assetScope: 'used'});
+    expect(restored.intake?.rights.assets.map((asset) => asset.relativePath)).toContain('input/luts/technical/identity.cube');
+  });
+
   it.each(['missing LUT', 'changed LUT', 'malformed LUT configuration', 'malformed style configuration'])('defers first-time confirmation when used assets cannot be resolved: %s', async (failure) => {
     const {projectPath} = await makeFixture();
     const briefPath = path.join(projectPath, 'brief.json');
