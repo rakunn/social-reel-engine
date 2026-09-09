@@ -380,6 +380,38 @@ describe('edit validation', () => {
 });
 
 describe('hash-bound approvals', () => {
+  it.each(['LUT configuration', 'style configuration', 'missing style font', 'invalid edit', 'brief configuration'])('defers rights reconfirmation while verification is blocked by %s', async (failure) => {
+    const {projectPath, edit} = await makeFixture();
+    const confirmation = await confirmRights(projectPath);
+    const file = failure === 'LUT configuration' ? 'config/luts.json'
+      : failure === 'invalid edit' ? 'edits/edit.json'
+        : failure === 'brief configuration' ? 'brief.json' : 'config/style.json';
+    const filePath = path.join(projectPath, file);
+    const original = await readFile(filePath, 'utf8').catch(() => null);
+    if (failure === 'missing style font') {
+      await writeJson(filePath, {
+        ...CINEMATIC_MINIMAL_STYLE,
+        typography: {...CINEMATIC_MINIMAL_STYLE.typography,
+          display: {...CINEMATIC_MINIMAL_STYLE.typography.display, assetId: 'missing-font', relativePath: 'input/fonts/missing.ttf'}},
+      });
+    } else if (failure === 'invalid edit') {
+      await writeJson(filePath, {...edit, reelName: 'another-project'});
+    } else {
+      await writeFile(filePath, '{malformed');
+    }
+    const intake = await readProjectIntake(projectPath);
+    expect(intake.rights).toMatchObject({status: 'indeterminate', confirmed: false, requiresExplicitConfirmation: false});
+    if (failure === 'missing style font') expect(intake.rights.reason).toMatch(/Selected style font is missing/);
+    expect(intake.requirements.some((item) => item.code === 'rights-confirmation')).toBe(false);
+    expect(intake.requirements).toContainEqual(expect.objectContaining({code: 'configuration', action: 'configure', blocks: 'export'}));
+
+    if (original === null) await unlink(filePath);
+    else await writeFile(filePath, original);
+    const restored = await readProjectIntake(projectPath);
+    expect(restored.rights).toMatchObject({status: 'confirmed', confirmed: true, requiresExplicitConfirmation: false});
+    expect(JSON.parse(await readFile(path.join(projectPath, 'brief.json'), 'utf8')).rightsConfirmation).toEqual(confirmation);
+  });
+
   it('binds the color manifest hash to referenced source bytes', async () => {
     const {projectPath, edit, sourceId} = await makeFixture();
     const lutsConfig = JSON.parse(

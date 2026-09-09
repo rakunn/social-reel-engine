@@ -1,7 +1,7 @@
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {z} from 'zod';
-import {EditManifestSchema, LutDefinitionsSchema, LutDefinitionSchema, SourceEntrySchema, type LutDefinition} from '../contracts/schemas';
+import {EditManifestSchema, LutDefinitionsSchema, LutDefinitionSchema, ReelBriefSchema, SourceEntrySchema, type LutDefinition} from '../contracts/schemas';
 import {readJson} from '../core/json';
 import {hashFile} from '../core/hash';
 import {resolveInside} from '../core/paths';
@@ -25,6 +25,8 @@ export type ProjectIntake = {
   scope: 'supplied' | 'selected';
   requirements: IntakeRequirement[];
   rights: {
+    status: 'confirmed' | 'unconfirmed' | 'indeterminate';
+    reason: string | null;
     confirmed: boolean;
     requiresExplicitConfirmation: boolean;
     assets: Array<{relativePath: string; checksumSha256: string}>;
@@ -181,16 +183,34 @@ export const readProjectIntake = async (
     }
   }
 
-  const rightsStatus = edit ? await readRightsConfirmationStatus(projectPath, {integrity}).catch(() => null) : null;
-  const usedAssets = edit ? await currentRightsAssets(projectPath, {integrity}).catch(() => null) : null;
+  const rightsErrors: string[] = [];
+  const recordRightsError = (error: unknown) => {
+    rightsErrors.push(error instanceof Error ? error.message : String(error));
+    return null;
+  };
+  const brief = await readJson(path.join(projectPath, 'brief.json'), ReelBriefSchema).catch(recordRightsError);
+  const hasRecordedConfirmation = Boolean(brief?.rightsConfirmed && brief.rightsConfirmation);
+  const rightsStatus = edit ? await readRightsConfirmationStatus(projectPath, {integrity}).catch(recordRightsError) : null;
+  const usedAssets = edit ? await currentRightsAssets(projectPath, {integrity}).catch(recordRightsError) : null;
   const rightsConfirmed = rightsStatus?.confirmed === true && usedAssets !== null;
+  const indeterminate = !brief || (hasRecordedConfirmation && (!edit || !rightsStatus || !usedAssets));
+  const reason = indeterminate
+    ? rightsErrors.length ? [...new Set(rightsErrors)].join('; ') : 'The edit must pass validation before its current rights asset set can be verified'
+    : rightsStatus?.reason ?? (rightsConfirmed ? null : 'Usage rights require explicit user confirmation');
+  if (rightsErrors.length || indeterminate) add({
+    code: 'configuration', action: 'configure', blocks: 'export',
+    paths: !brief ? ['brief.json'] : !edit ? ['edits/edit.json'] : ['config/luts.json', 'config/style.json', 'analysis/sources.json'],
+    message: `Rights verification is blocked: ${rightsErrors.length ? [...new Set(rightsErrors)].join('; ') : reason}. Repair the reported configuration or inputs, then rerun status. Retain any recorded rights confirmation until the current asset fingerprint can be checked.`,
+  });
   const rights: ProjectIntake['rights'] = {
+    status: indeterminate ? 'indeterminate' : rightsConfirmed ? 'confirmed' : 'unconfirmed',
+    reason,
     confirmed: rightsConfirmed,
-    requiresExplicitConfirmation: !rightsConfirmed,
+    requiresExplicitConfirmation: !indeterminate && !rightsConfirmed,
     assets: usedAssets ?? ingest.files.map(({relativePath, checksumSha256}) => ({relativePath, checksumSha256})),
     assetScope: usedAssets ? 'used' : 'supplied',
   };
-  if (!rights.confirmed) add({code: 'rights-confirmation', action: 'ask-user', blocks: 'export',
+  if (rights.requiresExplicitConfirmation) add({code: 'rights-confirmation', action: 'ask-user', blocks: 'export',
     paths: rights.assets.map((asset) => asset.relativePath),
     message: `${rightsStatus?.reason ?? 'Usage rights require explicit user confirmation'}. Present the asset inventory and ask the user to explicitly confirm permission for all used assets. Run confirm-rights only after their response covers the current used set; supplying files or a license label is not confirmation.`});
   return {scope: edit ? 'selected' : 'supplied', requirements, rights};

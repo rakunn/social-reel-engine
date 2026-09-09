@@ -118,6 +118,8 @@ Codex normally runs these commands for you. This is a staged reference, not an u
 
 `status` returns structured `intake.requirements`: `ask-user` items need missing facts/files or explicit rights; `configure` items are work Codex can do from verified information. Its rights inventory is labeled as supplied or used assets and includes checksums. Active media jobs return only lightweight activity status.
 
+`intake.rights.status` is `confirmed`, `unconfirmed`, or `indeterminate`. When configuration errors prevent checking an existing confirmation, repair the reported blocker and rerun `status`; do not ask for confirmation again until the current asset set can be verified.
+
 ```bash
 npm run reel -- new island-sunrise --title "Island Sunrise"
 npm run reel -- ingest island-sunrise /path/to/clip-1.mp4 /path/to/clip-2.mov --kind clips
