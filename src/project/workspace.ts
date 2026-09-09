@@ -10,8 +10,10 @@ import {
 import {readJson, writeJson} from '../core/json';
 import {assertSafeReelName} from '../core/paths';
 import {validateEdit} from '../edit/validate';
-import {scanInputs} from './ingest';
+import {scanInputs, type IngestManifest} from './ingest';
 import {StyleConfigSchema} from '../style/contracts';
+import type {ProjectIntake} from './intake';
+import {createSourceIntegrityContext, readVerifiedInputSnapshot, type SourceIntegrityContext} from '../media/source-integrity';
 import {
   isProcessIdentityAlive,
   isMediaOperationLockActive,
@@ -342,6 +344,7 @@ export type ProjectStatus = {
   stage:
     | 'awaiting-inputs'
     | 'awaiting-analysis'
+    | 'awaiting-configuration'
     | 'awaiting-edit'
     | 'awaiting-preview'
     | 'awaiting-edit-approval'
@@ -363,6 +366,7 @@ export type ProjectStatus = {
   colorApproved: boolean;
   shareDirectory?: string;
   shareFiles?: string[];
+  intake?: ProjectIntake;
   activity?: Pick<
     MediaOperationRecord,
     'command' | 'phase' | 'progress' | 'startedAt' | 'updatedAt' | 'finishedAt' | 'error'
@@ -418,8 +422,12 @@ const statusScanInProgressStatus = (): ProjectStatus => ({
   nextAction: 'Project status is checking inputs. Wait for it to finish, then request status again.',
 });
 
-const getProjectStatusWithoutOperation = async (projectPath: string): Promise<ProjectStatus> => {
-  const inputs = (await scanInputs(projectPath)).files.filter(
+const getProjectStatusWithoutOperation = async (
+  projectPath: string,
+  ingest: IngestManifest,
+  integrity: SourceIntegrityContext,
+): Promise<ProjectStatus> => {
+  const inputs = ingest.files.filter(
     (file) => file.kind === 'clips',
   ).length;
   const base = {inputs, editApproved: false, colorApproved: false};
@@ -434,8 +442,7 @@ const getProjectStatusWithoutOperation = async (projectPath: string): Promise<Pr
     return {...base, stage: 'awaiting-analysis', nextAction: 'Run analyze, proxy, and beats.'};
   }
   try {
-    const {readValidatedSourceManifest} = await import('../media/source-integrity');
-    await readValidatedSourceManifest(projectPath);
+    await readVerifiedInputSnapshot(projectPath, integrity, ingest);
   } catch {
     return {...base, stage: 'awaiting-analysis', nextAction: 'Run analyze, proxy, and beats.'};
   }
@@ -448,7 +455,7 @@ const getProjectStatusWithoutOperation = async (projectPath: string): Promise<Pr
     return {...base, stage: 'awaiting-edit', nextAction: 'Create and validate edits/edit.json.'};
   }
   try {
-    const validation = await validateEdit(projectPath, edit);
+    const validation = await validateEdit(projectPath, edit, {integrity});
     if (!validation.valid) {
       return {
         ...base,
@@ -498,7 +505,7 @@ const getProjectStatusWithoutOperation = async (projectPath: string): Promise<Pr
     };
   }
   const {readRightsConfirmationStatus} = await import('../edit/rights');
-  const rights = await readRightsConfirmationStatus(projectPath);
+  const rights = await readRightsConfirmationStatus(projectPath, {integrity});
   if (!rights.confirmed) {
     return {
       ...base,
@@ -666,7 +673,28 @@ export const getProjectStatus = async (projectPath: string): Promise<ProjectStat
   const locked = await runWithStatusScanLock(projectPath, async () => {
     const operationAfterLock = await readMediaOperation(projectPath);
     if (operationAfterLock) return statusFromOperation(operationAfterLock);
-    return await getProjectStatusWithoutOperation(projectPath);
+    const ingest = await scanInputs(projectPath);
+    const integrity = createSourceIntegrityContext();
+    const {readProjectIntake} = await import('./intake');
+    const intake = await readProjectIntake(projectPath, {ingest, integrity});
+    try {
+      const status = await getProjectStatusWithoutOperation(projectPath, ingest, integrity);
+      return {...status, intake};
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      intake.requirements.push({
+        code: 'configuration', action: 'configure', blocks: 'export', paths: ['config', 'analysis'],
+        message: `Stage checks failed: ${message}. Repair the project configuration or review metadata, then rerun status.`,
+      });
+      return {
+        stage: 'awaiting-configuration' as const,
+        inputs: ingest.files.filter((file) => file.kind === 'clips').length,
+        editApproved: false,
+        colorApproved: false,
+        nextAction: 'Repair the configuration blockers reported in intake, then rerun status.',
+        intake,
+      };
+    }
   });
   if (locked.acquired) return locked.value;
 

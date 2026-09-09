@@ -34,6 +34,7 @@ import {
   recordRenderArtifact,
 } from '../../src/render/artifacts';
 import {getProjectStatus} from '../../src/project/workspace';
+import {readProjectIntake} from '../../src/project/intake';
 import {RenderInterruptedError} from '../../src/render/errors';
 import {renderPreview} from '../../src/render/remotion';
 import {CINEMATIC_MINIMAL_STYLE} from '../../src/style/contracts';
@@ -379,6 +380,133 @@ describe('edit validation', () => {
 });
 
 describe('hash-bound approvals', () => {
+  it.each([false, true])('reports relevant undeclared LUTs with an unknown profile (declared selection: %s)', async (hasDeclaredSelection) => {
+    const {projectPath, edit, sourceId} = await makeFixture();
+    const configPath = path.join(projectPath, 'config/sources.json');
+    const config = JSON.parse(await readFile(configPath, 'utf8'));
+    config.sources['input/clips/clip.mp4'].confirmed = false;
+    await writeJson(configPath, config);
+    const manifestPath = path.join(projectPath, 'analysis/sources.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+    for (const source of manifest.sources) if (source.id === sourceId) source.camera.confirmed = false;
+    await writeJson(manifestPath, manifest);
+    if (!hasDeclaredSelection) {
+      const changed = structuredClone(edit);
+      changed.clips[0]!.grade.technicalLutId = null;
+      await writeJson(path.join(projectPath, 'edits/edit.json'), changed);
+    }
+    const lutPath = 'input/luts/technical/supplied.cube';
+    await writeFile(path.join(projectPath, lutPath), 'supplied transform bytes');
+    expect((await validateEdit(projectPath)).valid).toBe(true);
+    const status = await getProjectStatus(projectPath);
+    expect(status.intake?.scope).toBe('selected');
+    expect(status.intake?.requirements).toContainEqual(expect.objectContaining({code: 'source-profile', paths: ['input/clips/clip.mp4']}));
+    expect(status.intake?.requirements.some((item) => item.code === 'lut-metadata' && item.paths.includes(lutPath)))
+      .toBe(!hasDeclaredSelection);
+    expect(status.intake?.requirements.some((item) => item.code === 'normalization-lut')).toBe(false);
+  });
+
+  it.each(['unselected normalizer', 'missing normalizer', 'unknown technical LUT', 'unknown creative LUT'])('defers rights while LUT decisions can change the used set: %s', async (failure) => {
+    const {projectPath, edit} = await makeFixture();
+    const briefPath = path.join(projectPath, 'brief.json');
+    await writeJson(briefPath, {...JSON.parse(await readFile(briefPath, 'utf8')), rightsConfirmed: false, rightsConfirmation: null});
+    const lutsPath = path.join(projectPath, 'config/luts.json');
+    const originalLuts = await readFile(lutsPath, 'utf8');
+    const changed = structuredClone(edit);
+    if (failure === 'unknown technical LUT') changed.clips[0]!.grade.technicalLutId = 'unknown-technical';
+    else if (failure === 'unknown creative LUT') changed.clips[0]!.grade.creativeLutId = 'unknown-creative';
+    else changed.clips[0]!.grade.technicalLutId = null;
+    if (failure === 'missing normalizer') {
+      const luts = JSON.parse(originalLuts);
+      await writeJson(lutsPath, {...luts, luts: luts.luts.filter((lut: {kind: string}) => lut.kind === 'creative')});
+    }
+    await writeJson(path.join(projectPath, 'edits/edit.json'), changed);
+    expect((await validateEdit(projectPath)).valid).toBe(true);
+    const status = await getProjectStatus(projectPath);
+    expect(status.intake?.rights).toMatchObject({status: 'indeterminate', confirmed: false, requiresExplicitConfirmation: false});
+    expect(status.intake?.requirements.some((item) => ['normalization-lut', 'lut-metadata', 'lut-selection'].includes(item.code))).toBe(true);
+    expect(status.intake?.requirements.some((item) => item.code === 'rights-confirmation')).toBe(false);
+
+    await writeFile(lutsPath, originalLuts);
+    await writeJson(path.join(projectPath, 'edits/edit.json'), edit);
+    const restored = await getProjectStatus(projectPath);
+    expect(restored.intake?.rights).toMatchObject({status: 'unconfirmed', requiresExplicitConfirmation: true, assetScope: 'used'});
+    expect(restored.intake?.rights.assets.map((asset) => asset.relativePath)).toContain('input/luts/technical/identity.cube');
+  });
+
+  it.each(['missing LUT', 'changed LUT', 'malformed LUT configuration', 'malformed style configuration'])('defers first-time confirmation when used assets cannot be resolved: %s', async (failure) => {
+    const {projectPath} = await makeFixture();
+    const briefPath = path.join(projectPath, 'brief.json');
+    const brief = JSON.parse(await readFile(briefPath, 'utf8'));
+    await writeJson(briefPath, {...brief, rightsConfirmed: false, rightsConfirmation: null});
+    const target = failure === 'malformed LUT configuration' ? 'config/luts.json'
+      : failure === 'malformed style configuration' ? 'config/style.json' : 'input/luts/technical/identity.cube';
+    const targetPath = path.join(projectPath, target);
+    const original = await readFile(targetPath, 'utf8').catch(() => null);
+    if (failure === 'missing LUT') await unlink(targetPath);
+    else await writeFile(targetPath, failure === 'changed LUT' ? 'changed LUT bytes' : '{malformed');
+
+    const status = await getProjectStatus(projectPath);
+    expect(status.intake?.rights).toMatchObject({status: 'indeterminate', confirmed: false, requiresExplicitConfirmation: false});
+    expect(status.intake?.requirements.some((item) => item.code === 'rights-confirmation')).toBe(false);
+    expect(status.intake?.requirements).toContainEqual(expect.objectContaining({code: 'configuration', action: 'configure', blocks: 'export'}));
+
+    if (original === null) await unlink(targetPath);
+    else await writeFile(targetPath, original);
+    const restored = await getProjectStatus(projectPath);
+    expect(restored.intake?.rights).toMatchObject({status: 'unconfirmed', confirmed: false, requiresExplicitConfirmation: true, assetScope: 'used'});
+    expect(restored.intake?.rights.assets.map((asset) => asset.relativePath)).toContain('input/luts/technical/identity.cube');
+    expect(restored.intake?.requirements).toContainEqual(expect.objectContaining({code: 'rights-confirmation', action: 'ask-user'}));
+  });
+
+  it.each(['LUT configuration', 'style configuration', 'missing style font', 'invalid edit', 'brief configuration'])('defers rights reconfirmation while verification is blocked by %s', async (failure) => {
+    const {projectPath, edit} = await makeFixture();
+    const confirmation = await confirmRights(projectPath);
+    const file = failure === 'LUT configuration' ? 'config/luts.json'
+      : failure === 'invalid edit' ? 'edits/edit.json'
+        : failure === 'brief configuration' ? 'brief.json' : 'config/style.json';
+    const filePath = path.join(projectPath, file);
+    const original = await readFile(filePath, 'utf8').catch(() => null);
+    if (failure === 'missing style font') {
+      await writeJson(filePath, {
+        ...CINEMATIC_MINIMAL_STYLE,
+        typography: {...CINEMATIC_MINIMAL_STYLE.typography,
+          display: {...CINEMATIC_MINIMAL_STYLE.typography.display, assetId: 'missing-font', relativePath: 'input/fonts/missing.ttf'}},
+      });
+    } else if (failure === 'invalid edit') {
+      await writeJson(filePath, {...edit, reelName: 'another-project'});
+    } else {
+      await writeFile(filePath, '{malformed');
+    }
+    const intake = await readProjectIntake(projectPath);
+    expect(intake.rights).toMatchObject({status: 'indeterminate', confirmed: false, requiresExplicitConfirmation: false});
+    if (failure === 'missing style font') expect(intake.rights.reason).toMatch(/Selected style font is missing/);
+    expect(intake.requirements.some((item) => item.code === 'rights-confirmation')).toBe(false);
+    expect(intake.requirements).toContainEqual(expect.objectContaining({code: 'configuration', action: 'configure', blocks: 'export'}));
+    const status = await getProjectStatus(projectPath);
+    expect(status.intake?.rights).toMatchObject({status: 'indeterminate', requiresExplicitConfirmation: false});
+    expect(status.intake?.requirements).toContainEqual(expect.objectContaining({code: 'configuration', action: 'configure'}));
+
+    if (original === null) await unlink(filePath);
+    else await writeFile(filePath, original);
+    const restored = await readProjectIntake(projectPath);
+    expect(restored.rights).toMatchObject({status: 'confirmed', confirmed: true, requiresExplicitConfirmation: false});
+    expect(JSON.parse(await readFile(path.join(projectPath, 'brief.json'), 'utf8')).rightsConfirmation).toEqual(confirmation);
+  });
+
+  it('returns intake and a configuration blocker when approval metadata is malformed', async () => {
+    const {projectPath} = await makeFixture();
+    await confirmRights(projectPath);
+    await writeFile(path.join(projectPath, 'analysis/approvals.json'), '{malformed');
+    const status = await getProjectStatus(projectPath);
+    expect(status.stage).toBe('awaiting-configuration');
+    expect(status.intake?.rights.confirmed).toBe(true);
+    expect(status.intake?.requirements).toContainEqual(expect.objectContaining({
+      code: 'configuration', action: 'configure', blocks: 'export', message: expect.stringMatching(/Stage checks failed/),
+    }));
+    expect(status.nextAction).toMatch(/Repair.*status/);
+  });
+
   it('binds the color manifest hash to referenced source bytes', async () => {
     const {projectPath, edit, sourceId} = await makeFixture();
     const lutsConfig = JSON.parse(
@@ -405,6 +533,10 @@ describe('hash-bound approvals', () => {
       expect.objectContaining({rightsConfirmed: true, rightsConfirmation: confirmation}),
     );
     expect((await readRightsConfirmationStatus(projectPath)).confirmed).toBe(true);
+    const intake = await readProjectIntake(projectPath);
+    expect(intake.rights).toMatchObject({confirmed: true, requiresExplicitConfirmation: false, assetScope: 'used'});
+    expect(intake.rights.assets.some((asset) => asset.relativePath === 'input/clips/alternate.mp4')).toBe(false);
+    expect(intake.requirements.some((item) => item.code === 'rights-confirmation')).toBe(false);
 
     const manifest = SourceManifestSchema.parse(
       JSON.parse(await readFile(path.join(projectPath, 'analysis/sources.json'), 'utf8')),
@@ -424,6 +556,7 @@ describe('hash-bound approvals', () => {
         reason: expect.stringMatching(/asset set.*changed|changed.*asset set/i),
       }),
     );
+    expect((await readProjectIntake(projectPath)).rights).toMatchObject({confirmed: false, requiresExplicitConfirmation: true});
   });
 
   it('makes rights confirmation stale when selected music changes', async () => {
@@ -647,6 +780,9 @@ describe('hash-bound approvals', () => {
         reason: expect.stringMatching(/not bound.*asset set/i),
       }),
     );
+    expect((await readProjectIntake(projectPath)).requirements).toContainEqual(expect.objectContaining({
+      code: 'rights-confirmation', action: 'ask-user', blocks: 'export',
+    }));
   });
 
   it('reuses a supplied verified-input context while calculating render fingerprints', async () => {

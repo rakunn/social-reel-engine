@@ -431,7 +431,7 @@ export const EditManifestSchema = z
     schemaVersion: SchemaVersion,
     reelName: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
     output: VideoOutputSchema,
-    clips: z.array(EditClipSchema).min(1),
+    clips: z.array(EditClipSchema).min(1, 'No clips selected; create edits/edit.json before previewing'),
     titles: z.array(TitleSchema).default([]),
     music: z
       .object({
@@ -461,7 +461,7 @@ export const EditManifestSchema = z
       seen.add(clip.id);
     }
     const finalClipIndex = edit.clips.length - 1;
-    if (edit.clips[finalClipIndex].transitionAfter.type !== 'none') {
+    if (finalClipIndex >= 0 && edit.clips[finalClipIndex].transitionAfter.type !== 'none') {
       context.addIssue({
         code: 'custom',
         path: ['clips', finalClipIndex, 'transitionAfter'],

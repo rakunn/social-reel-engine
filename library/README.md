@@ -1,6 +1,10 @@
 # Local LUT library
 
-The supplied `.cube` files and PDF guide are copied here for local reuse and excluded from Git. `lut-catalog.json` is the tracked source of truth for checksums and declared semantics.
+LUT `.cube` files and the PDF guide must be supplied by the user. They are excluded from Git. `lut-catalog.json` describes optional local files and their checksums/semantics; a catalog entry does not mean the file is installed. A fresh checkout with no LUT binaries is expected.
+
+For a new job, the workflow first checks supplied/project inputs and verified local catalog files. It asks for a missing required normalizer in the consolidated intake, copies the supplied file through `ingest --kind technical-lut` into `projects/<name>/input/luts/technical/`, and records verified metadata in `config/luts.json`. Creative LUTs are optional and use `--kind creative-lut`. When a LUT is already supplied but unclassified, request only missing transform facts. Never infer them from filenames. The original files remain unchanged.
+
+For local reuse, an exact catalog-matching file may be placed at its declared `library/` path. The workflow verifies its checksum before installation into a job. Other user-supplied transforms can be declared directly in that job without modifying the shared catalog. Rights still require explicit user confirmation for the assets used.
 
 Technical transforms are never selected by filename alone during a reel job. The source camera gamma/gamut and the matching catalog profile must be explicitly confirmed in that project's `config/sources.json` and `config/luts.json`. Technical catalog entries keep gamma and gamut as separate canonical fields so contradictory source facts cannot pass on profile ID alone.
 

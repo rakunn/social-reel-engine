@@ -35,7 +35,7 @@ export type RightsIntegrityOptions = {
   integrity?: SourceIntegrityContext;
 };
 
-const currentRightsAssets = async (
+export const currentRightsAssets = async (
   projectPath: string,
   options: RightsIntegrityOptions = {},
 ): Promise<RightsAsset[]> => {

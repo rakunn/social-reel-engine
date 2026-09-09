@@ -5,11 +5,13 @@ import {afterEach, describe, expect, it} from 'vitest';
 import {analyzeSources} from '../../src/media/analyze';
 import {
   createSourceIntegrityContext,
+  assertVerifiedInputSnapshotUnchanged,
   readVerifiedInputSnapshot,
 } from '../../src/media/source-integrity';
 import {
   ingestFiles,
   readValidatedIngestManifest,
+  scanInputs,
 } from '../../src/project/ingest';
 import {createReelProject} from '../../src/project/workspace';
 
@@ -31,6 +33,24 @@ afterEach(async () => {
 });
 
 describe('source integrity context', () => {
+  it('verifies a supplied scan and still rescans before publishing artifacts', async () => {
+    const projectPath = await makeProject();
+    const sourcePath = path.join(path.dirname(projectPath), 'caption.srt');
+    await writeFile(sourcePath, '1\n00:00:00,000 --> 00:00:01,000\nOriginal\n');
+    await ingestFiles(projectPath, [sourcePath], 'captions');
+    await analyzeSources(projectPath);
+
+    const ingest = await scanInputs(projectPath);
+    const context = createSourceIntegrityContext();
+    const verified = await readVerifiedInputSnapshot(projectPath, context, ingest);
+    expect(verified.ingest).toBe(ingest);
+
+    await writeFile(path.join(projectPath, 'input/captions/caption.srt'), 'changed input');
+    await expect(assertVerifiedInputSnapshotUnchanged(projectPath, context)).rejects.toThrow(/stale or inconsistent/i);
+    await expect(readVerifiedInputSnapshot(projectPath, createSourceIntegrityContext(), await scanInputs(projectPath)))
+      .rejects.toThrow(/stale or inconsistent/i);
+  });
+
   it('reuses a verified input snapshot during one command', async () => {
     const projectPath = await makeProject();
     const sourcePath = path.join(path.dirname(projectPath), 'caption.srt');

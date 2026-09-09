@@ -295,7 +295,7 @@ const srgbProfileCheck = async (): Promise<DoctorCheck> => {
   }
 };
 
-const libraryCheck = async (engineRoot: string): Promise<DoctorCheck> => {
+export const lutLibraryCheck = async (engineRoot: string): Promise<DoctorCheck> => {
   try {
     const catalog = await readJson<{
       guide?: {file: string; checksumSha256: string};
@@ -310,6 +310,7 @@ const libraryCheck = async (engineRoot: string): Promise<DoctorCheck> => {
       ...(catalog.unclassified ?? []),
     ];
     const failures: string[] = [];
+    let installed = 0;
     for (const entry of [...(catalog.technical ?? []), ...(catalog.creative ?? [])]) {
       const parsed = LutDefinitionSchema.safeParse(entry);
       if (!parsed.success) {
@@ -322,9 +323,13 @@ const libraryCheck = async (engineRoot: string): Promise<DoctorCheck> => {
         await access(filePath);
         if ((await hashFile(filePath)) !== entry.checksumSha256) {
           failures.push(`${entry.file} checksum mismatch`);
+        } else {
+          installed += 1;
         }
-      } catch {
-        failures.push(`${entry.file} missing`);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          failures.push(`${entry.file} is unreadable`);
+        }
       }
     }
     return failures.length
@@ -332,13 +337,15 @@ const libraryCheck = async (engineRoot: string): Promise<DoctorCheck> => {
       : {
           id: 'lut-library',
           status: 'pass',
-          message: `${entries.length} local LUT/guide assets match the tracked catalog`,
+          message: `${installed}/${entries.length} optional local LUT/guide assets installed and verified. Missing LUTs are user-supplied; run project status for required transforms.`,
         };
-  } catch {
+  } catch (error) {
     return {
       id: 'lut-library',
-      status: 'warn',
-      message: 'No optional local LUT catalog is available',
+      status: (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'pass' : 'warn',
+      message: (error as NodeJS.ErrnoException).code === 'ENOENT'
+        ? 'No optional local LUT catalog is installed; supply project LUTs through ingest.'
+        : 'The optional local LUT catalog could not be read; check library/lut-catalog.json.',
     };
   }
 };
@@ -476,7 +483,7 @@ export const runDoctor = async (
       'librosa 0.11.0 is installed in .venv',
     ),
   );
-  checks.push(await libraryCheck(engineRoot));
+  checks.push(await lutLibraryCheck(engineRoot));
   checks.push(await styleLibraryCheck(engineRoot));
   return {ok: checks.every((check) => check.status !== 'fail'), checks};
 };

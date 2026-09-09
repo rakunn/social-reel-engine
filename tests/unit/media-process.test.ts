@@ -60,6 +60,24 @@ afterEach(async () => {
 });
 
 describe.runIf(process.platform !== 'win32')('owned media process execution', () => {
+  it('shares signal listeners across parallel commands and cancels every owned group', async () => {
+    const signalTarget = new EventEmitter();
+    const running = Array.from({length: 16}, () => runProcess(
+      process.execPath, ['-e', 'setInterval(() => {}, 1000)'],
+      {signalTarget, timeoutMs: 5000, cleanupTimeouts: {termMs: 100, killMs: 500, pollMs: 10}},
+    ));
+    const settled = Promise.allSettled(running);
+    for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) expect(signalTarget.listenerCount(signal)).toBe(1);
+    signalTarget.emit('SIGTERM');
+    for (const result of await settled) {
+      expect(result.status).toBe('rejected');
+      if (result.status === 'rejected') expect(result.reason).toBeInstanceOf(RenderInterruptedError);
+    }
+    for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) expect(signalTarget.listenerCount(signal)).toBe(0);
+    await expect(runProcess(process.execPath, ['-e', 'process.stdout.write("ready")'], {signalTarget}))
+      .resolves.toMatchObject({stdout: 'ready', exitCode: 0});
+    expect(signalTarget.listenerCount('SIGTERM')).toBe(0);
+  });
   it('rejects a missing executable without emitting an unhandled child error', async () => {
     await expect(
       runProcess(path.join(root, 'does-not-exist'), []),

@@ -8,6 +8,7 @@ import {
   runDoctor,
   storageCapacityCheck,
   styleLibraryCheck,
+  lutLibraryCheck,
 } from '../../src/commands/doctor';
 import {RenderInterruptedError} from '../../src/render/errors';
 
@@ -29,6 +30,17 @@ afterEach(async () => {
 });
 
 describe('Doctor workspace preflight', () => {
+  it('accepts absent user-supplied LUTs but warns about corrupted installed files', async () => {
+    const engineRoot = await makeDirectory();
+    await mkdir(path.join(engineRoot, 'library'), {recursive: true});
+    await copyFile(path.join(repositoryRoot, 'library/lut-catalog.json'), path.join(engineRoot, 'library/lut-catalog.json'));
+    await expect(lutLibraryCheck(engineRoot)).resolves.toMatchObject({status: 'pass', message: expect.stringMatching(/0\/.*optional/)});
+    const catalog = JSON.parse(await readFile(path.join(engineRoot, 'library/lut-catalog.json'), 'utf8'));
+    const installed = path.join(engineRoot, catalog.technical[0].file);
+    await mkdir(path.dirname(installed), {recursive: true});
+    await writeFile(installed, 'corrupt LUT');
+    await expect(lutLibraryCheck(engineRoot)).resolves.toMatchObject({status: 'warn', message: expect.stringMatching(/checksum mismatch/)});
+  });
   it('passes valid catalogs when no optional font has been downloaded', async () => {
     const engineRoot = await makeDirectory();
     await mkdir(path.join(engineRoot, 'library'), {recursive: true});
