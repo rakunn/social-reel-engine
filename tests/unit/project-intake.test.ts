@@ -1,17 +1,19 @@
 import {mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {afterEach, describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {readProjectIntake} from '../../src/project/intake';
 import {createReelProject, getProjectStatus} from '../../src/project/workspace';
 import {validateEdit} from '../../src/edit/validate';
 import {hashFile} from '../../src/core/hash';
+import * as hashing from '../../src/core/hash';
 import {writeJson} from '../../src/core/json';
 import {sourceIdFor} from '../../src/media/analyze';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
 const roots: string[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((root) => rm(root, {recursive: true, force: true})));
 });
 const camera = {model: 'Test Camera', gamma: 'Test Log', gamut: 'Test Wide', profileId: 'test-log', confirmed: true};
@@ -37,6 +39,23 @@ const addLut = async (root: string, file: string) => {
 };
 
 describe('project intake requirements', () => {
+  it('hashes each input once per new-project status and refreshes the next snapshot', async () => {
+    const {project} = await makeFixture();
+    const clipPath = path.join(project, 'input/clips/clip.mp4');
+    const hashSpy = vi.spyOn(hashing, 'hashFile');
+    const first = await getProjectStatus(project);
+    expect(hashSpy.mock.calls.filter(([file]) => file === clipPath)).toHaveLength(1);
+    expect(first.inputs).toBe(1);
+    expect(first.intake?.rights.assets).toHaveLength(1);
+
+    await writeFile(clipPath, 'changed synthetic input');
+    hashSpy.mockClear();
+    const second = await getProjectStatus(project);
+    expect(hashSpy.mock.calls.filter(([file]) => file === clipPath)).toHaveLength(1);
+    expect(second.intake?.rights.assets[0]?.checksumSha256)
+      .not.toBe(first.intake?.rights.assets[0]?.checksumSha256);
+  });
+
   it('collects profile, LUT and explicit rights questions before analysis without asserting rights', async () => {
     const {root, project} = await makeFixture();
     const before = await readFile(path.join(project, 'brief.json'), 'utf8');

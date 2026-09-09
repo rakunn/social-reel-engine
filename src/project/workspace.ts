@@ -10,7 +10,7 @@ import {
 import {readJson, writeJson} from '../core/json';
 import {assertSafeReelName} from '../core/paths';
 import {validateEdit} from '../edit/validate';
-import {scanInputs} from './ingest';
+import {scanInputs, type IngestManifest} from './ingest';
 import {StyleConfigSchema} from '../style/contracts';
 import type {ProjectIntake} from './intake';
 import {
@@ -420,8 +420,11 @@ const statusScanInProgressStatus = (): ProjectStatus => ({
   nextAction: 'Project status is checking inputs. Wait for it to finish, then request status again.',
 });
 
-const getProjectStatusWithoutOperation = async (projectPath: string): Promise<ProjectStatus> => {
-  const inputs = (await scanInputs(projectPath)).files.filter(
+const getProjectStatusWithoutOperation = async (
+  projectPath: string,
+  ingest: IngestManifest,
+): Promise<ProjectStatus> => {
+  const inputs = ingest.files.filter(
     (file) => file.kind === 'clips',
   ).length;
   const base = {inputs, editApproved: false, colorApproved: false};
@@ -668,9 +671,10 @@ export const getProjectStatus = async (projectPath: string): Promise<ProjectStat
   const locked = await runWithStatusScanLock(projectPath, async () => {
     const operationAfterLock = await readMediaOperation(projectPath);
     if (operationAfterLock) return statusFromOperation(operationAfterLock);
-    const status = await getProjectStatusWithoutOperation(projectPath);
+    const ingest = await scanInputs(projectPath);
+    const status = await getProjectStatusWithoutOperation(projectPath, ingest);
     const {readProjectIntake} = await import('./intake');
-    return {...status, intake: await readProjectIntake(projectPath)};
+    return {...status, intake: await readProjectIntake(projectPath, {ingest})};
   });
   if (locked.acquired) return locked.value;
 
