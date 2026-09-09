@@ -7,8 +7,10 @@ import {createReelProject, getProjectStatus} from '../../src/project/workspace';
 import {validateEdit} from '../../src/edit/validate';
 import {hashFile} from '../../src/core/hash';
 import * as hashing from '../../src/core/hash';
-import {writeJson} from '../../src/core/json';
-import {sourceIdFor} from '../../src/media/analyze';
+import {readJson, writeJson} from '../../src/core/json';
+import {cameraFromConfirmation, sourceIdFor} from '../../src/media/analyze';
+import {scanInputs} from '../../src/project/ingest';
+import {EditManifestSchema, ReelBriefSchema} from '../../src/contracts/schemas';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
 const roots: string[] = [];
@@ -36,6 +38,19 @@ const addLut = async (root: string, file: string) => {
     inputColorSpace: 'Test Log/Test Wide', outputColorSpace: 'Rec.709 Gamma 2.4',
     transformSemantics: 'normalization', defaultMix: 1,
   };
+};
+
+const recordSources = async (project: string) => {
+  const ingest = await scanInputs(project);
+  await writeJson(path.join(project, 'analysis/sources.json'), {
+    schemaVersion: '1.0.0', generatedAt: ingest.generatedAt,
+    sources: ingest.files.filter((file) => file.kind === 'clips').map((file) => ({
+      id: sourceIdFor('video', file.relativePath, file.checksumSha256),
+      relativePath: file.relativePath, checksumSha256: file.checksumSha256, sizeBytes: file.sizeBytes,
+      mediaType: 'video', camera: cameraFromConfirmation(file.relativePath.endsWith('/clip.mp4') ? camera : {}),
+      ffprobe: {format: {duration: '6'}, streams: [{codec_type: 'video', avg_frame_rate: '30/1'}]},
+    })),
+  });
 };
 
 describe('project intake requirements', () => {
@@ -115,11 +130,48 @@ describe('project intake requirements', () => {
         audio: {muted: true, gainDb: 0}, transitionAfter: {type: 'none', durationSeconds: 0}}],
       titles: [], music: null, captions: null,
     });
+    await recordSources(project);
+    expect((await validateEdit(project)).valid).toBe(true);
     const report = await readProjectIntake(project, {engineRoot: root});
     expect(report.scope).toBe('selected');
     expect(report.requirements.map((item) => item.code)).toEqual(['rights-confirmation']);
     await writeFile(path.join(project, lut.file), 'changed bytes');
     expect((await readProjectIntake(project, {engineRoot: root})).requirements)
       .toContainEqual(expect.objectContaining({code: 'lut-file', action: 'ask-user'}));
+  });
+
+  it.each(['single-card carousel', 'wrong identity', 'out-of-range trim'])('keeps supplied scope for a semantically invalid edit: %s', async (failure) => {
+    const {root, project} = await makeFixture(true);
+    await writeFile(path.join(project, 'input/clips/unused.mp4'), 'unconfirmed unused source');
+    await recordSources(project);
+    const brief = await readJson(path.join(project, 'brief.json'), ReelBriefSchema);
+    if (failure === 'single-card carousel') {
+      brief.output = {width: 1910, height: 1000, fps: 30};
+      await writeJson(path.join(project, 'brief.json'), {...brief, projectType: 'carousel'});
+    }
+    const sourceId = sourceIdFor('video', 'input/clips/clip.mp4', await hashFile(path.join(project, 'input/clips/clip.mp4')));
+    const edit = EditManifestSchema.parse({
+      schemaVersion: '1.0.0', reelName: failure === 'wrong identity' ? 'wrong-project' : 'intake-test', output: brief.output,
+      clips: [{id: 'shot', sourceId, inSeconds: 0, outSeconds: failure === 'out-of-range trim' ? 7 : 5, playbackRate: 1,
+        crop: {start: {x: 0.5, y: 0.5, scale: 1}, end: {x: 0.5, y: 0.5, scale: 1}},
+        stabilization: {enabled: false, strength: 0, fallbackToUnstabilized: false},
+        grade: {exposureStops: 0, whiteBalanceKelvin: 6500, tint: 0},
+        audio: {muted: true, gainDb: 0}, transitionAfter: {type: 'none', durationSeconds: 0}}],
+      titles: [], music: null, captions: null,
+    });
+    await writeJson(path.join(project, 'edits/edit.json'), edit);
+    expect((await validateEdit(project)).valid).toBe(false);
+    const report = await readProjectIntake(project, {engineRoot: root});
+    expect(report.scope).toBe('supplied');
+    expect(report.rights.assetScope).toBe('supplied');
+    expect(report.rights.assets.map((asset) => asset.relativePath)).toContain('input/clips/unused.mp4');
+    expect(report.requirements).toEqual(expect.arrayContaining([
+      expect.objectContaining({code: 'edit', action: 'configure'}),
+      expect.objectContaining({code: 'source-profile', paths: ['input/clips/unused.mp4']}),
+    ]));
+    const hashSpy = vi.spyOn(hashing, 'hashFile');
+    const status = await getProjectStatus(project);
+    expect(status.intake?.scope).toBe('supplied');
+    expect(hashSpy.mock.calls.filter(([file]) => file === path.join(project, 'input/clips/clip.mp4'))).toHaveLength(1);
   });
 });

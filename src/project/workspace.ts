@@ -13,6 +13,7 @@ import {validateEdit} from '../edit/validate';
 import {scanInputs, type IngestManifest} from './ingest';
 import {StyleConfigSchema} from '../style/contracts';
 import type {ProjectIntake} from './intake';
+import {createSourceIntegrityContext, readVerifiedInputSnapshot, type SourceIntegrityContext} from '../media/source-integrity';
 import {
   isProcessIdentityAlive,
   isMediaOperationLockActive,
@@ -423,6 +424,7 @@ const statusScanInProgressStatus = (): ProjectStatus => ({
 const getProjectStatusWithoutOperation = async (
   projectPath: string,
   ingest: IngestManifest,
+  integrity: SourceIntegrityContext,
 ): Promise<ProjectStatus> => {
   const inputs = ingest.files.filter(
     (file) => file.kind === 'clips',
@@ -439,8 +441,7 @@ const getProjectStatusWithoutOperation = async (
     return {...base, stage: 'awaiting-analysis', nextAction: 'Run analyze, proxy, and beats.'};
   }
   try {
-    const {readValidatedSourceManifest} = await import('../media/source-integrity');
-    await readValidatedSourceManifest(projectPath);
+    await readVerifiedInputSnapshot(projectPath, integrity, ingest);
   } catch {
     return {...base, stage: 'awaiting-analysis', nextAction: 'Run analyze, proxy, and beats.'};
   }
@@ -453,7 +454,7 @@ const getProjectStatusWithoutOperation = async (
     return {...base, stage: 'awaiting-edit', nextAction: 'Create and validate edits/edit.json.'};
   }
   try {
-    const validation = await validateEdit(projectPath, edit);
+    const validation = await validateEdit(projectPath, edit, {integrity});
     if (!validation.valid) {
       return {
         ...base,
@@ -503,7 +504,7 @@ const getProjectStatusWithoutOperation = async (
     };
   }
   const {readRightsConfirmationStatus} = await import('../edit/rights');
-  const rights = await readRightsConfirmationStatus(projectPath);
+  const rights = await readRightsConfirmationStatus(projectPath, {integrity});
   if (!rights.confirmed) {
     return {
       ...base,
@@ -672,9 +673,10 @@ export const getProjectStatus = async (projectPath: string): Promise<ProjectStat
     const operationAfterLock = await readMediaOperation(projectPath);
     if (operationAfterLock) return statusFromOperation(operationAfterLock);
     const ingest = await scanInputs(projectPath);
-    const status = await getProjectStatusWithoutOperation(projectPath, ingest);
+    const integrity = createSourceIntegrityContext();
+    const status = await getProjectStatusWithoutOperation(projectPath, ingest, integrity);
     const {readProjectIntake} = await import('./intake');
-    return {...status, intake: await readProjectIntake(projectPath, {ingest})};
+    return {...status, intake: await readProjectIntake(projectPath, {ingest, integrity})};
   });
   if (locked.acquired) return locked.value;
 

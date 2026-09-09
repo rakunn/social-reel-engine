@@ -8,6 +8,8 @@ import {resolveInside} from '../core/paths';
 import {lutCompatibilityFailures} from '../core/lut-compatibility';
 import {cameraFromConfirmation, sourceIdFor} from '../media/analyze';
 import {readRightsConfirmationStatus, currentRightsAssets} from '../edit/rights';
+import {validateEdit} from '../edit/validate';
+import {createSourceIntegrityContext, readVerifiedInputSnapshot, type SourceIntegrityContext} from '../media/source-integrity';
 import {scanInputs, type IngestManifest} from './ingest';
 import {readLutCatalog} from './library';
 
@@ -48,12 +50,21 @@ const defaultEngineRoot = path.resolve(path.dirname(fileURLToPath(import.meta.ur
 // This is an intake inventory, not permission to bypass grading/export checks.
 export const readProjectIntake = async (
   projectPath: string,
-  options: {engineRoot?: string; ingest?: IngestManifest} = {},
+  options: {engineRoot?: string; ingest?: IngestManifest; integrity?: SourceIntegrityContext} = {},
 ): Promise<ProjectIntake> => {
   const ingest = options.ingest ?? await scanInputs(projectPath);
   const requirements: IntakeRequirement[] = [];
   const add = (requirement: IntakeRequirement) => requirements.push(requirement);
-  const edit = await readJson(path.join(projectPath, 'edits/edit.json'), EditManifestSchema).catch(() => null);
+  const integrity = options.integrity ?? createSourceIntegrityContext();
+  let edit = await readJson(path.join(projectPath, 'edits/edit.json'), EditManifestSchema).catch(() => null);
+  if (edit) {
+    try {
+      await readVerifiedInputSnapshot(projectPath, integrity, ingest);
+      if (!(await validateEdit(projectPath, edit, {integrity})).valid) edit = null;
+    } catch {
+      edit = null;
+    }
+  }
   if (!edit) add({code: 'edit', action: 'configure', blocks: 'preview', paths: ['edits/edit.json'],
     message: 'Author and validate the edit from analyzed source IDs; choose creative defaults from the brief.'});
 
@@ -170,8 +181,8 @@ export const readProjectIntake = async (
     }
   }
 
-  const rightsStatus = edit ? await readRightsConfirmationStatus(projectPath).catch(() => null) : null;
-  const usedAssets = edit ? await currentRightsAssets(projectPath).catch(() => null) : null;
+  const rightsStatus = edit ? await readRightsConfirmationStatus(projectPath, {integrity}).catch(() => null) : null;
+  const usedAssets = edit ? await currentRightsAssets(projectPath, {integrity}).catch(() => null) : null;
   const rightsConfirmed = rightsStatus?.confirmed === true && usedAssets !== null;
   const rights: ProjectIntake['rights'] = {
     confirmed: rightsConfirmed,

@@ -69,12 +69,15 @@ export const sourceManifestFingerprintProjection = (manifest: SourceManifest) =>
     .sort((left, right) => left.relativePath.localeCompare(right.relativePath)),
 });
 
-const verifyInputSnapshot = async (projectPath: string): Promise<VerifiedInputSnapshot> => {
+const verifyInputSnapshot = async (
+  projectPath: string,
+  ingestSnapshot?: IngestManifest,
+): Promise<VerifiedInputSnapshot> => {
   const manifest = SourceManifestSchema.parse(
     await readJson(path.join(projectPath, 'analysis/sources.json')),
   );
   const [ingest, config] = await Promise.all([
-    scanInputs(projectPath),
+    ingestSnapshot ?? scanInputs(projectPath),
     readJson<SourcesConfig>(path.join(projectPath, 'config/sources.json')),
   ]);
   const expected = ingest.files
@@ -132,10 +135,12 @@ const verifyInputSnapshot = async (projectPath: string): Promise<VerifiedInputSn
 export const readVerifiedInputSnapshot = async (
   projectPath: string,
   context?: SourceIntegrityContext,
+  // Only reuse a scan captured within the caller's current project snapshot lock.
+  ingestSnapshot?: IngestManifest,
 ): Promise<VerifiedInputSnapshot> => {
-  if (!context) return await verifyInputSnapshot(projectPath);
+  if (!context) return await verifyInputSnapshot(projectPath, ingestSnapshot);
   if (context.snapshot) return context.snapshot;
-  context.pending ??= verifyInputSnapshot(projectPath);
+  context.pending ??= verifyInputSnapshot(projectPath, ingestSnapshot);
   try {
     context.snapshot = await context.pending;
     return context.snapshot;
