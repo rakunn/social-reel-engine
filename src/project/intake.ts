@@ -193,7 +193,7 @@ export const readProjectIntake = async (
   const rightsStatus = edit ? await readRightsConfirmationStatus(projectPath, {integrity}).catch(recordRightsError) : null;
   const usedAssets = edit ? await currentRightsAssets(projectPath, {integrity}).catch(recordRightsError) : null;
   const rightsConfirmed = rightsStatus?.confirmed === true && usedAssets !== null;
-  const indeterminate = !brief || (hasRecordedConfirmation && (!edit || !rightsStatus || !usedAssets));
+  const indeterminate = rightsErrors.length > 0 || !brief || (hasRecordedConfirmation && (!edit || !rightsStatus || !usedAssets));
   const reason = indeterminate
     ? rightsErrors.length ? [...new Set(rightsErrors)].join('; ') : 'The edit must pass validation before its current rights asset set can be verified'
     : rightsStatus?.reason ?? (rightsConfirmed ? null : 'Usage rights require explicit user confirmation');

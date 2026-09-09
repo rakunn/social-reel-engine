@@ -380,6 +380,31 @@ describe('edit validation', () => {
 });
 
 describe('hash-bound approvals', () => {
+  it.each(['missing LUT', 'changed LUT', 'malformed LUT configuration', 'malformed style configuration'])('defers first-time confirmation when used assets cannot be resolved: %s', async (failure) => {
+    const {projectPath} = await makeFixture();
+    const briefPath = path.join(projectPath, 'brief.json');
+    const brief = JSON.parse(await readFile(briefPath, 'utf8'));
+    await writeJson(briefPath, {...brief, rightsConfirmed: false, rightsConfirmation: null});
+    const target = failure === 'malformed LUT configuration' ? 'config/luts.json'
+      : failure === 'malformed style configuration' ? 'config/style.json' : 'input/luts/technical/identity.cube';
+    const targetPath = path.join(projectPath, target);
+    const original = await readFile(targetPath, 'utf8').catch(() => null);
+    if (failure === 'missing LUT') await unlink(targetPath);
+    else await writeFile(targetPath, failure === 'changed LUT' ? 'changed LUT bytes' : '{malformed');
+
+    const status = await getProjectStatus(projectPath);
+    expect(status.intake?.rights).toMatchObject({status: 'indeterminate', confirmed: false, requiresExplicitConfirmation: false});
+    expect(status.intake?.requirements.some((item) => item.code === 'rights-confirmation')).toBe(false);
+    expect(status.intake?.requirements).toContainEqual(expect.objectContaining({code: 'configuration', action: 'configure', blocks: 'export'}));
+
+    if (original === null) await unlink(targetPath);
+    else await writeFile(targetPath, original);
+    const restored = await getProjectStatus(projectPath);
+    expect(restored.intake?.rights).toMatchObject({status: 'unconfirmed', confirmed: false, requiresExplicitConfirmation: true, assetScope: 'used'});
+    expect(restored.intake?.rights.assets.map((asset) => asset.relativePath)).toContain('input/luts/technical/identity.cube');
+    expect(restored.intake?.requirements).toContainEqual(expect.objectContaining({code: 'rights-confirmation', action: 'ask-user'}));
+  });
+
   it.each(['LUT configuration', 'style configuration', 'missing style font', 'invalid edit', 'brief configuration'])('defers rights reconfirmation while verification is blocked by %s', async (failure) => {
     const {projectPath, edit} = await makeFixture();
     const confirmation = await confirmRights(projectPath);
